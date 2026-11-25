@@ -1,6 +1,21 @@
 ﻿# Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.711
+Contract version: 7.712
+
+## Contract 7.712 — the Gold slice sends the quantities it publishes
+
+
+
+Contract 7.710 taught the Gold route to publish whole-stack sell amounts, and left the same slice's mailbox refusing anything but one unit. `NativeMailboxClient.ValidateGoldSaleAction` required `amount == 1`, so a model that picked the `2` that the action catalog had just offered was stopped with `native-action-not-in-gold-sale-scope` before any Native command left the Host. Published option and sendable command disagreed, which is the worst shape of this kind of bug: the run looks like the model never tried.
+
+
+
+The mailbox now requires `amount >= 1`. The real ceiling stays where the game puts it: `AgentTradeAdapter.DraftTradeItem` rejects `amount > item.ItemCount` and rolls back a draft the player cannot afford. The self test keeps one unit and three units as valid cases, and zero units and a buy as invalid ones, so the transport can neither over-constrain the published surface nor accept a direction this slice does not own.
+
+
+
+harness/gate/05-observation-and-provider.ps1 asserts both halves next to each other: that the slice publishes `var sellAmounts = new JsonArray(1)`, and that the mailbox accepts `amount >= 1`. A future edit that widens one side alone turns the gate red.
+
 ## Contract 7.711 — the recorded action catalog keeps its integer argument values
 
 `AgentHostHarnessProgressTrace.SummarizeAllowedActionCatalog` kept only string argument values, so the Gold slice's `Amount` enum was recorded as `Amount: []`. The structure was live: `ProviderContractSelfTest.VerifyDecisionSchemaBindsCurrentArgumentValues` asserts that `1` and `2` both sit in the schema enum. The diagnostic was dead, so a reader of `AgentHostProgress.jsonl` could conclude the Host never published sellable amounts and shop for a different bug.

@@ -303,13 +303,13 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             "trade" => HasOnlyKeys(arguments, "direction", "itemViewModelId", "inventorySide", "amount") &&
                 arguments["direction"] is JsonValue directionNode && directionNode.TryGetValue<string>(out var direction) && direction == "sell" &&
                 arguments["inventorySide"] is JsonValue sideNode && sideNode.TryGetValue<string>(out var side) && side == "PlayerInventory" &&
-                HasText(arguments, "itemViewModelId") && arguments["amount"] is JsonValue amountNode && amountNode.TryGetValue<int>(out var amount) && amount == 1,
+                HasText(arguments, "itemViewModelId") && arguments["amount"] is JsonValue amountNode && amountNode.TryGetValue<int>(out var amount) && amount >= 1,
             "sellPrisonerOne" => HasOnlyKeys(arguments, "troopId") && HasText(arguments, "troopId"),
             "partyScreenCancel" => arguments.Count == 0,
             "partyScreenDone" => arguments.Count == 0,
             _ => false
         };
-        if (!valid) throw new AgentHostException("native-action-not-in-gold-sale-scope", "The W7-P Native adapter allows safe movement, current Town trade, one exact Goods or Ransom-prisoner sale, Native PartyScreen Done, transaction confirmation, or explicit cancellation.");
+        if (!valid) throw new AgentHostException("native-action-not-in-gold-sale-scope", "The W7-P Native adapter allows safe movement, current Town trade, one exact Goods or Ransom-prisoner sale of a Native-quoted quantity, Native PartyScreen Done, transaction confirmation, or explicit cancellation.");
     }
 
     internal static IReadOnlyList<object> RunGoldSaleActionContractSelfTests()
@@ -323,6 +323,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             ("menuSelect", "{\"menuId\":\"town\",\"optionId\":\"trade\"}"),
             ("tradeOptions", "{}"),
             ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"PlayerInventory\",\"amount\":1}"),
+            ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"PlayerInventory\",\"amount\":3}"),
             ("sellPrisonerOne", "{\"troopId\":\"mounted_ransacker\"}"),
             ("partyScreenCancel", "{}"),
             ("partyScreenDone", "{}"),
@@ -337,7 +338,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             ("pause", "{}"),
             ("dialogueSelect", "{\"optionId\":\"unobserved\",\"force\":true}"),
             ("trade", "{\"direction\":\"buy\",\"itemViewModelId\":\"market-goods\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),
-            ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"PlayerInventory\",\"amount\":2}"),
+            ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"PlayerInventory\",\"amount\":0}"),
             ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),
             ("sellPrisonerOne", "{\"troopId\":\"mounted_ransacker\",\"count\":7}"),
             ("partyScreenCancel", "{\"confirm\":true}"),
@@ -348,11 +349,11 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             try
             {
                 ValidateGoldSaleAction(item.Action, JsonNode.Parse(item.Json)!.AsObject());
-                throw new AgentHostException("native-gold-sale-invalid-action-accepted", "The Gold sale mailbox accepted a buy, bulk quantity, wrong inventory side, or clock action.");
+                throw new AgentHostException("native-gold-sale-invalid-action-accepted", "The Gold sale mailbox accepted a buy, a non-positive quantity, a wrong inventory side, or a clock action.");
             }
             catch (AgentHostException exception) when (exception.Code == "native-action-not-in-gold-sale-scope") { }
         }
-        return [new { scenario = "gold-sale-native-mailbox-allows-only-one-current-player-inventory-sale-and-no-clock-controls", validCases = validCases.Length, invalidCases = invalidCases.Length, passed = true }];
+        return [new { scenario = "gold-sale-native-mailbox-allows-one-current-player-inventory-sale-of-a-native-quoted-quantity-and-no-clock-controls", validCases = validCases.Length, invalidCases = invalidCases.Length, passed = true }];
     }
 
     internal static async Task<IReadOnlyList<object>> RunGoldSaleAcceptedResponseTransportSelfTestsAsync()

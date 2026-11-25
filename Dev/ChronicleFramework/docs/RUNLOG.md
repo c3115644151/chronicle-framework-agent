@@ -1165,3 +1165,13 @@ $env:CHRONICLE_LLM_OUTPUT_MODE='json_schema'
 $env:CHRONICLE_LLM_MAX_TOKENS='1000'
 .\harness\Test-AgentLiveModelLoop.ps1 -LoadSaveName ChronicleEycDev-opening-20261126 -AgentHostRuntime -EstablishYourClanAutonomyLoop -MaxProviderDecisions 26 -HostMaxElapsedSeconds 1800 -TimeoutSeconds 400
 ```
+
+## 2026-11-26 金币切片发布的数量与邮箱接受的数量不一致（契约 7.712）
+
+起因：打开 opening4 的进度日志，金币切片第 14 条 provider-decision 的动作目录已经写出 `Amount: [1]`（记录器修好之后才看得见），而 `NativeMailboxClient.ValidateGoldSaleAction` 仍要求 `amount == 1` —— 也就是说我刚在 89dafcd 里让主机发布整堆数量，同一个切片的邮箱却只肯发一件。模型若按发布的选项选 2 件，会在离开 Host 之前就被 `native-action-not-in-gold-sale-scope` 拒掉。
+
+修法：`ValidateGoldSaleAction` 改为 `amount >= 1`；上限交回游戏侧（`AgentTradeAdapter.DraftTradeItem` 拒 `amount > item.ItemCount`，买不起的草稿回滚）。自测把 1 件、3 件列为合法，0 件与买单列为非法，并把场景名改为 `gold-sale-native-mailbox-allows-one-current-player-inventory-sale-of-a-native-quoted-quantity-and-no-clock-controls`。
+
+验证：`dotnet build` 0 warning 0 error；`--provider-self-test` 430/430 passed，与基线逐索引比较只有这一条场景不同（validCases 13→14），其余 identical。`harness/gate/05-observation-and-provider.ps1` 同时断言发布侧 `var sellAmounts = new JsonArray(1)` 与邮箱侧 `amount >= 1`。
+
+仍在的缺口：这条链只允许卖出，买的方向在决策面完全缺失 —— `AgentTradeAdapter.DraftTradeItem(direction: buy)` 在原版侧可用（`item.ExecuteBuy(amount)`），落点是产品事项 #143。

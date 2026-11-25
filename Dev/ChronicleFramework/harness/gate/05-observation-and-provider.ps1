@@ -288,6 +288,8 @@ if ($harnessScript -notmatch "'AgentHostEstablishClanGoldSaleEvaluation' \{ @\('
     $agentHostDecisionCycleSource -notmatch 'Immediately after your own move, Native may briefly show the selected target before isMoving becomes true' -or
     $agentHostMailboxSource -notmatch 'ValidateGoldSaleAction' -or
     $agentHostMailboxSource -notmatch 'PlayerInventory' -or
+    $agentHostMailboxSource -notmatch 'out var amount\) && amount >= 1' -or
+    $agentHostGoldSaleLoopSource -notmatch 'var sellAmounts = new JsonArray\(1\)' -or
     $harnessScript -notmatch 'StoryModePlannerSourceSaveName = ''save002''' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'StartsWith\(''ChronicleW7P-''' -or
     $agentHostCampaignLoopEvaluationSource -notmatch 'storyModeGoldSaleSourceHashBefore' -or
@@ -296,7 +298,7 @@ if ($harnessScript -notmatch "'AgentHostEstablishClanGoldSaleEvaluation' \{ @\('
     $agentHostCampaignLoopEvaluationSource -match '\$saleVerification\.journalGoldAfter|\$saleVerification\.journalGoldBefore|\$saleVerification\.journalGoldTarget' -or
     $agentHostLiveModelLoopSource -notmatch 'JournalGoldCurrent' -or
     $agentHostLiveModelLoopSource -notmatch 'EstablishClanGoldSaleVerification') {
-    throw 'W7-P must keep native goods/Ransom sales within current observed options, expose Native Ransom rollback, isolate campaign goal scope, and preserve source/visual/cleanup evidence.'
+    throw 'W7-P must keep native goods/Ransom sales within current observed options, publish only sell quantities its own mailbox will send, expose Native Ransom rollback, isolate campaign goal scope, and preserve source/visual/cleanup evidence.'
 }
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
