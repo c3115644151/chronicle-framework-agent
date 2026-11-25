@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
@@ -7,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $saveRoot = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Game Saves')).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
 if ($LoadSaveName -notmatch '^[A-Za-z0-9_-]{1,48}$') { throw 'Battle fixture source must be one save basename without a path or extension.' }
@@ -30,7 +32,7 @@ $videoPath = Join-Path $runDirectory 'BattleToLoot.mp4'
 $videoContactSheetPath = Join-Path $runDirectory 'BattleToLoot-contact.jpg'
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $cli $Action @Arguments -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Agent CLI '$Action' failed: $output" }
     try { $receipt = $output | ConvertFrom-Json }
     catch { throw "Agent CLI '$Action' returned invalid JSON: $output" }

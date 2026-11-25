@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 function Get-AgentSaveModuleIds {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$SavePath)

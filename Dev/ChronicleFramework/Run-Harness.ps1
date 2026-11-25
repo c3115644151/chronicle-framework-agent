@@ -1,4 +1,5 @@
-﻿[CmdletBinding()]
+﻿#Requires -Version 7.0
+[CmdletBinding()]
 param(
     [ValidateSet('Docs', 'Preflight', 'ConfiguredModelPreflight', 'Api', 'Build', 'Smoke', 'ReleasePackage', 'Campaign', 'CampaignActorThinkTrace', 'FreshCampaign', 'FreshStoryModeSetup', 'FreshStoryModeModelEvaluation', 'PersistentEycCampaign', 'EycObjectiveCheckpointReadback', 'FreshStoryModeNativeMenuLeaveEvaluation', 'FreshStoryModeNativeInquiryResponseEvaluation', 'FreshCampaignProgression', 'FreshCampaignBaselineMatrix', 'FreshCampaignLiveModelEvaluation', 'FreshCampaignSupplyBaseline', 'FreshCampaignRecruitmentFallback', 'Protocol', 'AgentHostProvider', 'AgentHostProviderHealth', 'AgentHostPackage', 'AgentHostSupplyEvaluation', 'AgentHostCampaignLoopEvaluation', 'AgentHostNativeMapMovementMonitorProbe', 'AgentHostVillageToolsQuestEvaluation', 'AgentHostEstablishClanGoalPlannerEvaluation', 'AgentHostEstablishClanAutonomyEvaluation', 'AgentHostCaptivityRecoveryEvaluation', 'AgentHostEstablishClanGoldSaleEvaluation', 'AgentHostBattleSimulationEvaluation', 'AgentHostBattleAndCaptivityEvaluation', 'AgentHostLifecycleEvaluation', 'AgentHostLifecycleCompletionEvaluation', 'AgentLoop', 'LiveModel', 'LiveModelArrival', 'LiveModelRecruitment', 'LiveModelSafePassageRecruitment', 'LiveModelRecruitmentEvaluation', 'LiveModelSupplyEvaluation', 'CheckpointPersistence', 'LiveModelResume', 'LiveModelRuntimeResume', 'LiveModelActionRecovery', 'CheckpointValidation', 'RecruitmentBaseline', 'MultiDaySupplyBaseline', 'TimeControlLoop', 'BattleMissionFormationProbe', 'BattleMissionInputIsolationProbe', 'BattleMissionControllerProbe', 'BattleMissionRtsCameraProbe', 'BattleMissionMovementInputProbe', 'BattleMissionAgentNavigatorProbe', 'BattleMissionNativeAiHandoffProbe', 'BattleMissionHostNativeAiAutopilotProbe', 'BattleFixture', 'PostBattle', 'Observation', 'CaptivityObservation', 'CaptivityOutcome', 'EncounterSurrender', 'EncounterEscape', 'JoinEncounterDefenders', 'JoinEncounterEligibility', 'JoinEncounterAbandonArmy', 'MovingArmyJoin', 'JoinSiegeEvent', 'MapNotifications', 'MapIncidentInputGuard', 'QuickInformation', 'SceneNotification', 'MissionLeave', 'VillageToolsDelivery', 'MainHeroSkills', 'CharacterDevelopment', 'SpendSkillFocus', 'QuestJournal', 'PartyRoster', 'MapPartyTargets', 'MapPartyQuestMarkers', 'MapPartyQuestAcceptance', 'MapEscapeMenu', 'MapInquiry', 'AlleyLeaderInquiry', 'AlleyRosterManagement', 'AlleyAbandonment', 'AlleyEntryMenu', 'MissionSceneNavigation', 'AlleyVolunteerBranches', 'AlleyAttackYield', 'AlleyAttackFightMission', 'PersuasionDetails', 'MapPartyComposition', 'MapArmyComposition', 'MapPartyBehavior', 'PartyUpgrade', 'PartyPrisonerRecruitment', 'PartyRoles', 'InventoryNavigation', 'EquipmentTransactions', 'TradeTransactions', 'BarterTransactions', 'BarterContexts', 'BarterFightRoute', 'MissionInteraction', 'ArenaMasterInteraction', 'CompanionHiring', 'MapSettlementTargets', 'Movement', 'Hold', 'MoveToPoint', 'Recruitment', 'Rest', 'Pursuit', 'EngageVisibility', 'Conversation', 'QuestAcceptance', 'EscortVisibility', 'TavernMission', 'TownCenterMission', 'SettlementOverlayConversation', 'SettlementOverlayQuickTalk', 'SettlementOverlayQuestAcceptance', 'SettlementOverlayQuestGate', 'SettlementOverlayQuickTalkIssueGateProbe', 'VisualCapture', 'All')]
     [string]$Phase = 'All',
@@ -34,11 +35,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.675'
+$HarnessContractVersion = '7.678'
 $providerCredentialScript = Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1'
 function Get-HarnessConfiguredProviderCredential {
     . $providerCredentialScript
@@ -211,7 +213,7 @@ function Remove-RetainedAgentHostPackage([string]$PackageRoot) {
         throw 'Refusing retained Agent Host package cleanup outside its unique D: BuildCache package directory.'
     }
     $cleanupScript = Join-Path $harnessRoot 'Test-AgentHostPackage.ps1'
-    $cleanupOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $cleanupScript -CleanupPackageRoot $resolvedPackageRoot 2>&1 | Out-String
+    $cleanupOutput = & $HarnessPowerShell -NoProfile -File $cleanupScript -CleanupPackageRoot $resolvedPackageRoot 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Retained Agent Host package cleanup failed: $cleanupOutput" }
     $cleanupReceipt = $cleanupOutput | ConvertFrom-Json
     if (-not [bool]$cleanupReceipt.Removed -or (Test-Path -LiteralPath $resolvedPackageRoot)) { throw 'Retained Agent Host package directory remains after cleanup.' }
@@ -488,9 +490,9 @@ foreach ($stage in $requestedStages) {
     $stageResult = switch ($stage) {
         'Docs' {
             Invoke-Stage -Name 'Docs' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $docsScript
+                & $HarnessPowerShell -NoProfile -File $docsScript
                 if ($LASTEXITCODE -ne 0) { throw "Documentation check failed with exit code $LASTEXITCODE." }
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $contextPackScript
+                & $HarnessPowerShell -NoProfile -File $contextPackScript
                 if ($LASTEXITCODE -ne 0) { throw "Context pack failed with exit code $LASTEXITCODE." }
             }
         }
@@ -506,7 +508,7 @@ foreach ($stage in $requestedStages) {
                 if (-not (Get-Command ilspycmd -ErrorAction SilentlyContinue)) { throw 'ilspycmd was not found on PATH.' }
                 $templateList = dotnet new list 2>&1 | Out-String
                 if ($templateList -notmatch 'blmodfx') { throw 'Bannerlord.Templates blmodfx template was not found.' }
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $saveModuleMetadataTestScript
+                & $HarnessPowerShell -NoProfile -File $saveModuleMetadataTestScript
                 if ($LASTEXITCODE -ne 0) { throw "Save module metadata test failed with exit code $LASTEXITCODE." }
                 [xml]$manifest = Get-Content $sourceManifestPath
                 if ([string]$manifest.Module.Id.value -ne 'ChronicleFramework') { throw 'Unexpected module id.' }
@@ -562,7 +564,7 @@ foreach ($stage in $requestedStages) {
                     ModuleSet = $moduleVersions
                     Toolchain = @('dotnet', 'ilspycmd', 'Bannerlord.Templates:blmodfx')
                     PackageInfoHint = $packageInfoText
-                } | ConvertTo-Json
+                } | ConvertTo-Json -Depth 8
             }
         }
         'ConfiguredModelPreflight' {
@@ -758,9 +760,9 @@ foreach ($stage in $requestedStages) {
         }
         'Api' {
             Invoke-Stage -Name 'Api' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $apiScript -Scope Lifecycle
+                & $HarnessPowerShell -NoProfile -File $apiScript -Scope Lifecycle
                 if ($LASTEXITCODE -ne 0) { throw "API lifecycle stage failed with exit code $LASTEXITCODE." }
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $apiScript -Scope Events
+                & $HarnessPowerShell -NoProfile -File $apiScript -Scope Events
                 if ($LASTEXITCODE -ne 0) { throw "API events stage failed with exit code $LASTEXITCODE." }
             }
         }
@@ -833,7 +835,7 @@ foreach ($stage in $requestedStages) {
         }
         'NativeMapMovementMonitorProbe' {
             Invoke-Stage -Name 'NativeMapMovementMonitorProbe' -Action {
-                $probeOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostMovementProbeScript -WaitSeconds $NativeMapMovementProbeWaitSeconds 2>&1 | Out-String
+                $probeOutput = & $HarnessPowerShell -NoProfile -File $agentHostMovementProbeScript -WaitSeconds $NativeMapMovementProbeWaitSeconds 2>&1 | Out-String
                 if ($LASTEXITCODE -ne 0) { throw "Live Native map-movement monitor probe failed with exit code $LASTEXITCODE.`n$probeOutput" }
                 $probeOutput
             }
@@ -845,7 +847,7 @@ foreach ($stage in $requestedStages) {
                 try {
                     $smokeStdout = Join-Path $harnessTempDirectory 'SmokeWorker.stdout.log'
                     $smokeStderr = Join-Path $harnessTempDirectory 'SmokeWorker.stderr.log'
-                    $smokeWorker = Start-Process -FilePath (Get-Command powershell -ErrorAction Stop).Source -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $smokeScript + '"'),'-TimeoutSeconds',$effectiveSmokeTimeoutSeconds,'-StabilitySeconds',$SmokeStabilitySeconds) -WindowStyle Hidden -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr -PassThru
+                    $smokeWorker = Start-Process -FilePath $HarnessPowerShell -ArgumentList @('-NoProfile','-File',('"' + $smokeScript + '"'),'-TimeoutSeconds',$effectiveSmokeTimeoutSeconds,'-StabilitySeconds',$SmokeStabilitySeconds) -WindowStyle Hidden -RedirectStandardOutput $smokeStdout -RedirectStandardError $smokeStderr -PassThru
                     try {
                         if (-not $smokeWorker.WaitForExit(($effectiveSmokeTimeoutSeconds + $SmokeStabilitySeconds + 30) * 1000)) {
                             $ownedGameExe = [IO.Path]::GetFullPath((Join-Path $gameRoot 'bin\Win64_Shipping_Client\Bannerlord.exe'))
@@ -883,7 +885,7 @@ foreach ($stage in $requestedStages) {
         }
         'ReleasePackage' {
             Invoke-Stage -Name 'ReleasePackage' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostReleasePackageScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentHostReleasePackageScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Isolated Chronicle release package verification failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -891,34 +893,34 @@ foreach ($stage in $requestedStages) {
         }
         'Campaign' {
             Invoke-Stage -Name 'Campaign' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $campaignScript
+                & $HarnessPowerShell -NoProfile -File $campaignScript
                 if ($LASTEXITCODE -ne 0) { throw "Campaign test failed with exit code $LASTEXITCODE." }
             }
         }
         'FreshCampaign' {
             Invoke-Stage -Name 'FreshCampaign' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $freshCampaignScript 2>&1 | Out-String
                 if ($LASTEXITCODE -ne 0) { throw "Fresh campaign character-creation test failed with exit code $LASTEXITCODE. Output: $testOutput" }
                 $testOutput
             }
         }
         'FreshStoryModeSetup' {
             Invoke-Stage -Name 'FreshStoryModeSetup' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignScript -StoryModeEycSetup -TimeoutSeconds 360 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $freshCampaignScript -StoryModeEycSetup -TimeoutSeconds 360 2>&1 | Out-String
                 if ($LASTEXITCODE -ne 0) { throw "Fresh StoryMode/tutorial-skip setup probe failed with exit code $LASTEXITCODE. Output: $testOutput" }
                 $testOutput
             }
         }
         'FreshStoryModeNativeMenuLeaveEvaluation' {
             Invoke-Stage -Name 'FreshStoryModeNativeMenuLeaveEvaluation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignScript -StoryModeEycSetup -StoryModeNativeMenuLeaveEvaluation -TimeoutSeconds 360 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $freshCampaignScript -StoryModeEycSetup -StoryModeNativeMenuLeaveEvaluation -TimeoutSeconds 360 2>&1 | Out-String
                 if ($LASTEXITCODE -ne 0) { throw "Fresh StoryMode Native training-field Leave handler evaluation failed with exit code $LASTEXITCODE. Output: $testOutput" }
                 $testOutput
             }
         }
         'FreshStoryModeNativeInquiryResponseEvaluation' {
             Invoke-Stage -Name 'FreshStoryModeNativeInquiryResponseEvaluation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignScript -StoryModeEycSetup -StoryModeNativeMenuLeaveEvaluation -StoryModeNativeInquiryResponseEvaluation -TimeoutSeconds 360 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $freshCampaignScript -StoryModeEycSetup -StoryModeNativeMenuLeaveEvaluation -StoryModeNativeInquiryResponseEvaluation -TimeoutSeconds 360 2>&1 | Out-String
                 if ($LASTEXITCODE -ne 0) { throw "Fresh StoryMode original one-button Native Inquiry response evaluation failed with exit code $LASTEXITCODE. Output: $testOutput" }
                 $testOutput
             }
@@ -945,7 +947,7 @@ foreach ($stage in $requestedStages) {
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', $FreshStoryModeModel, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $FreshStoryModeModel, 'Process')
                     if ([string]::IsNullOrWhiteSpace($savedProviderTimeout)) { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', '300', 'Process') }
-                    $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignScript -StoryModeEycSetup -StoryModeEycLiveModelEvaluation -TimeoutSeconds 87000 2>&1 | Out-String
+                    $testOutput = & $HarnessPowerShell -NoProfile -File $freshCampaignScript -StoryModeEycSetup -StoryModeEycLiveModelEvaluation -TimeoutSeconds 87000 2>&1 | Out-String
                     if ($LASTEXITCODE -ne 0) { throw "Fresh natural StoryMode bounded real-model evaluation failed with exit code $LASTEXITCODE. Output: $testOutput" }
                     $testOutput
                 }
@@ -981,7 +983,7 @@ foreach ($stage in $requestedStages) {
                     [Environment]::SetEnvironmentVariable($providerKeyVariable, [string]$providerCredential.Value, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $FreshStoryModeModel, 'Process')
                     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_AGENT_MODEL', $FreshStoryModeModel, 'Process')
-                    $testOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $persistentEycCampaignScript `
+                    $testOutput = & $HarnessPowerShell -NoProfile -File $persistentEycCampaignScript `
                         -HostMaxElapsedSeconds $PersistentEycHostMaxElapsedSeconds `
                         -MaxProviderDecisionsPerContinuation $PersistentEycMaxProviderDecisionsPerContinuation `
                         -MaxHttpRequestsPerDecision $PersistentEycMaxHttpRequestsPerDecision `
@@ -1002,7 +1004,7 @@ foreach ($stage in $requestedStages) {
         }
         'EycObjectiveCheckpointReadback' {
             Invoke-Stage -Name 'EycObjectiveCheckpointReadback' -Action {
-                $testOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $eycObjectiveCheckpointReadbackScript `
+                $testOutput = & $HarnessPowerShell -NoProfile -File $eycObjectiveCheckpointReadbackScript `
                     -CampaignKey $PersistentEycCampaignKey -TimeoutSeconds 240 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native EYC objective checkpoint readback failed with exit code $testExitCode.`n$testOutput" }
@@ -1019,7 +1021,7 @@ foreach ($stage in $requestedStages) {
                     $previousTemp = $env:CHRONICLE_HARNESS_TEMP
                     $env:CHRONICLE_HARNESS_TEMP = $attemptTemp
                     try {
-                        $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignScript -ValidateRecruitmentProgression 2>&1 | Out-String
+                        $testOutput = & $HarnessPowerShell -NoProfile -File $freshCampaignScript -ValidateRecruitmentProgression 2>&1 | Out-String
                         $testExitCode = $LASTEXITCODE
                     }
                     finally { $env:CHRONICLE_HARNESS_TEMP = $previousTemp }
@@ -1079,28 +1081,28 @@ foreach ($stage in $requestedStages) {
         }
         'FreshCampaignBaselineMatrix' {
             Invoke-Stage -Name 'FreshCampaignBaselineMatrix' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignBaselineMatrixScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $freshCampaignBaselineMatrixScript 2>&1 | Out-String
                 if ($LASTEXITCODE -ne 0) { throw "Five-instance fresh-campaign baseline matrix failed with exit code $LASTEXITCODE.`n$testOutput" }
                 $testOutput
             }
         }
         'FreshCampaignSupplyBaseline' {
             Invoke-Stage -Name 'FreshCampaignSupplyBaseline' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignSupplyBaselineScript -Runs $FreshCampaignSupplyRuns 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $freshCampaignSupplyBaselineScript -Runs $FreshCampaignSupplyRuns 2>&1 | Out-String
                 if ($LASTEXITCODE -ne 0) { throw "Fresh-Campaign paired Native supply baseline matrix failed with exit code $LASTEXITCODE.`n$testOutput" }
                 $testOutput
             }
         }
         'FreshCampaignRecruitmentFallback' {
             Invoke-Stage -Name 'FreshCampaignRecruitmentFallback' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignRecruitmentFallbackScript -MaxAttempts $RecruitmentFallbackMaxAttempts 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $freshCampaignRecruitmentFallbackScript -MaxAttempts $RecruitmentFallbackMaxAttempts 2>&1 | Out-String
                 if ($LASTEXITCODE -ne 0) { throw "Fresh-Campaign Native recruitment fallback evaluation failed with exit code $LASTEXITCODE.`n$testOutput" }
                 $testOutput
             }
         }
         'FreshCampaignLiveModelEvaluation' {
             Invoke-Stage -Name 'FreshCampaignLiveModelEvaluation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshCampaignLiveModelEvaluationScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $freshCampaignLiveModelEvaluationScript 2>&1 | Out-String
                 if ($LASTEXITCODE -ne 0) { throw "Five-instance fresh-campaign real-model evaluation failed with exit code $LASTEXITCODE.`n$testOutput" }
                 $testOutput
             }
@@ -1108,9 +1110,9 @@ foreach ($stage in $requestedStages) {
         'Protocol' {
             Invoke-Stage -Name 'Protocol' -Action {
                 $fakeBridgeEvidence = Join-Path $harnessTempDirectory 'AgentHostProtocolContract'
-                $fakeBridgeOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $harnessRoot 'Test-AgentHostProtocol.ps1') -HostDllPath $agentHostDllPath -EvidenceDirectory $fakeBridgeEvidence 2>&1 | Out-String
+                $fakeBridgeOutput = & $HarnessPowerShell -NoProfile -File (Join-Path $harnessRoot 'Test-AgentHostProtocol.ps1') -HostDllPath $agentHostDllPath -EvidenceDirectory $fakeBridgeEvidence 2>&1 | Out-String
                 if ($LASTEXITCODE -ne 0) { throw "Agent Host mailbox contract test failed with exit code $LASTEXITCODE.`n$fakeBridgeOutput" }
-                $nativeProtocolOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $protocolScript 2>&1 | Out-String
+                $nativeProtocolOutput = & $HarnessPowerShell -NoProfile -File $protocolScript 2>&1 | Out-String
                 $nativeProtocolExitCode = $LASTEXITCODE
                 if ($nativeProtocolExitCode -ne 0) { throw "Agent protocol test failed with exit code $nativeProtocolExitCode.`n$nativeProtocolOutput" }
                 [ordered]@{ hostMailboxContract = $fakeBridgeOutput; nativeProtocol = $nativeProtocolOutput; nativeHostHandshakes = '3 read-only state requests; checked same Native PID, MainHero, Clan, MainParty, time mode and unchanged Campaign fingerprint.' } | ConvertTo-Json -Depth 8
@@ -1123,16 +1125,16 @@ foreach ($stage in $requestedStages) {
                 if ($useBoundedProviderSmoke) { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', '90', 'Process') }
                 try {
                 $mailboxEvidencePath = Join-Path $harnessTempDirectory 'AgentHostMailboxContract'
-                $mailboxOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $harnessRoot 'Test-AgentHostProtocol.ps1') -HostDllPath $agentHostDllPath -EvidenceDirectory $mailboxEvidencePath 2>&1 | Out-String
+                $mailboxOutput = & $HarnessPowerShell -NoProfile -File (Join-Path $harnessRoot 'Test-AgentHostProtocol.ps1') -HostDllPath $agentHostDllPath -EvidenceDirectory $mailboxEvidencePath 2>&1 | Out-String
                 $mailboxExitCode = $LASTEXITCODE
                 if ($mailboxExitCode -ne 0) { throw "Local Agent Host mailbox regression failed with exit code $mailboxExitCode.`n$mailboxOutput" }
                 $providerEvidencePath = Join-Path $harnessTempDirectory 'AgentHostProvider'
-                $providerArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1'),
+                $providerArguments = @('-NoProfile', '-File', (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1'),
                     '-HostDllPath', $agentHostDllPath, '-EvidencePath', $providerEvidencePath, '-MaxOutputTokens', [string]$ProviderSmokeMaxOutputTokens)
                 if ($AllowDshXdPoolFreeRoute) { $providerArguments += '-AllowDshXdPoolFreeRoute' }
                 if ($AllowDshWorkBuddyGateway) { $providerArguments += '-AllowDshWorkBuddyGateway' }
                 if ($ProbeDshFreeRouteWithMinimalChat) { $providerArguments += '-ProbeDshFreeRouteWithMinimalChat' }
-                $providerOutput = & powershell @providerArguments 2>&1 | Out-String
+                $providerOutput = & $HarnessPowerShell @providerArguments 2>&1 | Out-String
                 $providerExitCode = $LASTEXITCODE
                 if ($providerExitCode -ne 0) { throw "Local Agent Host provider contract/smoke failed with exit code $providerExitCode.`n$providerOutput" }
                 [ordered]@{ mailboxRegression = $mailboxOutput; providerContractAndSmoke = $providerOutput } | ConvertTo-Json -Depth 8
@@ -1145,11 +1147,11 @@ foreach ($stage in $requestedStages) {
         'AgentHostProviderHealth' {
             Invoke-Stage -Name 'AgentHostProviderHealth' -Action {
                 $providerHealthEvidencePath = Join-Path $harnessTempDirectory 'AgentHostProviderHealth'
-                $providerHealthArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1'),
+                $providerHealthArguments = @('-NoProfile', '-File', (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1'),
                     '-HostDllPath', $agentHostDllPath, '-EvidencePath', $providerHealthEvidencePath, '-HealthOnly')
                 if ($AllowDshXdPoolFreeRoute) { $providerHealthArguments += '-AllowDshXdPoolFreeRoute' }
                 if ($AllowDshWorkBuddyGateway) { $providerHealthArguments += '-AllowDshWorkBuddyGateway' }
-                $providerHealthOutput = & powershell @providerHealthArguments 2>&1 | Out-String
+                $providerHealthOutput = & $HarnessPowerShell @providerHealthArguments 2>&1 | Out-String
                 $providerHealthExitCode = $LASTEXITCODE
                 if ($providerHealthExitCode -ne 0) { throw "Read-only Agent Host provider health check failed with exit code $providerHealthExitCode.`n$providerHealthOutput" }
                 $providerHealthOutput
@@ -1162,7 +1164,7 @@ foreach ($stage in $requestedStages) {
                 $packageArguments = @('-ProjectPath', $agentHostProjectPath, '-EvidencePath', $packageEvidencePath)
                 if ($retainPackageForSameSessionRuntime) { $packageArguments += '-RetainRuntimePackage' }
                 try {
-                    $packageOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostPackageScript @packageArguments 2>&1 | Out-String
+                    $packageOutput = & $HarnessPowerShell -NoProfile -File $agentHostPackageScript @packageArguments 2>&1 | Out-String
                     $packageExitCode = $LASTEXITCODE
                     $runtimeReceiptPath = Join-Path $packageEvidencePath 'AgentHostRuntimePackage.json'
                     if ($retainPackageForSameSessionRuntime -and (Test-Path -LiteralPath $runtimeReceiptPath -PathType Leaf)) {
@@ -1185,7 +1187,7 @@ foreach ($stage in $requestedStages) {
         }
         'AgentHostSupplyEvaluation' {
             Invoke-Stage -Name 'AgentHostSupplyEvaluation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $harnessRoot 'Test-AgentHostSupplyEvaluation.ps1') -Runs $AgentHostSupplyRuns 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File (Join-Path $harnessRoot 'Test-AgentHostSupplyEvaluation.ps1') -Runs $AgentHostSupplyRuns 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "FreeLLMAPI-routed real-model Agent Host supply evaluation failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1193,7 +1195,7 @@ foreach ($stage in $requestedStages) {
         }
         'AgentHostCampaignLoopEvaluation' {
             Invoke-Stage -Name 'AgentHostCampaignLoopEvaluation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostCampaignLoopEvaluationScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentHostCampaignLoopEvaluationScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "FreeLLMAPI-routed real-model Agent Host Campaign loop evaluation failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1201,7 +1203,7 @@ foreach ($stage in $requestedStages) {
         }
         'CampaignActorThinkTrace' {
             Invoke-Stage -Name 'CampaignActorThinkTrace' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $campaignActorThinkTraceScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $campaignActorThinkTraceScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Read-only Native Campaign Actor Think trace failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1209,7 +1211,7 @@ foreach ($stage in $requestedStages) {
         }
         'AgentHostVillageToolsQuestEvaluation' {
             Invoke-Stage -Name 'AgentHostVillageToolsQuestEvaluation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostCampaignLoopEvaluationScript -VillageToolsQuest -FrameRate 5 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentHostCampaignLoopEvaluationScript -VillageToolsQuest -FrameRate 5 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "FreeLLMAPI-routed real-model Agent Host VillageNeedsTools Quest evaluation failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1217,7 +1219,7 @@ foreach ($stage in $requestedStages) {
         }
         'AgentHostEstablishClanGoalPlannerEvaluation' {
             Invoke-Stage -Name 'AgentHostEstablishClanGoalPlannerEvaluation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostCampaignLoopEvaluationScript -EstablishYourClanGoalPlanner -PlannerSourceSaveName $StoryModePlannerSourceSaveName -FrameRate 5 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentHostCampaignLoopEvaluationScript -EstablishYourClanGoalPlanner -PlannerSourceSaveName $StoryModePlannerSourceSaveName -FrameRate 5 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "FreeLLMAPI-routed read-only StoryMode Establish Your Clan objective planner evaluation failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1229,7 +1231,7 @@ foreach ($stage in $requestedStages) {
                 $useBoundedAutonomyRuntime = [string]::IsNullOrWhiteSpace($originalProviderTimeout)
                 if ($useBoundedAutonomyRuntime) { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', '90', 'Process') }
                 try {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostCampaignLoopEvaluationScript -EstablishYourClanAutonomyLoop -PlannerSourceSaveName $StoryModePlannerSourceSaveName -FrameRate 5 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentHostCampaignLoopEvaluationScript -EstablishYourClanAutonomyLoop -PlannerSourceSaveName $StoryModePlannerSourceSaveName -FrameRate 5 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "FreeLLMAPI-routed real-model StoryMode autonomy evaluation on a disposable existing-quest clone failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1241,7 +1243,7 @@ foreach ($stage in $requestedStages) {
         }
         'AgentHostCaptivityRecoveryEvaluation' {
             Invoke-Stage -Name 'AgentHostCaptivityRecoveryEvaluation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostCampaignLoopEvaluationScript -CaptivityRecoveryFromExisting -PlannerSourceSaveName $StoryModePlannerSourceSaveName -FrameRate 5 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentHostCampaignLoopEvaluationScript -CaptivityRecoveryFromExisting -PlannerSourceSaveName $StoryModePlannerSourceSaveName -FrameRate 5 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "FreeLLMAPI-routed real-model recovery from existing StoryMode Captivity failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1249,7 +1251,7 @@ foreach ($stage in $requestedStages) {
         }
         'AgentHostEstablishClanGoldSaleEvaluation' {
             Invoke-Stage -Name 'AgentHostEstablishClanGoldSaleEvaluation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostCampaignLoopEvaluationScript -EstablishClanGoldSaleFromStoryMode -PlannerSourceSaveName $StoryModePlannerSourceSaveName -FrameRate 5 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentHostCampaignLoopEvaluationScript -EstablishClanGoldSaleFromStoryMode -PlannerSourceSaveName $StoryModePlannerSourceSaveName -FrameRate 5 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "FreeLLMAPI-routed real-model StoryMode Gold objective sale evaluation failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1257,7 +1259,7 @@ foreach ($stage in $requestedStages) {
         }
         'AgentHostBattleSimulationEvaluation' {
             Invoke-Stage -Name 'AgentHostBattleSimulationEvaluation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostCampaignLoopEvaluationScript -BattleSimulationLoop -BattleSourceSaveName $BattleSimulationSourceSaveName -FrameRate 5 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentHostCampaignLoopEvaluationScript -BattleSimulationLoop -BattleSourceSaveName $BattleSimulationSourceSaveName -FrameRate 5 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "FreeLLMAPI-routed real-model Agent Host BattleSimulation evaluation failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1265,7 +1267,7 @@ foreach ($stage in $requestedStages) {
         }
         'AgentHostBattleAndCaptivityEvaluation' {
             Invoke-Stage -Name 'AgentHostBattleAndCaptivityEvaluation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostCampaignLoopEvaluationScript -BattleAndCaptivityLoop -BattleSourceSaveName $BattleSimulationSourceSaveName -FrameRate 5 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentHostCampaignLoopEvaluationScript -BattleAndCaptivityLoop -BattleSourceSaveName $BattleSimulationSourceSaveName -FrameRate 5 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "FreeLLMAPI-routed real-model Native BattleSimulation/captivity recovery evaluation failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1274,7 +1276,7 @@ foreach ($stage in $requestedStages) {
         'AgentHostLifecycleEvaluation' {
             Invoke-Stage -Name 'AgentHostLifecycleEvaluation' -Action {
                 try {
-                    $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostLifecycleEvaluationScript -Scenario $LifecycleScenario 2>&1 | Out-String
+                    $testOutput = & $HarnessPowerShell -NoProfile -File $agentHostLifecycleEvaluationScript -Scenario $LifecycleScenario 2>&1 | Out-String
                     $testExitCode = $LASTEXITCODE
                     if ($testExitCode -ne 0) { throw "Game-owned Agent Host lifecycle test failed with exit code $testExitCode.`n$testOutput" }
                     $testOutput
@@ -1290,7 +1292,7 @@ foreach ($stage in $requestedStages) {
         'AgentHostLifecycleCompletionEvaluation' {
             Invoke-Stage -Name 'AgentHostLifecycleCompletionEvaluation' -Action {
                 try {
-                    $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentHostLifecycleEvaluationScript -Scenario Complete -TimeoutSeconds 300 2>&1 | Out-String
+                    $testOutput = & $HarnessPowerShell -NoProfile -File $agentHostLifecycleEvaluationScript -Scenario Complete -TimeoutSeconds 300 2>&1 | Out-String
                     $testExitCode = $LASTEXITCODE
                     if ($testExitCode -ne 0) { throw "Game-owned real-model Host completion test failed with exit code $testExitCode.`n$testOutput" }
                     $testOutput
@@ -1305,13 +1307,13 @@ foreach ($stage in $requestedStages) {
         }
         'Observation' {
             Invoke-Stage -Name 'Observation' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $observationScript
+                & $HarnessPowerShell -NoProfile -File $observationScript
                 if ($LASTEXITCODE -ne 0) { throw "Agent observation test failed with exit code $LASTEXITCODE." }
             }
         }
         'CaptivityObservation' {
             Invoke-Stage -Name 'CaptivityObservation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $captivityObservationScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $captivityObservationScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native MainHero captivity observation test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1319,7 +1321,7 @@ foreach ($stage in $requestedStages) {
         }
         'CaptivityOutcome' {
             Invoke-Stage -Name 'CaptivityOutcome' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $captivityOutcomeScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $captivityOutcomeScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native MainHero captivity outcome test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1327,7 +1329,7 @@ foreach ($stage in $requestedStages) {
         }
         'PrisonCaptivityOutcome' {
             Invoke-Stage -Name 'PrisonCaptivityOutcome' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $captivityOutcomeScript -CaptorContext Settlement 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $captivityOutcomeScript -CaptorContext Settlement 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native MainHero prison captivity outcome test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1335,7 +1337,7 @@ foreach ($stage in $requestedStages) {
         }
         'EncounterSurrender' {
             Invoke-Stage -Name 'EncounterSurrender' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $encounterSurrenderScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $encounterSurrenderScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Encounter surrender/captivity test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1343,7 +1345,7 @@ foreach ($stage in $requestedStages) {
         }
         'EncounterEscape' {
             Invoke-Stage -Name 'EncounterEscape' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $encounterEscapeScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $encounterEscapeScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Encounter escape/outcome test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1351,7 +1353,7 @@ foreach ($stage in $requestedStages) {
         }
         'JoinEncounterDefenders' {
             Invoke-Stage -Name 'JoinEncounterDefenders' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $joinEncounterScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $joinEncounterScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Join Encounter Help Defenders test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1360,7 +1362,7 @@ foreach ($stage in $requestedStages) {
         'JoinEncounterEligibility' {
             Invoke-Stage -Name 'JoinEncounterEligibility' -Action {
                 foreach ($relationProfile in @('HelpAttackers', 'Neutral')) {
-                    $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $joinEncounterEligibilityScript -RelationProfile $relationProfile 2>&1 | Out-String
+                    $testOutput = & $HarnessPowerShell -NoProfile -File $joinEncounterEligibilityScript -RelationProfile $relationProfile 2>&1 | Out-String
                     $testExitCode = $LASTEXITCODE
                     if ($testExitCode -ne 0) { throw "Native Join Encounter $relationProfile eligibility test failed with exit code $testExitCode.`n$testOutput" }
                     $testOutput
@@ -1369,7 +1371,7 @@ foreach ($stage in $requestedStages) {
         }
         'JoinEncounterAbandonArmy' {
             Invoke-Stage -Name 'JoinEncounterAbandonArmy' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $joinEncounterAbandonArmyScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $joinEncounterAbandonArmyScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Join Encounter Abandon Army test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1377,7 +1379,7 @@ foreach ($stage in $requestedStages) {
         }
         'MovingArmyJoin' {
             Invoke-Stage -Name 'MovingArmyJoin' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $movingArmyJoinScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $movingArmyJoinScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native unengaged Army encounter Join Army test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1385,7 +1387,7 @@ foreach ($stage in $requestedStages) {
         }
         'JoinSiegeEvent' {
             Invoke-Stage -Name 'JoinSiegeEvent' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $joinSiegeEventScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $joinSiegeEventScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Join Siege Event test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1393,7 +1395,7 @@ foreach ($stage in $requestedStages) {
         }
         'MapNotifications' {
             Invoke-Stage -Name 'MapNotifications' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $mapNotificationsScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $mapNotificationsScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native map notification observation test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1401,7 +1403,7 @@ foreach ($stage in $requestedStages) {
         }
         'MapIncidentInputGuard' {
             Invoke-Stage -Name 'MapIncidentInputGuard' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $mapIncidentInputGuardScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $mapIncidentInputGuardScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native MapIncident movement guard test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1409,7 +1411,7 @@ foreach ($stage in $requestedStages) {
         }
         'QuickInformation' {
             Invoke-Stage -Name 'QuickInformation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $quickInformationScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $quickInformationScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native QuickInformation observation test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1417,7 +1419,7 @@ foreach ($stage in $requestedStages) {
         }
         'SceneNotification' {
             Invoke-Stage -Name 'SceneNotification' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $sceneNotificationScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $sceneNotificationScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native SceneNotification observation test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1425,7 +1427,7 @@ foreach ($stage in $requestedStages) {
         }
         'MissionLeave' {
             Invoke-Stage -Name 'MissionLeave' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $missionLeaveScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $missionLeaveScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Mission Leave runtime test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1433,7 +1435,7 @@ foreach ($stage in $requestedStages) {
         }
         'VillageToolsDelivery' {
             Invoke-Stage -Name 'VillageToolsDelivery' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $villageToolsDeliveryScript -MaxDecisions $VillageToolsMaxDecisions 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $villageToolsDeliveryScript -MaxDecisions $VillageToolsMaxDecisions 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Autonomous Native Village Tools delivery test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1441,7 +1443,7 @@ foreach ($stage in $requestedStages) {
         }
         'Movement' {
             Invoke-Stage -Name 'Movement' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $movementScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $movementScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Agent movement test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1449,7 +1451,7 @@ foreach ($stage in $requestedStages) {
         }
         'Hold' {
             Invoke-Stage -Name 'Hold' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $holdScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $holdScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Hold behavior test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1457,17 +1459,17 @@ foreach ($stage in $requestedStages) {
         }
         'MoveToPoint' {
             Invoke-Stage -Name 'MoveToPoint' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $moveToPointScript
+                & $HarnessPowerShell -NoProfile -File $moveToPointScript
                 if ($LASTEXITCODE -ne 0) { throw "Agent point movement test failed with exit code $LASTEXITCODE." }
             }
         }
         'Recruitment' {
             Invoke-Stage -Name 'Recruitment' -Action {
                 if ($RecruitmentBulkOnly) {
-                    $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $recruitmentScript -BulkOnly 2>&1 | Out-String
+                    $testOutput = & $HarnessPowerShell -NoProfile -File $recruitmentScript -BulkOnly 2>&1 | Out-String
                 }
                 else {
-                    $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $recruitmentScript 2>&1 | Out-String
+                    $testOutput = & $HarnessPowerShell -NoProfile -File $recruitmentScript 2>&1 | Out-String
                 }
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Agent recruitment test failed with exit code $testExitCode.`n$testOutput" }
@@ -1476,13 +1478,13 @@ foreach ($stage in $requestedStages) {
         }
         'Rest' {
             Invoke-Stage -Name 'Rest' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $restScript
+                & $HarnessPowerShell -NoProfile -File $restScript
                 if ($LASTEXITCODE -ne 0) { throw "Agent rest test failed with exit code $LASTEXITCODE." }
             }
         }
         'Pursuit' {
             Invoke-Stage -Name 'Pursuit' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $pursuitScript
+                & $HarnessPowerShell -NoProfile -File $pursuitScript
                 if ($LASTEXITCODE -ne 0) { throw "Agent pursuit test failed with exit code $LASTEXITCODE." }
             }
         }
@@ -1491,7 +1493,7 @@ foreach ($stage in $requestedStages) {
                 $previousHarnessMode = $env:CHRONICLE_HARNESS_MODE
                 $env:CHRONICLE_HARNESS_MODE = 'visual-capture'
                 try {
-                    $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $pursuitScript -ProbeEngageVisibilityLoss -VisibilityProbeSeconds $VisibilityProbeSeconds -TimeoutSeconds 240 2>&1 | Out-String
+                    $testOutput = & $HarnessPowerShell -NoProfile -File $pursuitScript -ProbeEngageVisibilityLoss -VisibilityProbeSeconds $VisibilityProbeSeconds -TimeoutSeconds 240 2>&1 | Out-String
                     $testExitCode = $LASTEXITCODE
                     if ($testExitCode -ne 0) { throw "Agent Engage visibility probe failed with exit code $testExitCode.`n$testOutput" }
                 }
@@ -1503,109 +1505,109 @@ foreach ($stage in $requestedStages) {
         }
         'Conversation' {
             Invoke-Stage -Name 'Conversation' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $pursuitScript -ProbeConversation
+                & $HarnessPowerShell -NoProfile -File $pursuitScript -ProbeConversation
                 if ($LASTEXITCODE -ne 0) { throw "Agent conversation lifecycle test failed with exit code $LASTEXITCODE." }
             }
         }
         'QuestAcceptance' {
             Invoke-Stage -Name 'QuestAcceptance' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $pursuitScript -ProbeQuestAcceptance
+                & $HarnessPowerShell -NoProfile -File $pursuitScript -ProbeQuestAcceptance
                 if ($LASTEXITCODE -ne 0) { throw "Agent Quest acceptance test failed with exit code $LASTEXITCODE." }
             }
         }
         'EscortVisibility' {
             Invoke-Stage -Name 'EscortVisibility' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $pursuitScript -ProbeEscortVisibilityLoss -VisibilityProbeSeconds 45
+                & $HarnessPowerShell -NoProfile -File $pursuitScript -ProbeEscortVisibilityLoss -VisibilityProbeSeconds 45
                 if ($LASTEXITCODE -ne 0) { throw "Escort visibility probe failed with exit code $LASTEXITCODE." }
             }
         }
         'TavernMission' {
             Invoke-Stage -Name 'TavernMission' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $tavernMissionScript
+                & $HarnessPowerShell -NoProfile -File $tavernMissionScript
                 if ($LASTEXITCODE -ne 0) { throw "Native Tavern Mission entry test failed with exit code $LASTEXITCODE." }
             }
         }
         'TownCenterMission' {
             Invoke-Stage -Name 'TownCenterMission' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $townCenterMissionScript
+                & $HarnessPowerShell -NoProfile -File $townCenterMissionScript
                 if ($LASTEXITCODE -ne 0) { throw "Native Town Center Mission test failed with exit code $LASTEXITCODE." }
             }
         }
         'SettlementOverlayConversation' {
             Invoke-Stage -Name 'SettlementOverlayConversation' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $settlementOverlayConversationScript -TargetSettlementId $TargetSettlementId -ApproachSettlementId $ApproachSettlementId
+                & $HarnessPowerShell -NoProfile -File $settlementOverlayConversationScript -TargetSettlementId $TargetSettlementId -ApproachSettlementId $ApproachSettlementId
                 if ($LASTEXITCODE -ne 0) { throw "Native Settlement overlay Conversation test failed with exit code $LASTEXITCODE." }
             }
         }
         'SettlementOverlayQuickTalk' {
             Invoke-Stage -Name 'SettlementOverlayQuickTalk' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $settlementOverlayConversationScript -TargetSettlementId $QuickTalkTargetSettlementId -ApproachSettlementId $QuickTalkTargetSettlementId -InteractionMode QuickTalk -ExpectedOutcome ConversationOnly
+                & $HarnessPowerShell -NoProfile -File $settlementOverlayConversationScript -TargetSettlementId $QuickTalkTargetSettlementId -ApproachSettlementId $QuickTalkTargetSettlementId -InteractionMode QuickTalk -ExpectedOutcome ConversationOnly
                 if ($LASTEXITCODE -ne 0) { throw "Native Settlement overlay QuickConversation test failed with exit code $LASTEXITCODE." }
             }
         }
         'SettlementOverlayQuestAcceptance' {
             Invoke-Stage -Name 'SettlementOverlayQuestAcceptance' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $settlementOverlayConversationScript -TargetSettlementId $TargetSettlementId -ApproachSettlementId $ApproachSettlementId -ExpectedOutcome QuestAccepted
+                & $HarnessPowerShell -NoProfile -File $settlementOverlayConversationScript -TargetSettlementId $TargetSettlementId -ApproachSettlementId $ApproachSettlementId -ExpectedOutcome QuestAccepted
                 if ($LASTEXITCODE -ne 0) { throw "Native Settlement overlay Issue Quest acceptance test failed with exit code $LASTEXITCODE." }
             }
         }
         'SettlementOverlayQuestGate' {
             Invoke-Stage -Name 'SettlementOverlayQuestGate' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $settlementOverlayConversationScript -ExpectedOutcome NativePreconditionBlocked
+                & $HarnessPowerShell -NoProfile -File $settlementOverlayConversationScript -ExpectedOutcome NativePreconditionBlocked
                 if ($LASTEXITCODE -ne 0) { throw "Native Settlement overlay Issue Quest precondition gate test failed with exit code $LASTEXITCODE." }
             }
         }
         'SettlementOverlayQuickTalkIssueGateProbe' {
             Invoke-Stage -Name 'SettlementOverlayQuickTalkIssueGateProbe' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $settlementOverlayConversationScript -TargetSettlementId $QuickTalkTargetSettlementId -ApproachSettlementId $QuickTalkTargetSettlementId -InteractionMode QuickTalk -ExpectedOutcome IssueGateProbe
+                & $HarnessPowerShell -NoProfile -File $settlementOverlayConversationScript -TargetSettlementId $QuickTalkTargetSettlementId -ApproachSettlementId $QuickTalkTargetSettlementId -InteractionMode QuickTalk -ExpectedOutcome IssueGateProbe
                 if ($LASTEXITCODE -ne 0) { throw "Native Settlement QuickTalk Issue gate diagnostic failed with exit code $LASTEXITCODE." }
             }
         }
         'MapSettlementTargets' {
             Invoke-Stage -Name 'MapSettlementTargets' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $mapSettlementTargetsScript
+                & $HarnessPowerShell -NoProfile -File $mapSettlementTargetsScript
                 if ($LASTEXITCODE -ne 0) { throw "Native map settlement visibility and movement guard test failed with exit code $LASTEXITCODE." }
             }
         }
         'MainHeroSkills' {
             Invoke-Stage -Name 'MainHeroSkills' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $mainHeroSkillsScript
+                & $HarnessPowerShell -NoProfile -File $mainHeroSkillsScript
                 if ($LASTEXITCODE -ne 0) { throw "Native MainHero skills observation test failed with exit code $LASTEXITCODE." }
             }
         }
         'CharacterDevelopment' {
             Invoke-Stage -Name 'CharacterDevelopment' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $characterDevelopmentScript
+                & $HarnessPowerShell -NoProfile -File $characterDevelopmentScript
                 if ($LASTEXITCODE -ne 0) { throw "Native MainHero Character Developer observation test failed with exit code $LASTEXITCODE." }
             }
         }
         'SpendSkillFocus' {
             Invoke-Stage -Name 'SpendSkillFocus' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $spendSkillFocusScript
+                & $HarnessPowerShell -NoProfile -File $spendSkillFocusScript
                 if ($LASTEXITCODE -ne 0) { throw "Native Character Developer Skill Focus transaction test failed with exit code $LASTEXITCODE." }
             }
         }
         'QuestJournal' {
             Invoke-Stage -Name 'QuestJournal' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $settlementOverlayConversationScript -TargetSettlementId village_V1_1 -ApproachSettlementId town_V1 -ExpectedOutcome QuestAccepted -ValidateQuestDetails
+                & $HarnessPowerShell -NoProfile -File $settlementOverlayConversationScript -TargetSettlementId village_V1_1 -ApproachSettlementId town_V1 -ExpectedOutcome QuestAccepted -ValidateQuestDetails
                 if ($LASTEXITCODE -ne 0) { throw "Native Quest Journal details comparison failed with exit code $LASTEXITCODE." }
             }
         }
         'PartyRoster' {
             Invoke-Stage -Name 'PartyRoster' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $partyRosterScript
+                & $HarnessPowerShell -NoProfile -File $partyRosterScript
                 if ($LASTEXITCODE -ne 0) { throw "Native MainParty roster observation test failed with exit code $LASTEXITCODE." }
             }
         }
         'MapPartyTargets' {
             Invoke-Stage -Name 'MapPartyTargets' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $mapPartyTargetsScript
+                & $HarnessPowerShell -NoProfile -File $mapPartyTargetsScript
                 if ($LASTEXITCODE -ne 0) { throw "Native Map party target observation test failed with exit code $LASTEXITCODE." }
             }
         }
         'MapPartyQuestMarkers' {
             Invoke-Stage -Name 'MapPartyQuestMarkers' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $mapPartyQuestMarkersScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $mapPartyQuestMarkersScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native map Party Issue marker observation test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1613,7 +1615,7 @@ foreach ($stage in $requestedStages) {
         }
         'MapPartyQuestAcceptance' {
             Invoke-Stage -Name 'MapPartyQuestAcceptance' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $mapPartyQuestAcceptanceScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $mapPartyQuestAcceptanceScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native map Lord Issue Quest acceptance test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1621,7 +1623,7 @@ foreach ($stage in $requestedStages) {
         }
         'MapEscapeMenu' {
             Invoke-Stage -Name 'MapEscapeMenu' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $mapEscapeMenuScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $mapEscapeMenuScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Map Escape-menu observe/close test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1629,7 +1631,7 @@ foreach ($stage in $requestedStages) {
         }
         'MapInquiry' {
             Invoke-Stage -Name 'MapInquiry' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $mapInquiryScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $mapInquiryScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Map Inquiry observe/respond test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1637,7 +1639,7 @@ foreach ($stage in $requestedStages) {
         }
         'AlleyLeaderInquiry' {
             Invoke-Stage -Name 'AlleyLeaderInquiry' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $alleyLeaderInquiryScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $alleyLeaderInquiryScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Alley leader MultiSelection Inquiry test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1645,7 +1647,7 @@ foreach ($stage in $requestedStages) {
         }
         'AlleyRosterManagement' {
             Invoke-Stage -Name 'AlleyRosterManagement' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $alleyRosterManagementScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $alleyRosterManagementScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Alley PartyScreen roster test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1653,7 +1655,7 @@ foreach ($stage in $requestedStages) {
         }
         'AlleyAbandonment' {
             Invoke-Stage -Name 'AlleyAbandonment' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $alleyAbandonmentScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $alleyAbandonmentScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Alley abandonment menu test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1661,7 +1663,7 @@ foreach ($stage in $requestedStages) {
         }
         'AlleyEntryMenu' {
             Invoke-Stage -Name 'AlleyEntryMenu' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $alleyEntryMenuScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $alleyEntryMenuScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Alley entry/return menu test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1669,7 +1671,7 @@ foreach ($stage in $requestedStages) {
         }
         'MissionSceneNavigation' {
             Invoke-Stage -Name 'MissionSceneNavigation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $missionSceneNavigationScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $missionSceneNavigationScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Mission scene discovery/navigation failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1679,7 +1681,7 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'AlleyVolunteerBranches' -Action {
                 $outputs = [System.Collections.Generic.List[string]]::new()
                 foreach ($scenario in @('noVolunteers','availableVolunteers')) {
-                    $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $missionSceneNavigationScript -VolunteerScenario $scenario 2>&1 | Out-String
+                    $testOutput = & $HarnessPowerShell -NoProfile -File $missionSceneNavigationScript -VolunteerScenario $scenario 2>&1 | Out-String
                     $testExitCode = $LASTEXITCODE
                     if ($testExitCode -ne 0) { throw "Alley volunteer branch '$scenario' failed with exit code $testExitCode.`n$testOutput" }
                     $outputs.Add("scenario=$scenario`n$testOutput")
@@ -1691,7 +1693,7 @@ foreach ($stage in $requestedStages) {
             Invoke-Stage -Name 'AlleyAttackYield' -Action {
                 $outputs = [System.Collections.Generic.List[string]]::new()
                 foreach ($scenario in @('noAttack','peacefulYield')) {
-                    $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $alleyAttackYieldScript -Scenario $scenario 2>&1 | Out-String
+                    $testOutput = & $HarnessPowerShell -NoProfile -File $alleyAttackYieldScript -Scenario $scenario 2>&1 | Out-String
                     $testExitCode = $LASTEXITCODE
                     if ($testExitCode -ne 0) { throw "Alley attack branch '$scenario' failed with exit code $testExitCode.`n$testOutput" }
                     $outputs.Add("scenario=$scenario`n$testOutput")
@@ -1701,7 +1703,7 @@ foreach ($stage in $requestedStages) {
         }
         'AlleyAttackFightMission' {
             Invoke-Stage -Name 'AlleyAttackFightMission' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $alleyAttackFightMissionScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $alleyAttackFightMissionScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Alley Fight Mission entry/retreat failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1709,7 +1711,7 @@ foreach ($stage in $requestedStages) {
         }
         'PersuasionDetails' {
             Invoke-Stage -Name 'PersuasionDetails' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $persuasionDetailsScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $persuasionDetailsScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Persuasion observation/option loop failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1717,49 +1719,49 @@ foreach ($stage in $requestedStages) {
         }
         'MapPartyComposition' {
             Invoke-Stage -Name 'MapPartyComposition' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $mapPartyCompositionScript
+                & $HarnessPowerShell -NoProfile -File $mapPartyCompositionScript
                 if ($LASTEXITCODE -ne 0) { throw "Native Map party composition/expanded tooltip comparison failed with exit code $LASTEXITCODE." }
             }
         }
         'MapArmyComposition' {
             Invoke-Stage -Name 'MapArmyComposition' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $mapPartyCompositionScript -ValidateArmyTooltip
+                & $HarnessPowerShell -NoProfile -File $mapPartyCompositionScript -ValidateArmyTooltip
                 if ($LASTEXITCODE -ne 0) { throw "Native Army tooltip composition comparison failed with exit code $LASTEXITCODE." }
             }
         }
         'MapPartyBehavior' {
             Invoke-Stage -Name 'MapPartyBehavior' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $mapPartyBehaviorScript -ValidateArmyTooltip
+                & $HarnessPowerShell -NoProfile -File $mapPartyBehaviorScript -ValidateArmyTooltip
                 if ($LASTEXITCODE -ne 0) { throw "Native Map party behavior summary comparison failed with exit code $LASTEXITCODE." }
             }
         }
         'PartyUpgrade' {
             Invoke-Stage -Name 'PartyUpgrade' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $partyUpgradeScript
+                & $HarnessPowerShell -NoProfile -File $partyUpgradeScript
                 if ($LASTEXITCODE -ne 0) { throw "Native MainParty PartyScreen upgrade transaction failed with exit code $LASTEXITCODE." }
             }
         }
         'PartyPrisonerRecruitment' {
             Invoke-Stage -Name 'PartyPrisonerRecruitment' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $partyPrisonerRecruitmentScript
+                & $HarnessPowerShell -NoProfile -File $partyPrisonerRecruitmentScript
                 if ($LASTEXITCODE -ne 0) { throw "Native MainParty PartyScreen prisoner recruitment transaction failed with exit code $LASTEXITCODE." }
             }
         }
         'MissionInteraction' {
             Invoke-Stage -Name 'MissionInteraction' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $missionInteractionScript
+                & $HarnessPowerShell -NoProfile -File $missionInteractionScript
                 if ($LASTEXITCODE -ne 0) { throw "Native Mission Agent interaction regression failed with exit code $LASTEXITCODE." }
             }
         }
         'ArenaMasterInteraction' {
             Invoke-Stage -Name 'ArenaMasterInteraction' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $arenaMasterInteractionScript
+                & $HarnessPowerShell -NoProfile -File $arenaMasterInteractionScript
                 if ($LASTEXITCODE -ne 0) { throw "Native cross-culture ArenaMaster interaction regression failed with exit code $LASTEXITCODE." }
             }
         }
         'CompanionHiring' {
             Invoke-Stage -Name 'CompanionHiring' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $companionHiringScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $companionHiringScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Wanderer companion-hiring flow failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1767,62 +1769,62 @@ foreach ($stage in $requestedStages) {
         }
         'PartyRoles' {
             Invoke-Stage -Name 'PartyRoles' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $partyRolesScript
+                & $HarnessPowerShell -NoProfile -File $partyRolesScript
                 if ($LASTEXITCODE -ne 0) { throw "Native PartyRole assignment/removal flow failed with exit code $LASTEXITCODE." }
             }
         }
         'InventoryNavigation' {
             Invoke-Stage -Name 'InventoryNavigation' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $inventoryNavigationScript
+                & $HarnessPowerShell -NoProfile -File $inventoryNavigationScript
                 if ($LASTEXITCODE -ne 0) { throw "Native Inventory navigation/clock boundary test failed with exit code $LASTEXITCODE." }
             }
         }
         'EquipmentTransactions' {
             Invoke-Stage -Name 'EquipmentTransactions' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $equipmentTransactionsScript
+                & $HarnessPowerShell -NoProfile -File $equipmentTransactionsScript
                 if ($LASTEXITCODE -ne 0) { throw "Native MainHero equip/unequip transaction test failed with exit code $LASTEXITCODE." }
             }
         }
         'TradeTransactions' {
             Invoke-Stage -Name 'TradeTransactions' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $tradeTransactionsScript
+                & $HarnessPowerShell -NoProfile -File $tradeTransactionsScript
                 if ($LASTEXITCODE -ne 0) { throw "Native Town Trade transaction test failed with exit code $LASTEXITCODE." }
             }
         }
         'BarterTransactions' {
             Invoke-Stage -Name 'BarterTransactions' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $barterTransactionsScript
+                & $HarnessPowerShell -NoProfile -File $barterTransactionsScript
                 if ($LASTEXITCODE -ne 0) { throw "Native ordinary Lord Barter transaction test failed with exit code $LASTEXITCODE." }
             }
         }
         'BarterContexts' {
             Invoke-Stage -Name 'BarterContexts' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $barterContextsScript
+                & $HarnessPowerShell -NoProfile -File $barterContextsScript
                 if ($LASTEXITCODE -ne 0) { throw "Native Safe Passage Barter context test failed with exit code $LASTEXITCODE." }
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $barterContextsScript -CancelOnly
+                & $HarnessPowerShell -NoProfile -File $barterContextsScript -CancelOnly
                 if ($LASTEXITCODE -ne 0) { throw "Native Safe Passage Cancel/encounter-menu test failed with exit code $LASTEXITCODE." }
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $barterContextsScript -FightOnly
+                & $HarnessPowerShell -NoProfile -File $barterContextsScript -FightOnly
                 if ($LASTEXITCODE -ne 0) { throw "Native Safe Passage Fight/encounter-menu test failed with exit code $LASTEXITCODE." }
             }
         }
         'BarterFightRoute' {
             Invoke-Stage -Name 'BarterFightRoute' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $barterContextsScript -FightOnly
+                & $HarnessPowerShell -NoProfile -File $barterContextsScript -FightOnly
                 if ($LASTEXITCODE -ne 0) { throw "Native Safe Passage Fight-route test failed with exit code $LASTEXITCODE." }
             }
         }
         'BarterSafePassage' {
             Invoke-Stage -Name 'BarterSafePassage' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $barterContextsScript -ObserveExpiry
+                & $HarnessPowerShell -NoProfile -File $barterContextsScript -ObserveExpiry
                 if ($LASTEXITCODE -ne 0) { throw "Native Safe Passage offer/cooldown test failed with exit code $LASTEXITCODE." }
             }
         }
         'AgentLoop' {
             Invoke-Stage -Name 'AgentLoop' -Action {
-                $providerOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentModelProviderScript 2>&1 | Out-String
+                $providerOutput = & $HarnessPowerShell -NoProfile -File $agentModelProviderScript 2>&1 | Out-String
                 $providerExitCode = $LASTEXITCODE
                 if ($providerExitCode -ne 0) { throw "OpenAI-compatible provider protocol test failed with exit code $providerExitCode.`n$providerOutput" }
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentLoopScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentLoopScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Agent decision loop test failed with exit code $testExitCode.`n$testOutput" }
                 "Provider Protocol Stub:`n$providerOutput`nAgent Loop:`n$testOutput"
@@ -1830,7 +1832,7 @@ foreach ($stage in $requestedStages) {
         }
         'LiveModel' {
             Invoke-Stage -Name 'LiveModel' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentLiveModelLoopScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentLiveModelLoopScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Live model Campaign loop failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1838,7 +1840,7 @@ foreach ($stage in $requestedStages) {
         }
         'LiveModelArrival' {
             Invoke-Stage -Name 'LiveModelArrival' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentLiveModelLoopScript -ArrivalLoop 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentLiveModelLoopScript -ArrivalLoop 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Live-model Native arrival loop failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1846,7 +1848,7 @@ foreach ($stage in $requestedStages) {
         }
         'LiveModelRecruitment' {
             Invoke-Stage -Name 'LiveModelRecruitment' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentLiveModelLoopScript -RecruitmentLoop 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentLiveModelLoopScript -RecruitmentLoop 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Live-model Native volunteer recruitment loop failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1854,7 +1856,7 @@ foreach ($stage in $requestedStages) {
         }
         'LiveModelSafePassageRecruitment' {
             Invoke-Stage -Name 'LiveModelSafePassageRecruitment' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentLiveModelLoopScript -RecruitmentLoop -RoadsideBanditNegotiationLoop 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentLiveModelLoopScript -RecruitmentLoop -RoadsideBanditNegotiationLoop 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Live-model roadside Safe Passage recruitment loop failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1862,7 +1864,7 @@ foreach ($stage in $requestedStages) {
         }
         'CheckpointPersistence' {
             Invoke-Stage -Name 'CheckpointPersistence' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentCheckpointPersistenceScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentCheckpointPersistenceScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native Campaign checkpoint persistence test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1870,7 +1872,7 @@ foreach ($stage in $requestedStages) {
         }
         'LiveModelResume' {
             Invoke-Stage -Name 'LiveModelResume' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentLiveModelResumeScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentLiveModelResumeScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Live-model Native Campaign checkpoint resume failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1878,7 +1880,7 @@ foreach ($stage in $requestedStages) {
         }
         'LiveModelRuntimeResume' {
             Invoke-Stage -Name 'LiveModelRuntimeResume' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentLiveModelResumeScript -RuntimeOnlyResume 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentLiveModelResumeScript -RuntimeOnlyResume 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Live-model in-process runtime restart failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1886,7 +1888,7 @@ foreach ($stage in $requestedStages) {
         }
         'LiveModelActionRecovery' {
             Invoke-Stage -Name 'LiveModelActionRecovery' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentLiveModelResumeScript -CrashAfterRecruit 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentLiveModelResumeScript -CrashAfterRecruit 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Live-model post-action checkpoint recovery failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1894,7 +1896,7 @@ foreach ($stage in $requestedStages) {
         }
         'CheckpointValidation' {
             Invoke-Stage -Name 'CheckpointValidation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentCheckpointValidationScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentCheckpointValidationScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Invalid Campaign checkpoint safety test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1902,7 +1904,7 @@ foreach ($stage in $requestedStages) {
         }
         'RecruitmentBaseline' {
             Invoke-Stage -Name 'RecruitmentBaseline' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentEvaluationRecruitmentBaselineScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentEvaluationRecruitmentBaselineScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native recruitment evaluation baseline failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1910,7 +1912,7 @@ foreach ($stage in $requestedStages) {
         }
         'MultiDaySupplyBaseline' {
             Invoke-Stage -Name 'MultiDaySupplyBaseline' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $multiDaySupplyBaselineScript -Repetitions $SupplyBaselineRepetitions -ProvisionAmount $SupplyBaselineProvisionAmount 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $multiDaySupplyBaselineScript -Repetitions $SupplyBaselineRepetitions -ProvisionAmount $SupplyBaselineProvisionAmount 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Multi-day Native supply baseline failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1918,7 +1920,7 @@ foreach ($stage in $requestedStages) {
         }
         'LiveModelRecruitmentEvaluation' {
             Invoke-Stage -Name 'LiveModelRecruitmentEvaluation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentEvaluationLiveModelRecruitmentScript 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentEvaluationLiveModelRecruitmentScript 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Repeated real-model recruitment evaluation failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1926,7 +1928,7 @@ foreach ($stage in $requestedStages) {
         }
         'LiveModelSupplyEvaluation' {
             Invoke-Stage -Name 'LiveModelSupplyEvaluation' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentEvaluationLiveModelSupplyScript -Runs $SupplyModelRuns 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentEvaluationLiveModelSupplyScript -Runs $SupplyModelRuns 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Repeated real-model multi-day supply evaluation failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1934,7 +1936,7 @@ foreach ($stage in $requestedStages) {
         }
         'TimeControlLoop' {
             Invoke-Stage -Name 'TimeControlLoop' -Action {
-                $testOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $agentLoopScript -TimeControlOnly 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File $agentLoopScript -TimeControlOnly 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "Native time-control decision loop test failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
@@ -1943,7 +1945,7 @@ foreach ($stage in $requestedStages) {
         'BattleMissionFormationProbe' {
             Invoke-Stage -Name 'BattleMissionFormationProbe' -Action {
                 $childOutputPath = Join-Path $harnessTempDirectory 'BattleMissionFormationProbeChild.log'
-                $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $battleMissionFormationProbeScript -SourceSaveName $BattleSimulationSourceSaveName -TimeoutSeconds 300 2>&1 | Out-String
+                $childOutput = & $HarnessPowerShell -NoProfile -File $battleMissionFormationProbeScript -SourceSaveName $BattleSimulationSourceSaveName -TimeoutSeconds 300 2>&1 | Out-String
                 $childOutput | Set-Content -LiteralPath $childOutputPath -Encoding UTF8
                 if ($LASTEXITCODE -ne 0) { throw "Native Battle Mission formation probe failed with exit code $LASTEXITCODE. Child output: $childOutput" }
                 $childOutput
@@ -1952,7 +1954,7 @@ foreach ($stage in $requestedStages) {
         'BattleMissionInputIsolationProbe' {
             Invoke-Stage -Name 'BattleMissionInputIsolationProbe' -Action {
                 $childOutputPath = Join-Path $harnessTempDirectory 'BattleMissionInputIsolationProbeChild.log'
-                $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $battleMissionFormationProbeScript -SourceSaveName $BattleSimulationSourceSaveName -TimeoutSeconds 300 -ProbeDesktopInputIsolationOnly 2>&1 | Out-String
+                $childOutput = & $HarnessPowerShell -NoProfile -File $battleMissionFormationProbeScript -SourceSaveName $BattleSimulationSourceSaveName -TimeoutSeconds 300 -ProbeDesktopInputIsolationOnly 2>&1 | Out-String
                 $childOutput | Set-Content -LiteralPath $childOutputPath -Encoding UTF8
                 if ($LASTEXITCODE -ne 0) { throw "Native Battle Mission desktop-input isolation probe failed with exit code $LASTEXITCODE. Child output: $childOutput" }
                 $childOutput
@@ -1961,7 +1963,7 @@ foreach ($stage in $requestedStages) {
         'BattleMissionControllerProbe' {
             Invoke-Stage -Name 'BattleMissionControllerProbe' -Action {
                 $childOutputPath = Join-Path $harnessTempDirectory 'BattleMissionControllerProbeChild.log'
-                $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $battleMissionFormationProbeScript -SourceSaveName $BattleSimulationSourceSaveName -TimeoutSeconds 300 -ProbeMainAgentAiController 2>&1 | Out-String
+                $childOutput = & $HarnessPowerShell -NoProfile -File $battleMissionFormationProbeScript -SourceSaveName $BattleSimulationSourceSaveName -TimeoutSeconds 300 -ProbeMainAgentAiController 2>&1 | Out-String
                 $childOutput | Set-Content -LiteralPath $childOutputPath -Encoding UTF8
                 if ($LASTEXITCODE -ne 0) { throw "Native MainAgent AI-controller probe failed with exit code $LASTEXITCODE.`nChild output: $childOutput" }
                 $childOutput
@@ -1970,7 +1972,7 @@ foreach ($stage in $requestedStages) {
         'BattleMissionRtsCameraProbe' {
             Invoke-Stage -Name 'BattleMissionRtsCameraProbe' -Action {
                 $childOutputPath = Join-Path $harnessTempDirectory 'BattleMissionRtsCameraProbeChild.log'
-                $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $battleMissionFormationProbeScript -SourceSaveName $BattleSimulationSourceSaveName -TimeoutSeconds 300 -ProbeMainAgentAiController -ProbeMainAgentRtsCameraBehavior 2>&1 | Out-String
+                $childOutput = & $HarnessPowerShell -NoProfile -File $battleMissionFormationProbeScript -SourceSaveName $BattleSimulationSourceSaveName -TimeoutSeconds 300 -ProbeMainAgentAiController -ProbeMainAgentRtsCameraBehavior 2>&1 | Out-String
                 $childOutput | Set-Content -LiteralPath $childOutputPath -Encoding UTF8
                 if ($LASTEXITCODE -ne 0) { throw "Native RTSCamera-pattern MainAgent AI probe failed with exit code $LASTEXITCODE.`nChild output: $childOutput" }
                 $childOutput
@@ -1979,7 +1981,7 @@ foreach ($stage in $requestedStages) {
         'BattleMissionMovementInputProbe' {
             Invoke-Stage -Name 'BattleMissionMovementInputProbe' -Action {
                 $childOutputPath = Join-Path $harnessTempDirectory 'BattleMissionMovementInputProbeChild.log'
-                $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $battleMissionFormationProbeScript -SourceSaveName $BattleSimulationSourceSaveName -TimeoutSeconds 300 -ProbeBattleMovementInput 2>&1 | Out-String
+                $childOutput = & $HarnessPowerShell -NoProfile -File $battleMissionFormationProbeScript -SourceSaveName $BattleSimulationSourceSaveName -TimeoutSeconds 300 -ProbeBattleMovementInput 2>&1 | Out-String
                 $childOutput | Set-Content -LiteralPath $childOutputPath -Encoding UTF8
                 if ($LASTEXITCODE -ne 0) { throw "Native Battle movement input probe failed with exit code $LASTEXITCODE.`nChild output: $childOutput" }
                 $childOutput
@@ -1988,7 +1990,7 @@ foreach ($stage in $requestedStages) {
         'BattleMissionAgentNavigatorProbe' {
             Invoke-Stage -Name 'BattleMissionAgentNavigatorProbe' -Action {
                 $childOutputPath = Join-Path $harnessTempDirectory 'BattleMissionAgentNavigatorProbeChild.log'
-                $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $battleMissionFormationProbeScript -SourceSaveName $BattleSimulationSourceSaveName -TimeoutSeconds 300 -ProbeBattleAgentNavigator 2>&1 | Out-String
+                $childOutput = & $HarnessPowerShell -NoProfile -File $battleMissionFormationProbeScript -SourceSaveName $BattleSimulationSourceSaveName -TimeoutSeconds 300 -ProbeBattleAgentNavigator 2>&1 | Out-String
                 $childOutput | Set-Content -LiteralPath $childOutputPath -Encoding UTF8
                 if ($LASTEXITCODE -ne 0) { throw "Native Battle AgentNavigator probe failed with exit code $LASTEXITCODE.`nChild output: $childOutput" }
                 $childOutput
@@ -1997,7 +1999,7 @@ foreach ($stage in $requestedStages) {
         'BattleMissionNativeAiHandoffProbe' {
             Invoke-Stage -Name 'BattleMissionNativeAiHandoffProbe' -Action {
                 $childOutputPath = Join-Path $harnessTempDirectory 'BattleMissionNativeAiHandoffProbeChild.log'
-                $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $battleMissionFormationProbeScript -SourceSaveName $BattleSimulationSourceSaveName -TimeoutSeconds 300 -ProbeMainAgentNativeAiHandoff 2>&1 | Out-String
+                $childOutput = & $HarnessPowerShell -NoProfile -File $battleMissionFormationProbeScript -SourceSaveName $BattleSimulationSourceSaveName -TimeoutSeconds 300 -ProbeMainAgentNativeAiHandoff 2>&1 | Out-String
                 $childOutput | Set-Content -LiteralPath $childOutputPath -Encoding UTF8
                 if ($LASTEXITCODE -ne 0) { throw "Native Battle MainAgent AI handoff probe failed with exit code $LASTEXITCODE.`nChild output: $childOutput" }
                 $childOutput
@@ -2011,7 +2013,7 @@ foreach ($stage in $requestedStages) {
                 $childOutputPath = Join-Path $harnessTempDirectory 'BattleMissionHostNativeAiAutopilotProbeChild.log'
                 $battleProbeArguments = @('-SourceSaveName', $BattleSimulationSourceSaveName, '-TimeoutSeconds', '900', '-ProbeAgentHostNativeAiAutopilot')
                 if ($BattleMissionSoloMainHeroProbe) { $battleProbeArguments += '-SoloMainHero' }
-                $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $battleMissionFormationProbeScript @battleProbeArguments 2>&1 | Out-String
+                $childOutput = & $HarnessPowerShell -NoProfile -File $battleMissionFormationProbeScript @battleProbeArguments 2>&1 | Out-String
                 $childOutput | Set-Content -LiteralPath $childOutputPath -Encoding UTF8
                 if ($LASTEXITCODE -ne 0) { throw "Production AgentHost Native battle autopilot probe failed with exit code $LASTEXITCODE.`nChild output: $childOutput" }
                 $childOutput
@@ -2020,7 +2022,7 @@ foreach ($stage in $requestedStages) {
         'BattleFixture' {
             Invoke-Stage -Name 'BattleFixture' -Action {
                 $childOutputPath = Join-Path $harnessTempDirectory 'BattleFixtureChild.log'
-                $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $battleFixtureScript -LoadSaveName $BattleSimulationSourceSaveName 2>&1 | Out-String
+                $childOutput = & $HarnessPowerShell -NoProfile -File $battleFixtureScript -LoadSaveName $BattleSimulationSourceSaveName 2>&1 | Out-String
                 $childOutput | Set-Content -LiteralPath $childOutputPath -Encoding UTF8
                 if ($LASTEXITCODE -ne 0) { throw "Battle fixture test failed with exit code $LASTEXITCODE. Child output: $childOutput" }
                 $childOutput
@@ -2029,7 +2031,7 @@ foreach ($stage in $requestedStages) {
         'PostBattle' {
             Invoke-Stage -Name 'PostBattle' -Action {
                 $childOutputPath = Join-Path $harnessTempDirectory 'PostBattleChild.log'
-                $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $battleFixtureScript -LoadSaveName $BattleSimulationSourceSaveName -Scenario PostBattle -CaptureFrames 2>&1 | Out-String
+                $childOutput = & $HarnessPowerShell -NoProfile -File $battleFixtureScript -LoadSaveName $BattleSimulationSourceSaveName -Scenario PostBattle -CaptureFrames 2>&1 | Out-String
                 $childOutput | Set-Content -LiteralPath $childOutputPath -Encoding UTF8
                 if ($LASTEXITCODE -ne 0) { throw "Postbattle test failed with exit code $LASTEXITCODE. Child output: $childOutput" }
                 $childOutput
@@ -2037,7 +2039,7 @@ foreach ($stage in $requestedStages) {
         }
         'VisualCapture' {
             Invoke-Stage -Name 'VisualCapture' -Action {
-                & powershell -NoProfile -ExecutionPolicy Bypass -File $visualCaptureScript
+                & $HarnessPowerShell -NoProfile -File $visualCaptureScript
                 if ($LASTEXITCODE -ne 0) { throw "Window-only visual capture failed with exit code $LASTEXITCODE." }
             }
         }
@@ -2058,7 +2060,7 @@ $summary = [ordered]@{
 }
 
 try {
-    $retentionOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $testResultsRetentionScript -EvidenceRoot $evidenceRoot -CurrentRunId $runId -Apply 2>&1 | Out-String
+    $retentionOutput = & $HarnessPowerShell -NoProfile -File $testResultsRetentionScript -EvidenceRoot $evidenceRoot -CurrentRunId $runId -Apply 2>&1 | Out-String
     $retentionExitCode = $LASTEXITCODE
     if ($retentionExitCode -ne 0) { throw "Prune-TestResults exited ${retentionExitCode}: $retentionOutput" }
     $retention = $retentionOutput | ConvertFrom-Json

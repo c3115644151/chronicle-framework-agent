@@ -1,7 +1,9 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param([int]$TimeoutSeconds = 20)
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $providerPath = Join-Path $PSScriptRoot 'Agent-OpenAICompatibleProvider.ps1'
 $budgetPolicyPath = Join-Path $PSScriptRoot 'Agent-ProviderBudget.ps1'
 $decisionLoopPolicyPath = Join-Path $PSScriptRoot 'Agent-DecisionLoopPolicy.ps1'
@@ -28,8 +30,8 @@ if (-not (Test-Path -LiteralPath $providerPath)) { throw "OpenAI-compatible prov
 
 function Start-ProviderProcess($InputJson) {
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $startInfo.FileName = (Get-Command powershell.exe -ErrorAction Stop).Source
-    $startInfo.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$providerPath`""
+    $startInfo.FileName = $HarnessPowerShell
+    $startInfo.Arguments = "-NoProfile -File `"$providerPath`""
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardInput = $true
@@ -62,6 +64,9 @@ try {
     $env:CHRONICLE_LLM_MAX_TOKENS = '512'
     $env:CHRONICLE_LLM_MAX_TOKEN_PARAMETER = 'max_completion_tokens'
     $env:CHRONICLE_LLM_THINKING_MODE = 'disabled'
+    # Ambient user-scope overrides would change the request shape this contract asserts, so test the documented defaults.
+    Remove-Item Env:CHRONICLE_LLM_TEMPERATURE -ErrorAction SilentlyContinue
+    Remove-Item Env:CHRONICLE_LLM_REASONING_EFFORT -ErrorAction SilentlyContinue
 
     $goal = 'Inspect currently visible safe settlements and then stop with the Native receipt.'
     $expectedHeroName = -join @([char]0x6CD5,[char]0x5C14,[char]0x585E,[char]0x6C83)
@@ -743,7 +748,7 @@ try {
     if (-not $process.WaitForExit(10000)) { try { $process.Kill() } catch { }; throw 'Provider did not stop after its bounded connection retry.' }
     $connectionStdout = $connectionProvider.StdoutTask.Result.Trim()
     $connectionStderr = $connectionProvider.StderrTask.Result.Trim()
-    $connectionFailureClassified = ($process.ExitCode -ne 0 -and $connectionStdout -notmatch '"action"' -and $connectionStderr -match 'WebException \(status=(ConnectFailure|NameResolutionFailure|ProxyNameResolutionFailure); host=127\.0\.0\.1; attempt=2/2;' -and $connectionStderr -notmatch [regex]::Escape($harnessSecret))
+    $connectionFailureClassified = ($process.ExitCode -ne 0 -and $connectionStdout -notmatch '"action"' -and $connectionStderr -match 'connection failure \(status=(ConnectFailure|NameResolutionFailure|ProxyNameResolutionFailure); host=127\.0\.0\.1; attempt=2/2;' -and $connectionStderr -notmatch [regex]::Escape($harnessSecret))
 
     $failureStep = 'disable-retries-for-priced-provider'
     $paidRetryRequest = $request | ConvertTo-Json -Depth 12 | ConvertFrom-Json

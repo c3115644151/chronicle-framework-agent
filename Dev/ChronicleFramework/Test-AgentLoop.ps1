@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
@@ -6,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $loop = Join-Path $PSScriptRoot 'Agent-DecisionLoop.ps1'
 $provider = Join-Path $PSScriptRoot 'Test-AgentLoopProvider.ps1'
@@ -200,7 +202,7 @@ $underfundedProviderBudget.maxEstimatedCost = 0.001
 $underfundedProviderBudgetBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($underfundedProviderBudget | ConvertTo-Json -Depth 8 -Compress)))
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $cli $Action @Arguments -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Agent CLI '$Action' failed: $output" }
     try { return $output | ConvertFrom-Json }
     catch { throw "Agent CLI '$Action' returned invalid JSON: $output" }
@@ -216,7 +218,7 @@ try {
     $env:CHRONICLE_TEST_PROVIDER_MODE = 'unicodeRoundTrip'
     $env:CHRONICLE_TEST_EXPECTED_HERO_NAME = $expectedHeroName
     try {
-        $unicodeOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-unicode-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $unicodeOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-unicode-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
         $unicodeExitCode = $LASTEXITCODE
     }
     finally {
@@ -233,7 +235,7 @@ try {
         $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
         $env:CHRONICLE_TEST_PROVIDER_MODE = 'timeModes'
         try {
-            $timeModesOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -MaxDecisions 3 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-time-modes-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+            $timeModesOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -MaxDecisions 3 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-time-modes-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
             $timeModesExitCode = $LASTEXITCODE
         }
         finally {
@@ -277,7 +279,7 @@ try {
         $env:CHRONICLE_TEST_PROVIDER_MODE = 'waitingResume'
         try {
             $waitingStart = Invoke-AgentCli 'load' @('-SaveName', $LoadSaveName)
-            $waitingResumeOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-waiting-resume-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+            $waitingResumeOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-waiting-resume-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
             $waitingResumeExitCode = $LASTEXITCODE
         }
         finally {
@@ -329,7 +331,7 @@ try {
     $env:CHRONICLE_TEST_PROVIDER_MODE = 'decisionContext'
     $env:CHRONICLE_TEST_EXPECTED_GOAL = $contextGoal
     try {
-        $contextOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal $contextGoal -AllowedActionNames 'mapSettlementTargets,move' -MaxDecisions 3 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-context-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $contextOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -Goal $contextGoal -AllowedActionNames 'mapSettlementTargets,move' -MaxDecisions 3 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-context-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
         $contextExitCode = $LASTEXITCODE
     }
     finally {
@@ -359,7 +361,7 @@ try {
     $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
     $env:CHRONICLE_TEST_PROVIDER_MODE = 'goalVerifierRejectedDone'
     try {
-        $goalVerifierOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Harness verifier test: do not stop before the deliberately unreachable Native daily tick condition.' -CompletionContractBase64 $impossibleCompletionContractBase64 -ProviderBudgetBase64 $checkpointProviderBudgetBase64 -AllowedActionNames 'state' -PersistCheckpoint -MaxDecisions 3 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-goal-verifier-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $goalVerifierOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -Goal 'Harness verifier test: do not stop before the deliberately unreachable Native daily tick condition.' -CompletionContractBase64 $impossibleCompletionContractBase64 -ProviderBudgetBase64 $checkpointProviderBudgetBase64 -AllowedActionNames 'state' -PersistCheckpoint -MaxDecisions 3 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-goal-verifier-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
         $goalVerifierExitCode = $LASTEXITCODE
     }
     finally {
@@ -407,7 +409,7 @@ try {
         $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
         $env:CHRONICLE_TEST_PROVIDER_MODE = 'goalVerifierResume'
         try {
-            $goalResumeOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -ProviderBudgetBase64 $checkpointProviderBudgetBase64 -ResumeCheckpoint -AllowedActionNames 'state' -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-goal-verifier-resume-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+            $goalResumeOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -ProviderBudgetBase64 $checkpointProviderBudgetBase64 -ResumeCheckpoint -AllowedActionNames 'state' -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-goal-verifier-resume-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
             $goalResumeExitCode = $LASTEXITCODE
         }
         finally {
@@ -427,7 +429,7 @@ try {
         $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
         $env:CHRONICLE_TEST_PROVIDER_MODE = 'checkpointMustNotCall'
         try {
-            $budgetExhaustedResumeOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -ProviderBudgetBase64 $checkpointProviderBudgetBase64 -ResumeCheckpoint -AllowedActionNames 'state' -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-goal-verifier-budget-exhausted-resume-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+            $budgetExhaustedResumeOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -ProviderBudgetBase64 $checkpointProviderBudgetBase64 -ResumeCheckpoint -AllowedActionNames 'state' -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-goal-verifier-budget-exhausted-resume-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
             $budgetExhaustedResumeExitCode = $LASTEXITCODE
         }
         finally {
@@ -466,7 +468,7 @@ try {
     $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
     $env:CHRONICLE_TEST_PROVIDER_MODE = 'checkpointMustNotCall'
     try {
-        $budgetOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Cost guard test: stop before making a model call when its maximum reserved cost exceeds the task budget.' -AllowedActionNames 'state' -ProviderBudgetBase64 $underfundedProviderBudgetBase64 -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-budget-preflight-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $budgetOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -Goal 'Cost guard test: stop before making a model call when its maximum reserved cost exceeds the task budget.' -AllowedActionNames 'state' -ProviderBudgetBase64 $underfundedProviderBudgetBase64 -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-budget-preflight-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
         $budgetExitCode = $LASTEXITCODE
     }
     finally {
@@ -490,7 +492,7 @@ try {
     $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
     $env:CHRONICLE_TEST_PROVIDER_MODE = 'reportedUsageOverBudget'
     try {
-        $usageBudgetOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Harness test: the provider receipt exceeds the input token reservation and must be suppressed before any Native action.' -AllowedActionNames 'state' -ProviderBudgetBase64 $usageBudgetBase64 -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-budget-usage-overrun-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $usageBudgetOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -Goal 'Harness test: the provider receipt exceeds the input token reservation and must be suppressed before any Native action.' -AllowedActionNames 'state' -ProviderBudgetBase64 $usageBudgetBase64 -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-budget-usage-overrun-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
         $usageBudgetExitCode = $LASTEXITCODE
     }
     finally {
@@ -515,7 +517,7 @@ try {
     $priorInvalidDecision = $env:CHRONICLE_TEST_INVALID_DECISION
     $env:CHRONICLE_TEST_INVALID_DECISION = 'recruit'
     try {
-        $scopedInvalidOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -AllowedActionNames 'mapSettlementTargets,move' -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-scoped-invalid-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $scopedInvalidOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -AllowedActionNames 'mapSettlementTargets,move' -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-scoped-invalid-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
         $scopedInvalidExitCode = $LASTEXITCODE
     }
     finally {
@@ -528,7 +530,7 @@ try {
     $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
     $env:CHRONICLE_TEST_PROVIDER_MODE = 'dynamicAvailabilityRecovery'
     try {
-        $recoveryOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Recover from unavailable volunteer recruitment by selecting a currently available map action.' -AllowedActionNames 'mapSettlementTargets,move,recruitOptions,recruit' -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-action-recovery-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $recoveryOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -Goal 'Recover from unavailable volunteer recruitment by selecting a currently available map action.' -AllowedActionNames 'mapSettlementTargets,move,recruitOptions,recruit' -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-action-recovery-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
         $recoveryExitCode = $LASTEXITCODE
     }
     finally {
@@ -551,7 +553,7 @@ try {
     $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
     $env:CHRONICLE_TEST_PROVIDER_MODE = 'invalidArgumentRecovery'
     try {
-        $invalidArgumentRecoveryOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Recover from a rejected extra argument without sending a Native action, then read state.' -AllowedActionNames 'state' -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-invalid-argument-recovery-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $invalidArgumentRecoveryOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -Goal 'Recover from a rejected extra argument without sending a Native action, then read state.' -AllowedActionNames 'state' -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-invalid-argument-recovery-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
         $invalidArgumentRecoveryExitCode = $LASTEXITCODE
     }
     finally {
@@ -579,7 +581,7 @@ try {
     $env:CHRONICLE_TEST_PROVIDER_MODE = 'unavailableDialogueRecovery'
     try {
         $ErrorActionPreference = 'Continue'
-        $dialogueRecoveryOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Reject a dialogue selection when no Native conversation options are currently visible, then continue with a current map observation.' -AllowedActionNames 'dialogueSelect,mapSettlementTargets,move' -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-dialogue-recovery-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $dialogueRecoveryOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -Goal 'Reject a dialogue selection when no Native conversation options are currently visible, then continue with a current map observation.' -AllowedActionNames 'dialogueSelect,mapSettlementTargets,move' -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-dialogue-recovery-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
         $dialogueRecoveryExitCode = $LASTEXITCODE
     }
     finally {
@@ -613,7 +615,7 @@ try {
     $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
     $env:CHRONICLE_TEST_PROVIDER_MODE = 'staleOfferRecovery'
     try {
-        $staleOfferOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Reach a safe visible settlement, recover from a stale volunteer offer without Native mutation, refresh offers, and recruit one affordable volunteer within capacity.' -AllowedActionNames 'mapSettlementTargets,move,recruitOptions,recruit' -MaxDecisions 24 -MaxElapsedSeconds 600 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-stale-offer-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $staleOfferOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -Goal 'Reach a safe visible settlement, recover from a stale volunteer offer without Native mutation, refresh offers, and recruit one affordable volunteer within capacity.' -AllowedActionNames 'mapSettlementTargets,move,recruitOptions,recruit' -MaxDecisions 24 -MaxElapsedSeconds 600 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-stale-offer-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
         $staleOfferExitCode = $LASTEXITCODE
     }
     finally {
@@ -655,7 +657,7 @@ try {
     $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
     $env:CHRONICLE_TEST_PROVIDER_MODE = 'unlistedResumeRecovery'
     try {
-        $resumeRecoveryOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal 'Move to one currently visible safe Settlement. Native map movement advances time naturally; never issue resume/pause/fastForward. If the provider proposes an unavailable clock action, recover with a fresh observation and observeAgain.' -AllowedActionNames 'mapSettlementTargets,move' -MaxDecisions 12 -MaxElapsedSeconds 600 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-unlisted-resume-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $resumeRecoveryOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -Goal 'Move to one currently visible safe Settlement. Native map movement advances time naturally; never issue resume/pause/fastForward. If the provider proposes an unavailable clock action, recover with a fresh observation and observeAgain.' -AllowedActionNames 'mapSettlementTargets,move' -MaxDecisions 12 -MaxElapsedSeconds 600 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-unlisted-resume-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
         $resumeRecoveryExitCode = $LASTEXITCODE
     }
     finally {
@@ -702,7 +704,7 @@ try {
     $priorInvalidDecision = $env:CHRONICLE_TEST_INVALID_DECISION
     $env:CHRONICLE_TEST_INVALID_DECISION = '1'
     try {
-        $invalidOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-invalid-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $invalidOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-invalid-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
         $invalidExitCode = $LASTEXITCODE
     }
     finally {
@@ -714,7 +716,7 @@ try {
     $priorInvalidDecision = $env:CHRONICLE_TEST_INVALID_DECISION
     $env:CHRONICLE_TEST_INVALID_DECISION = 'advance'
     try {
-        $harnessClockOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-clock-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $harnessClockOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-clock-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
         $harnessClockExitCode = $LASTEXITCODE
     }
     finally {
@@ -726,7 +728,7 @@ try {
     $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
     $env:CHRONICLE_TEST_PROVIDER_MODE = 'observationLoop'
     try {
-        $loopOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $loopOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
         $loopExitCode = $LASTEXITCODE
     }
     finally {
@@ -746,7 +748,7 @@ try {
     $priorProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
     $env:CHRONICLE_TEST_PROVIDER_MODE = 'doneSignal'
     try {
-        $doneOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -MaxDecisions 4 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-done-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
+        $doneOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -MaxDecisions 4 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('loop-done-' + [Guid]::NewGuid().ToString('N')) 2>&1 | Out-String
         $doneExitCode = $LASTEXITCODE
     }
     finally {

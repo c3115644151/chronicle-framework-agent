@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
@@ -7,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $decisionLoop = Join-Path $PSScriptRoot 'Agent-DecisionLoop.ps1'
 $provider = Join-Path $PSScriptRoot 'Test-AgentVillageToolsProvider.ps1'
@@ -29,7 +31,7 @@ $start = $null
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @(), [int]$CommandTimeout = 0) {
     $effectiveTimeout = if ($CommandTimeout -gt 0) { $CommandTimeout } else { $TimeoutSeconds }
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $effectiveTimeout -AsJson 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $cli $Action @Arguments -TimeoutSeconds $effectiveTimeout -AsJson 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Agent CLI '$Action' failed: $output" }
     try { return $output | ConvertFrom-Json }
     catch { throw "Agent CLI '$Action' returned invalid JSON: $output" }
@@ -54,7 +56,7 @@ try {
     Capture-EngineFrame $beforeFrame 'capture-before'
 
     $env:CHRONICLE_VILLAGE_TOOLS_SCENARIO_TARGET_ID = $ScenarioSettlementId
-    $providerRun = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $decisionLoop -DecisionProviderPath $provider -MaxDecisions $MaxDecisions -TimeoutSeconds $TimeoutSeconds -CommandPrefix "$commandPrefix-agent" 2>&1 | Out-String
+    $providerRun = & $HarnessPowerShell -NoProfile -File $decisionLoop -DecisionProviderPath $provider -MaxDecisions $MaxDecisions -TimeoutSeconds $TimeoutSeconds -CommandPrefix "$commandPrefix-agent" 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
         if ($tempPath -and (Test-Path -LiteralPath $tempPath -PathType Container)) {
             $failureTracePath = Join-Path $tempPath 'VillageToolsDecisionFailure.json'

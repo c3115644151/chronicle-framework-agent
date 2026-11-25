@@ -1,7 +1,9 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param([string]$CleanupGeneratedRoot)
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 
 function Remove-IsolatedTree([string]$Path, [string]$AllowedParent, [string]$ExpectedLeafPattern) {
     if (-not (Test-Path -LiteralPath $Path)) { return }
@@ -176,8 +178,8 @@ function Invoke-PackagedSmoke([string]$IsolatedRoot) {
     [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_MODE','smoke','Process')
     try {
         $startInfo = [Diagnostics.ProcessStartInfo]::new()
-        $startInfo.FileName = (Get-Command powershell -ErrorAction Stop).Source
-        $startInfo.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $smokeScript + '" -SkipBuild -TimeoutSeconds 45 -StabilitySeconds 8'
+        $startInfo.FileName = $HarnessPowerShell
+        $startInfo.Arguments = '-NoProfile -File "' + $smokeScript + '" -SkipBuild -TimeoutSeconds 45 -StabilitySeconds 8'
         $startInfo.WorkingDirectory = $harnessRoot
         $startInfo.UseShellExecute = $false
         $startInfo.CreateNoWindow = $true
@@ -256,7 +258,7 @@ try {
     New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
     $runDirectoryCreated = $true
     foreach ($output in @($firstOutput,$secondOutput)) {
-        $resultText = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $harnessRoot 'New-ChronicleReleasePackage.ps1') -GameRoot $gameRoot -OutputRoot $output 2>&1 | Out-String
+        $resultText = & $HarnessPowerShell -NoProfile -File (Join-Path $harnessRoot 'New-ChronicleReleasePackage.ps1') -GameRoot $gameRoot -OutputRoot $output 2>&1 | Out-String
         $generatorExitCode = $LASTEXITCODE
         if ($generatorExitCode -ne 0) { throw "Release package generator failed (exit=$generatorExitCode). $resultText" }
         $receipt = $resultText.Trim() | ConvertFrom-Json

@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [ValidateRange(90,300)][int]$TimeoutSeconds = 180,
@@ -7,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $harnessTemp = $env:CHRONICLE_HARNESS_TEMP
 if ([string]::IsNullOrWhiteSpace($harnessTemp) -or -not (Test-Path -LiteralPath $harnessTemp -PathType Container)) {
     throw 'Agent Host lifecycle evaluation requires an active Harness evidence directory.'
@@ -111,7 +113,7 @@ $hostExitObservedEvents = @()
 $watch = [Diagnostics.Stopwatch]::StartNew()
 
 function Invoke-LifecycleCli([string]$Action, [string[]]$Arguments = @()) {
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $cli $Action @Arguments -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Lifecycle CLI '$Action' failed: $output" }
     try { return $output | ConvertFrom-Json }
     catch { throw "Lifecycle CLI '$Action' returned invalid JSON." }
@@ -403,7 +405,7 @@ finally {
                 if ($remainingHost -and [IO.Path]::GetFullPath($remainingHost.Path) -ceq [IO.Path]::GetFullPath($hostPath)) {
                     Stop-Process -Id $hostProcessId -Force
                 }
-                $cleanup = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli recoverTestConfig -AsJson 2>&1 | Out-String
+                $cleanup = & $HarnessPowerShell -NoProfile -File $cli recoverTestConfig -AsJson 2>&1 | Out-String
                 if ($LASTEXITCODE -ne 0) { throw 'Parent-exit fixture session/config cleanup failed.' }
                 $stopReceipt = $cleanup | ConvertFrom-Json
                 if (-not $stopReceipt.restored) { throw 'Parent-exit fixture did not restore its original engine configuration.' }
@@ -412,7 +414,7 @@ finally {
                 Remove-Item -LiteralPath $sessionPath -Force
             }
             else {
-                $cleanup = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli stop -TimeoutSeconds 5 -AsJson 2>&1 | Out-String
+                $cleanup = & $HarnessPowerShell -NoProfile -File $cli stop -TimeoutSeconds 5 -AsJson 2>&1 | Out-String
                 if ($LASTEXITCODE -ne 0) { throw 'Lifecycle fixture cleanup failed.' }
                 $stopReceipt = $cleanup | ConvertFrom-Json
             }

@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param()
 
@@ -24,6 +25,38 @@ function Get-OptionalNonNegativeInt($Source, [string]$Name) {
     $parsed = 0
     if (-not [int]::TryParse([string]$value, [ref]$parsed) -or $parsed -lt 0) { return $null }
     return $parsed
+}
+
+function Get-PreResponseConnectionFailureStatus($ErrorRecord) {
+    # Map a provider failure onto a transport-neutral status name so retry decisions and error text do not depend on
+    # the .NET version's exception type (Windows PowerShell raises WebException, pwsh 7 raises HttpRequestException).
+    if (-not $ErrorRecord -or -not $ErrorRecord.Exception) { return $null }
+    $current = $ErrorRecord.Exception
+    $depth = 0
+    while ($current -and $depth -lt 8) {
+        $typeName = $current.GetType().Name
+        if ($typeName -ceq 'WebException') {
+            $webStatusName = [string]$current.Status
+            if ($webStatusName -in @('ConnectFailure','NameResolutionFailure','ProxyNameResolutionFailure','Timeout')) { return $webStatusName }
+        }
+        if ($typeName -ceq 'SocketException') {
+            $socketError = 0
+            if ([int]::TryParse([string][int]$current.SocketErrorCode, [ref]$socketError) -and $socketError -gt 0) {
+                if ($socketError -eq 11001) { return 'NameResolutionFailure' }
+                if ($socketError -in @(10060,10061,10064,10065,10051)) { return 'ConnectFailure' }
+            }
+        }
+        $requestErrorProperty = @($current.PSObject.Properties | Where-Object { $_.Name -ceq 'HttpRequestError' } | Select-Object -First 1)
+        if ($requestErrorProperty.Count -eq 1) {
+            $requestErrorName = [string]$requestErrorProperty[0].Value
+            if ($requestErrorName -ceq 'NameResolutionError') { return 'NameResolutionFailure' }
+            if ($requestErrorName -ceq 'ConnectionError') { return 'ConnectFailure' }
+        }
+        if ($typeName -in @('TaskCanceledException','OperationCanceledException','TimeoutException')) { return 'Timeout' }
+        $current = $current.InnerException
+        $depth++
+    }
+    return $null
 }
 
 try {
@@ -260,38 +293,50 @@ Return one action as `{"action":"listed action","arguments":{},"rationale":"brie
             break
         }
         catch {
-        $webStatus = if ($_.Exception -is [System.Net.WebException]) { $_.Exception.Status } else { $null }
-        $preResponseConnectionFailure = ($webStatus -in @([System.Net.WebExceptionStatus]::ConnectFailure,[System.Net.WebExceptionStatus]::NameResolutionFailure,[System.Net.WebExceptionStatus]::ProxyNameResolutionFailure))
+        $failureStatus = Get-PreResponseConnectionFailureStatus $_
+        $preResponseConnectionFailure = ($failureStatus -in @('ConnectFailure','NameResolutionFailure','ProxyNameResolutionFailure'))
         if ($attempt -lt $maxAttempts -and $preResponseConnectionFailure) {
             Start-Sleep -Milliseconds 400
             continue
         }
         $status = $null
         try { $status = [int]$_.Exception.Response.StatusCode } catch { }
+        if (-not $status) {
+            # pwsh 7 surfaces the response code on HttpRequestException instead of through a WebResponse.
+            try {
+                if ($_.Exception.GetType().Name -ceq 'HttpRequestException' -and $_.Exception.StatusCode) { $status = [int]$_.Exception.StatusCode }
+            }
+            catch { }
+        }
         if ($status) {
             $safeDetail = $null
             if ($endpointUri.IsLoopback) {
-                try {
-                    $safeDetail = [string]$_.ErrorDetails.Message
-                    $errorStream = $_.Exception.Response.GetResponseStream()
-                    if ([string]::IsNullOrWhiteSpace($safeDetail) -and $errorStream) {
-                        $errorReader = New-Object System.IO.StreamReader($errorStream)
-                        $safeDetail = $errorReader.ReadToEnd().Trim()
-                        $errorReader.Dispose()
+                try { $safeDetail = [string]$_.ErrorDetails.Message } catch { $safeDetail = $null }
+                if ([string]::IsNullOrWhiteSpace($safeDetail)) {
+                    try {
+                        $errorStream = $_.Exception.Response.GetResponseStream()
+                        if ($errorStream) {
+                            $errorReader = New-Object System.IO.StreamReader($errorStream)
+                            $safeDetail = $errorReader.ReadToEnd().Trim()
+                            $errorReader.Dispose()
+                        }
                     }
+                    catch { $safeDetail = $null }
+                }
+                if ([string]::IsNullOrWhiteSpace($safeDetail)) { $safeDetail = $null }
+                else {
                     if (-not [string]::IsNullOrWhiteSpace($apiKey)) { $safeDetail = $safeDetail.Replace($apiKey, '[redacted]') }
                     if ($safeDetail.Length -gt 240) { $safeDetail = $safeDetail.Substring(0,240) }
                 }
-                catch { $safeDetail = $null }
             }
             if ($safeDetail) { throw "Model provider HTTP request failed with status $status on loopback endpoint: $safeDetail" }
             throw "Model provider HTTP request failed with status $status."
         }
-        if ($_.Exception -is [System.Net.WebException] -and $_.Exception.Status -eq [System.Net.WebExceptionStatus]::Timeout)
+        if ($failureStatus -ceq 'Timeout')
             { throw "Model provider request timed out after $timeoutSeconds seconds." }
-        if ($_.Exception -is [System.Net.WebException]) {
+        if ($failureStatus) {
             $innerType = if ($_.Exception.InnerException) { $_.Exception.InnerException.GetType().Name } else { 'none' }
-            throw "Model provider request failed with WebException (status=$($_.Exception.Status); host=$($endpointUri.Host); attempt=$attempt/$maxAttempts; inner=$innerType)."
+            throw "Model provider request failed with connection failure (status=$failureStatus; host=$($endpointUri.Host); attempt=$attempt/$maxAttempts; inner=$innerType)."
         }
         throw "Model provider request failed with $($_.Exception.GetType().Name) (attempt=$attempt/$maxAttempts; host=$($endpointUri.Host))."
         }

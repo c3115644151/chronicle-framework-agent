@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 $ErrorActionPreference = 'Stop'
 $requestReader = New-Object System.IO.StreamReader -ArgumentList @([Console]::OpenStandardInput(), [System.Text.Encoding]::UTF8, $true)
 try { $requestJson = $requestReader.ReadToEnd() }

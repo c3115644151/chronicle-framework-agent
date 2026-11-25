@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 $script:ChronicleTestWindowWidth = 840
 $script:ChronicleTestWindowHeight = 472
 $script:ChronicleTestWindowX = 0

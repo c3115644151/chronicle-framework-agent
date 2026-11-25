@@ -1,4 +1,5 @@
-﻿[CmdletBinding()]
+#Requires -Version 7.0
+[CmdletBinding()]
 param(
     [Parameter(Position = 0, Mandatory = $true)]
     [ValidateSet('start','load','recoverTestConfig','state','agentCheckpointGet','agentCheckpointSet','harnessSeedAgentCheckpointFailure','closeEscapeMenu','respondInquiry','respondMultiSelectionInquiry','mapSettlementTargets','mapNotifications','quickInformation','sceneNotification','continueSceneNotification','incidentSelect','submitStoryModeClanName','bannerEditorDone','mapPartyTargets','mapPartyComposition','mapPartyBehavior','partyUpgradeOptions','upgradeTroop','prisonerRecruitmentOptions','recruitPrisoner','characterDevelopment','spendSkillFocus','questDetails','partyRoster','partyRoles','inventoryOpen','heroEquipmentOptions','equipHeroItem','unequipHeroItem','inventoryConfirm','inventoryCancel','inventoryCancelChanges','tradeConfirm','tradeCancel','tradeCancelChanges','barterOptions','barterEdit','barterReset','barterAutoBalance','barterOffer','barterCancel','setPartyRole','unassignPartyRole','captureFrame','harnessMissionDiagnostics','harnessMapDiagnostics','harnessOpenMapEscapeMenu','harnessOpenNativeInquiry','harnessOpenRecruitmentInquiry','harnessNativeInquiryDiagnostics','harnessPrepareAlleyLeaderFixture','harnessAlleyLeaderDiagnostics','harnessPrepareAlleyRosterFixture','harnessSeedAlleyAttackFixture','harnessSeedPersuasionFixture','harnessCurrentConversationAnswers','harnessAlleyRosterDiagnostics','harnessPlayerSkillsDiagnostics','harnessCharacterDevelopmentDiagnostics','harnessQuestDetailsDiagnostics','harnessQuestDeadlinePrivacyDiagnostics','harnessPartyRosterDiagnostics','harnessMapPartyDiagnostics','harnessMapPartyCompositionDiagnostics','harnessCreateMapArmyFixture','harnessPrepareMovingArmyEncounter','harnessArmyEncounterDiagnostics','harnessPrepareSiegeJoinFixture','harnessSiegeJoinDiagnostics','harnessSeedMapPartyIssueMarker','harnessPrepareSafePassageFixture','harnessSeedCaptivityObservationFixture','harnessSeedPrisonCaptivityFixture','harnessSwitchCaptivityObservationMenu','harnessCaptivityDiagnostics','harnessPrepareSurrenderCondition','harnessSeedTryGetAwayFixture','harnessTryGetAwayDiagnostics','harnessSeedNpcBattleForPlayerJoin','harnessPrepareArmyMemberForCurrentJoinEncounter','harnessJoinEncounterDiagnostics','harnessPreparePursuitVisibilityFixture','harnessSeedPartyUpgradeFixture','harnessSeedPrisonerRecruitmentFixture','harnessSeedRecruitmentCapacityFixture','harnessPrepareCompanionHiringFixture','harnessCompanionHiringDiagnostics','harnessSeedPartyRoleFixture','harnessPartyRoleDiagnostics','harnessSeedEquipmentModifierFixture','harnessClearEquipmentModifierFixture','harnessSeedTradeRumorFixture','harnessTradeRumorTooltipDiagnostics','harnessSeedMapNotificationFixture','harnessSeedMapIncidentFixture','harnessSeedQuickInformationFixture','harnessSeedSceneNotificationFixture','harnessOpenInventoryState','harnessCloseInventoryState','harnessInventoryStateDiagnostics','talkToSettlementHero','visitSettlementHero','inventoryTakeAll','inventoryDone','seedVisualLoot','advance','pause','resume','fastForward','move','moveToPoint','battleMissionStatus','harnessCloseMissionOrderMenu','harnessPrepareCameraMotionBaseline','missionFinishDeployment','missionAutoDeploy','missionDelegateTroops','missionAutopilotMainAgent','harnessMainAgentAiControllerProbe','harnessMainAgentNativeAiHandoffProbe','harnessRestoreMainAgentAiControllerProbe','harnessMainAgentAiSurrogateControllerProbe','harnessRefreshMainAgentFormationAiProbe','harnessNotifyMainAgentAiMovementOrderProbe','harnessMainAgentAiRtsCameraProbe','harnessBattleMovementInputProbe','harnessBattleAgentNavigatorProbe','missionSceneAgents','missionInput','missionNavigateToAgent','missionLeave','tournamentJoin','tournamentSkipRound','tournamentSkipAllRounds','tournamentWatchRound','tournamentLeave','missionInteract','missionCancelNavigation','missionAimAt','pursue','follow','hold','menu','menuSelect','persuasionDetails','dialogueSelect','dialogueContinue','battlePause','battleSkip','battleFinish','battleRetreat','missionRetreat','partyTakeAll','partyLootTransferOne','sellPrisonerOne','partyScreenCancel','partyScreenDone','questTroopTransfer','questTroopScreenDone','questTroopScreenCancel','alleyRosterTransfer','alleyRosterCancel','rest','recruitOptions','recruit','recruitAll','foodOptions','tradeOptions','tradeRumors','trade','provision','save','stop')]
@@ -183,6 +184,14 @@ function Get-DescendantProcessIds([int]$ParentId) {
     }
 }
 
+function Test-ProcessIdListed([int]$ProcessId) {
+    if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) { return $true }
+    # .NET reports a signaled process as gone by identifier while the entry can
+    # still appear in the process list, so a name-based liveness check made right
+    # after a stop would still see it. Treat any listing as alive until it reaps.
+    return [bool]@(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Id -eq $ProcessId })
+}
+
 function Stop-AgentProcessTree([int]$RootProcessId) {
     $descendants = @(Get-DescendantProcessIds -ParentId $RootProcessId)
     foreach ($id in @($descendants + $RootProcessId) | Where-Object { $_ } | Select-Object -Unique) {
@@ -190,7 +199,7 @@ function Stop-AgentProcessTree([int]$RootProcessId) {
     }
     $deadline = (Get-Date).AddSeconds(15)
     do {
-        $remaining = @($descendants + $RootProcessId | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+        $remaining = @($descendants + $RootProcessId | Where-Object { Test-ProcessIdListed -ProcessId $_ })
         if ($remaining.Count -eq 0) { return $true }
         Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $deadline)
@@ -203,7 +212,7 @@ function Stop-ChronicleStartupProcessTree([int]$RootProcessId, [int[]]$KnownProc
     foreach ($id in $targets) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }
     $deadline = (Get-Date).AddSeconds(15)
     do {
-        $remaining = @($targets | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+        $remaining = @($targets | Where-Object { Test-ProcessIdListed -ProcessId $_ })
         if ($remaining.Count -eq 0) { return $true }
         Start-Sleep -Milliseconds 250
     } while ((Get-Date) -lt $deadline)
@@ -219,7 +228,7 @@ function Invoke-ProtocolCommand([string]$ProtocolAction, [hashtable]$Arguments =
     $expectedStatus = if ($ReturnWhenAccepted) { 'accepted' } else { 'completed' }
     $responsePath = Join-Path $responseRoot "$id.$expectedStatus.json"
     $temporaryPath = "$commandPath.$id.tmp"
-    $payload | ConvertTo-Json -Compress | Set-Content -Path $temporaryPath -Encoding UTF8
+    $payload | ConvertTo-Json -Compress -Depth 12 | Set-Content -Path $temporaryPath -Encoding UTF8
     Move-Item -LiteralPath $temporaryPath -Destination $commandPath -Force
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
@@ -564,7 +573,7 @@ if ($Action -in @('start','load')) {
     }
     $performanceProfile = [ordered]@{ maxFramerate = 30; width = [int]$windowLayout.Width; height = [int]$windowLayout.Height; configRestoredAfterStop = [bool]$engineConfigBackupCreated }
     $session = [ordered]@{ protocolVersion = 1; processId = $readyProcessId; rootProcessId = $process.Id; observedProcessIds = @($observedStartupProcessIds); saveName = $SaveName; moduleSet = $modules; startedUtc = (Get-Date).ToUniversalTime().ToString('O'); windowLayout = $windowLayout; performanceProfile = $performanceProfile; steamClient = $steamStatus; engineConfigBackupPath = if ($engineConfigBackupCreated) { $engineConfigBackupPath } else { $null }; startupDialogReceipts = @($startupDialogReceipts) }
-    $session | ConvertTo-Json | Set-Content -Path $sessionPath -Encoding UTF8
+    $session | ConvertTo-Json -Depth 12 | Set-Content -Path $sessionPath -Encoding UTF8
     Write-ChronicleStartupTrace -Path $startupProgressPath -Stage 'session-written' -RootProcessId $process.Id -ProcessId $readyProcessId -Details @{ sessionPath = $sessionPath }
     $configuredTimeout = $TimeoutSeconds
     $TimeoutSeconds = [Math]::Min(30, $TimeoutSeconds)

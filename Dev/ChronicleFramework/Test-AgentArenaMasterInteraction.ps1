@@ -1,4 +1,5 @@
-﻿[CmdletBinding()]
+﻿#Requires -Version 7.0
+[CmdletBinding()]
 param(
     [string]$LoadSaveName = 'ChronicleEycDev-20261030-tyal-arena-master',
     [ValidateRange(10, 120)][int]$AgentSpawnTimeoutSeconds = 30,
@@ -7,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $documentsRoot = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)) 'Mount and Blade II Bannerlord'
 $savePath = Join-Path (Join-Path $documentsRoot 'Game Saves') "$LoadSaveName.sav"
@@ -32,12 +34,12 @@ function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @(), [int]$Comm
     $attemptId = [Guid]::NewGuid().ToString('N')
     $stdoutPath = Join-Path $cliOutputDirectory "AgentCli-$Action-$attemptId.stdout.log"
     $stderrPath = Join-Path $cliOutputDirectory "AgentCli-$Action-$attemptId.stderr.log"
-    $quotedArgs = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$cli,$Action) + $Arguments + @('-TimeoutSeconds',[string]$effectiveTimeout,'-AsJson')
+    $quotedArgs = @('-NoProfile','-File',$cli,$Action) + $Arguments + @('-TimeoutSeconds',[string]$effectiveTimeout,'-AsJson')
     $argumentLine = ($quotedArgs | ForEach-Object {
         $value = [string]$_
         if ($value -match '\s|"') { '"' + $value.Replace('"','\"') + '"' } else { $value }
     }) -join ' '
-    $cliProcess = Start-Process -FilePath 'powershell.exe' -ArgumentList $argumentLine -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru
+    $cliProcess = Start-Process -FilePath $HarnessPowerShell -ArgumentList $argumentLine -WindowStyle Hidden -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru
     $wallTimeoutSeconds = [Math]::Max(300, $effectiveTimeout + 45)
     if (-not $cliProcess.WaitForExit($wallTimeoutSeconds * 1000)) {
         Stop-Process -Id $cliProcess.Id -Force -ErrorAction SilentlyContinue

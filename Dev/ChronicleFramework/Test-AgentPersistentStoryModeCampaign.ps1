@@ -1,4 +1,5 @@
-﻿[CmdletBinding()]
+﻿#Requires -Version 7.0
+[CmdletBinding()]
 param(
     [ValidateRange(60,86400)][int]$HostMaxElapsedSeconds = 86400,
     [ValidateRange(1,160)][int]$MaxProviderDecisionsPerContinuation = 1,
@@ -11,6 +12,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $harnessRoot = $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP) -or -not (Test-Path -LiteralPath $env:CHRONICLE_HARNESS_TEMP -PathType Container)) {
     throw 'Persistent StoryMode evaluation requires an active Run-Harness evidence directory.'
@@ -364,7 +366,7 @@ function Invoke-JsonChild([string]$ScriptPath, [string[]]$Arguments, [string]$Ch
     }
     $childResultPath = Join-Path $env:CHRONICLE_HARNESS_TEMP $ChildResultFileName
     Remove-Item -LiteralPath $childResultPath -Force -ErrorAction SilentlyContinue
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ScriptPath @Arguments 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $ScriptPath @Arguments 2>&1 | Out-String
     $exitCode = $LASTEXITCODE
     try { $evidence = Get-Content -LiteralPath $childResultPath -Raw -Encoding UTF8 | ConvertFrom-Json }
     catch { throw "Persistent EYC child script returned no structured evidence (exit=$exitCode)." }

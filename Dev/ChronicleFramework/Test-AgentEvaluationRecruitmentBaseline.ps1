@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
@@ -6,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 if ($Runs -lt 3 -or $Runs -gt 10) { throw 'Baseline runs must be between 3 and 10.' }
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $loop = Join-Path $PSScriptRoot 'Agent-DecisionLoop.ps1'
@@ -21,7 +23,7 @@ $results = [System.Collections.Generic.List[object]]::new()
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @(), [int]$CommandTimeout = 0) {
     $effectiveTimeout = if ($CommandTimeout -gt 0) { $CommandTimeout } else { $TimeoutSeconds }
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $effectiveTimeout -AsJson 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $cli $Action @Arguments -TimeoutSeconds $effectiveTimeout -AsJson 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Agent CLI '$Action' failed: $output" }
     try { return $output | ConvertFrom-Json }
     catch { throw "Agent CLI '$Action' returned invalid JSON: $output" }
@@ -37,7 +39,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         $started = $true
         $before = Invoke-AgentCli 'state' @('-CommandId', "$runPrefix-before")
         if ($before.state.context.gameState -ne 'MapState' -or $before.state.context.encounterActive -or $before.state.location.currentSettlementId) { throw "Baseline run $runIndex did not start in the expected unobstructed world-map state." }
-        $loopOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal $goal -AllowedActionNames 'mapSettlementTargets,move,resume,recruitOptions,recruit' -MaxDecisions 20 -MaxElapsedSeconds 480 -TimeoutSeconds $TimeoutSeconds -CommandPrefix $runPrefix 2>&1 | Out-String
+        $loopOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -Goal $goal -AllowedActionNames 'mapSettlementTargets,move,resume,recruitOptions,recruit' -MaxDecisions 20 -MaxElapsedSeconds 480 -TimeoutSeconds $TimeoutSeconds -CommandPrefix $runPrefix 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) { throw "Deterministic baseline decision loop failed on run ${runIndex}: $loopOutput" }
         $loopTrace = $loopOutput | ConvertFrom-Json
         if (-not $loopTrace.termination.completedByProvider -or -not $loopTrace.trace[-1].decision.done) { throw "Baseline run $runIndex exhausted its decision budget instead of reaching its completion receipt." }

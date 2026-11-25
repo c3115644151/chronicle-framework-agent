@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 function ConvertTo-ChronicleReceiptValue {
     param([AllowNull()][object]$Value, [int]$Depth = 0)
     if ($Depth -gt 12) { throw 'Receipt data exceeds its supported nesting depth.' }

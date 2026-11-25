@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [ValidateRange(1,5)][int]$Runs = 5,
@@ -7,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $freshCampaignScript = Join-Path $PSScriptRoot 'Test-AgentFreshCampaign.ps1'
 $supplyBaselineScript = Join-Path $PSScriptRoot 'Test-AgentMultiDaySupplyBaseline.ps1'
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
@@ -53,7 +55,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $runStartedUtc = [DateTime]::UtcNow.ToString('O')
 
     try {
-        $freshOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $freshCampaignScript -ValidateRecruitmentProgression -RetainDisposableSave -TimeoutSeconds $TimeoutSeconds 2>&1 | Out-String
+        $freshOutput = & $HarnessPowerShell -NoProfile -File $freshCampaignScript -ValidateRecruitmentProgression -RetainDisposableSave -TimeoutSeconds $TimeoutSeconds 2>&1 | Out-String
         try { $freshResult = $freshOutput | ConvertFrom-Json }
         catch { throw "Fresh Campaign fixture preparation returned no structured result (exit=$LASTEXITCODE): $freshOutput" }
         $disposableSaveName = [string]$freshResult.DisposableSaveName
@@ -67,7 +69,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { throw 'Fresh Campaign fixture creation left an Agent session before Native branch tests.' }
 
         $phase = 'paired-native-supply-baseline'
-        $baselineOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $supplyBaselineScript -LoadSaveName $disposableSaveName -TimeoutSeconds $TimeoutSeconds -RestDays 3 -TargetPartyMembers 6 -ProvisionAmount 1 -RestWallClockLimitSeconds $RestWallClockLimitSeconds -Repetitions 1 -CaptureVisualEvidence -FrameRate $FrameRate 2>&1 | Out-String
+        $baselineOutput = & $HarnessPowerShell -NoProfile -File $supplyBaselineScript -LoadSaveName $disposableSaveName -TimeoutSeconds $TimeoutSeconds -RestDays 3 -TargetPartyMembers 6 -ProvisionAmount 1 -RestWallClockLimitSeconds $RestWallClockLimitSeconds -Repetitions 1 -CaptureVisualEvidence -FrameRate $FrameRate 2>&1 | Out-String
         try { $baselineResult = $baselineOutput | ConvertFrom-Json }
         catch { throw "Paired Native supply baseline returned no structured result (exit=$LASTEXITCODE): $baselineOutput" }
         if ($LASTEXITCODE -ne 0 -or -not [bool]$baselineResult.Passed) { throw "Paired Native supply branches did not meet their source-backed baseline checks: $($baselineResult.Failure)" }

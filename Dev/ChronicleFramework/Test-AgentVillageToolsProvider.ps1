@@ -1,4 +1,5 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿#Requires -Version 7.0
+$ErrorActionPreference = 'Stop'
 $reader = New-Object System.IO.StreamReader -ArgumentList @([Console]::OpenStandardInput(), [System.Text.Encoding]::UTF8, $true)
 try { $inputJson = $reader.ReadToEnd() }
 finally { $reader.Dispose() }

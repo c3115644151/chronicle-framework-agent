@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [ValidateRange(1,3)][int]$Runs = 3,
@@ -6,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $liveTest = Join-Path $PSScriptRoot 'Test-AgentLiveModelLoop.ps1'
 $outerTemp = $env:CHRONICLE_HARNESS_TEMP
 if (-not $outerTemp -or -not (Test-Path -LiteralPath $outerTemp -PathType Container)) { throw 'Agent Host supply evaluation requires the active Run-Harness TestResults temp directory.' }
@@ -47,7 +49,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         $profilePath = Join-Path $mcmFixtureDirectory 'ChronicleAgentSettings.json'
         [ordered]@{ OllamaBaseUrl = $providerBaseUrl; ModelId = $providerModelId } | ConvertTo-Json -Compress | Set-Content -LiteralPath $profilePath -Encoding UTF8
         $env:CHRONICLE_AGENT_PROFILE_PATH = $profilePath
-        $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -SupplyManagementLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
+        $childOutput = & $HarnessPowerShell -NoProfile -File $liveTest -SupplyManagementLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
         $childExitCode = $LASTEXITCODE
         $resultPath = Join-Path $runTemp 'LiveModelLoopResult.json'
         if (Test-Path -LiteralPath $resultPath -PathType Leaf) {

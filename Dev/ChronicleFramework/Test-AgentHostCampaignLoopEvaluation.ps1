@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [ValidateRange(1,3)][int]$Runs = 1,
@@ -15,6 +16,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 . (Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1')
 if (@($VillageToolsQuest, $EstablishYourClanGoalPlanner, $EstablishYourClanAutonomyLoop, $CaptivityRecoveryFromExisting, $EstablishClanGoldSaleFromStoryMode, $BattleSimulationLoop, $BattleAndCaptivityLoop | Where-Object { $_ }).Count -gt 1) { throw 'Select only one Agent Host Campaign evaluation slice per run.' }
 $liveTest = Join-Path $PSScriptRoot 'Test-AgentLiveModelLoop.ps1'
@@ -106,10 +108,10 @@ if (Test-Path -LiteralPath $sessionPath -PathType Leaf) {
 
     $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
     $stopOutput = ''
-    try { $stopOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli stop -AsJson 2>&1 | Out-String }
+    try { $stopOutput = & $HarnessPowerShell -NoProfile -File $cli stop -AsJson 2>&1 | Out-String }
     catch { $stopOutput = $_.Exception.Message }
     if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { throw 'The stale CLI session did not clear through the Agent CLI recovery path.' }
-    $cleanupOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -CleanupPreparedSaveName $staleSaveName 2>&1 | Out-String
+    $cleanupOutput = & $HarnessPowerShell -NoProfile -File $PSCommandPath -CleanupPreparedSaveName $staleSaveName 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "The stale ChronicleW7K fixture save did not clear through bounded cleanup: $cleanupOutput" }
     if ($outerTemp -and (Test-Path -LiteralPath $outerTemp -PathType Container)) {
         [ordered]@{
@@ -172,7 +174,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         [ordered]@{ ProviderBaseUrl = $providerBaseUrl; ModelId = $providerModelId; OutputMode = 'auto' } | ConvertTo-Json -Compress | Set-Content -LiteralPath $profilePath -Encoding UTF8
         $env:CHRONICLE_AGENT_PROFILE_PATH = $profilePath
         if ($VillageToolsQuest) {
-            $prepOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Test-AgentVillageToolsQuestFixturePreparation.ps1') -SourceSaveName 'AgentBridgeLifecycle' -MaxVillages 4 2>&1 | Out-String
+            $prepOutput = & $HarnessPowerShell -NoProfile -File (Join-Path $PSScriptRoot 'Test-AgentVillageToolsQuestFixturePreparation.ps1') -SourceSaveName 'AgentBridgeLifecycle' -MaxVillages 4 2>&1 | Out-String
             $prepExitCode = $LASTEXITCODE
             $prepResultPath = Join-Path $runTemp 'VillageToolsQuestFixturePreparation.json'
             if (Test-Path -LiteralPath $prepResultPath -PathType Leaf) {
@@ -183,7 +185,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
                 throw $failure
             }
             $preparedSaveName = [string]$fixturePreparation.PreparedSaveName
-            $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -LoadSaveName $preparedSaveName -VillageToolsQuestLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
+            $childOutput = & $HarnessPowerShell -NoProfile -File $liveTest -LoadSaveName $preparedSaveName -VillageToolsQuestLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
         }
         elseif ($EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop -or $CaptivityRecoveryFromExisting -or $EstablishClanGoldSaleFromStoryMode) {
             . (Join-Path $PSScriptRoot 'Agent-SaveMetadata.ps1')
@@ -207,7 +209,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             [ordered]@{ SourceSaveName = $PlannerSourceSaveName; SourceSha256Before = $plannerSourceHashBefore; SourceModuleIds = $plannerSourceModules; RuntimeLoadModuleAugment = @('ChronicleFramework'); DisposableCloneName = $plannerFixtureSaveName; DisposableClonePrefix = $plannerFixturePrefix; DisposableCloneSha256 = $plannerCloneHash; IsByteForByteCopy = $true; NoGameWorldStateInjected = $true } |
                 ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $runTemp 'EstablishYourClanSourceFixture.json') -Encoding UTF8
             $storyModeLoopSwitch = if ($EstablishClanGoldSaleFromStoryMode) { '-EstablishClanGoldSaleLoop' } elseif ($CaptivityRecoveryFromExisting) { '-CaptivityRecoveryLoop' } elseif ($EstablishYourClanAutonomyLoop) { '-EstablishYourClanAutonomyLoop' } else { '-EstablishYourClanGoalPlanner' }
-            $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -LoadSaveName $plannerFixtureSaveName $storyModeLoopSwitch -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
+            $childOutput = & $HarnessPowerShell -NoProfile -File $liveTest -LoadSaveName $plannerFixtureSaveName $storyModeLoopSwitch -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
         }
         elseif ($BattleSimulationLoop -or $BattleAndCaptivityLoop) {
             $battleSaveRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
@@ -232,10 +234,10 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             [ordered]@{ SourceSaveName = $BattleSourceSaveName; SourceSha256Before = $battleSourceHashBefore; SourceModuleIds = $sourceModules; DisposableCloneName = $battleFixtureSaveName; DisposableCloneSha256 = $battleCloneHash; IsByteForByteCopy = $true; NoGameWorldStateInjected = $true } |
                 ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $runTemp 'BattleSourceFixture.json') -Encoding UTF8
             $battleLoopSwitch = if ($BattleAndCaptivityLoop) { '-BattleAndCaptivityLoop' } else { '-BattleSimulationLoop' }
-            $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -LoadSaveName $battleFixtureSaveName $battleLoopSwitch -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
+            $childOutput = & $HarnessPowerShell -NoProfile -File $liveTest -LoadSaveName $battleFixtureSaveName $battleLoopSwitch -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
         }
         else {
-            $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -ArrivalLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
+            $childOutput = & $HarnessPowerShell -NoProfile -File $liveTest -ArrivalLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
         }
         $childExitCode = $LASTEXITCODE
         $resultPath = Join-Path $runTemp 'LiveModelLoopResult.json'

@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [ValidateRange(1,10)][int]$MaxAttempts = 10,
@@ -7,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $freshCampaignScript = Join-Path $PSScriptRoot 'Test-AgentFreshCampaign.ps1'
 $supplyBaselineScript = Join-Path $PSScriptRoot 'Test-AgentMultiDaySupplyBaseline.ps1'
 $videoLibrary = Join-Path $PSScriptRoot 'HarnessVideoCapture.ps1'
@@ -30,7 +32,7 @@ function Get-SaveManifestHash {
 }
 
 function Invoke-FallbackCli([string]$Action, [string[]]$Arguments = @(), [int]$CommandTimeout = 15) {
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $CommandTimeout -AsJson 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $cli $Action @Arguments -TimeoutSeconds $CommandTimeout -AsJson 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Native fallback CLI '$Action' failed: $output" }
     try { return $output | ConvertFrom-Json }
     catch { throw "Native fallback CLI '$Action' returned invalid JSON: $output" }
@@ -143,7 +145,7 @@ function Invoke-FreshCampaignFallbackAttempt([int]$AttemptNumber) {
     try {
         if (Get-Process -Name Bannerlord* -ErrorAction SilentlyContinue) { throw 'A Bannerlord client was present before this fallback attempt.' }
         if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { throw 'A pre-existing Agent session must not be overwritten.' }
-        $freshOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $freshCampaignScript -ValidateRecruitmentProgression -RetainDisposableSave -TimeoutSeconds $TimeoutSeconds 2>&1 | Out-String
+        $freshOutput = & $HarnessPowerShell -NoProfile -File $freshCampaignScript -ValidateRecruitmentProgression -RetainDisposableSave -TimeoutSeconds $TimeoutSeconds 2>&1 | Out-String
         try { $freshResult = $freshOutput | ConvertFrom-Json } catch { throw "Fresh Campaign child returned no structured receipt: $freshOutput" }
         $saveName = [string]$freshResult.DisposableSaveName
         if ($freshResult.DisposableSavePath) { $savePath = [IO.Path]::GetFullPath([string]$freshResult.DisposableSavePath) }
@@ -334,7 +336,7 @@ function Invoke-FreshCampaignFallbackAttempt([int]$AttemptNumber) {
         if (-not $processStopped) { throw 'Bannerlord process remained after fallback preparation.' }
 
         if ($fallbackTriggered -and $partyPrepared -and $marketTownReached) {
-            $baselineOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $supplyBaselineScript -LoadSaveName $saveName -TimeoutSeconds $TimeoutSeconds -RestDays 3 -TargetPartyMembers 6 -ProvisionAmount 1 -RestWallClockLimitSeconds $RestWallClockLimitSeconds -Repetitions 1 -CaptureVisualEvidence -StartAtCurrentTown -FrameRate $FrameRate 2>&1 | Out-String
+            $baselineOutput = & $HarnessPowerShell -NoProfile -File $supplyBaselineScript -LoadSaveName $saveName -TimeoutSeconds $TimeoutSeconds -RestDays 3 -TargetPartyMembers 6 -ProvisionAmount 1 -RestWallClockLimitSeconds $RestWallClockLimitSeconds -Repetitions 1 -CaptureVisualEvidence -StartAtCurrentTown -FrameRate $FrameRate 2>&1 | Out-String
             try { $baselineResult = $baselineOutput | ConvertFrom-Json } catch { throw "Prepared fallback Campaign returned no paired Native supply result: $baselineOutput" }
             $baselineExitCode = $LASTEXITCODE
             if ($baselineExitCode -ne 0 -or -not [bool]$baselineResult.Passed) { throw "Prepared fallback Campaign could not complete its paired Native supply comparison: $($baselineResult.Failure)" }

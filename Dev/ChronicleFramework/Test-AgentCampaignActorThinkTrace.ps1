@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [ValidateRange(0.1,1.0)][double]$AdvanceDays = 0.25,
@@ -6,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $harnessTemp = $env:CHRONICLE_HARNESS_TEMP
 if ([string]::IsNullOrWhiteSpace($harnessTemp) -or -not (Test-Path -LiteralPath $harnessTemp -PathType Container)) {
     throw 'Campaign Actor Think trace requires an active Harness evidence directory.'
@@ -32,7 +34,7 @@ foreach ($name in @('CHRONICLE_HARNESS_MODE','CHRONICLE_HARNESS_ACTOR_TRACE_ID',
 }
 
 function Invoke-ActorTraceCli([string]$Action, [string[]]$Arguments = @(), [int]$CommandTimeout = 30) {
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $CommandTimeout -AsJson 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $cli $Action @Arguments -TimeoutSeconds $CommandTimeout -AsJson 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Actor trace CLI '$Action' failed: $output" }
     try { return $output | ConvertFrom-Json }
     catch { throw "Actor trace CLI '$Action' returned invalid JSON." }

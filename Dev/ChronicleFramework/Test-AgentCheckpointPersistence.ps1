@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
@@ -5,6 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $previousHarnessMode = $env:CHRONICLE_HARNESS_MODE
 $env:CHRONICLE_HARNESS_MODE = 'visual-capture'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
@@ -27,7 +29,7 @@ $runDirectory = Split-Path -Parent $env:CHRONICLE_HARNESS_TEMP
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @(), [int]$CommandTimeout = 0) {
     $effectiveTimeout = if ($CommandTimeout -gt 0) { $CommandTimeout } else { $TimeoutSeconds }
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $effectiveTimeout -AsJson 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $cli $Action @Arguments -TimeoutSeconds $effectiveTimeout -AsJson 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Agent CLI '$Action' failed: $output" }
     try { return $output | ConvertFrom-Json }
     catch { throw "Agent CLI '$Action' returned invalid JSON: $output" }

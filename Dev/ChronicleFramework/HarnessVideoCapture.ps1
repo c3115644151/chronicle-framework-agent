@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 function Test-ChronicleFragmentedCaptureResilience {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$EvidencePath)

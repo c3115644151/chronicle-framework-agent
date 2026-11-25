@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [ValidateRange(1,3)][int]$Runs = 3,
@@ -6,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $liveTest = Join-Path $PSScriptRoot 'Test-AgentLiveModelLoop.ps1'
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
 $outerTemp = $env:CHRONICLE_HARNESS_TEMP
@@ -28,7 +30,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $failure = $null
     $exitCode = 1
     try {
-        $null = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $liveTest -SupplyManagementLoop -FrameRate $FrameRate 2>&1 | Out-String
+        $null = & $HarnessPowerShell -NoProfile -File $liveTest -SupplyManagementLoop -FrameRate $FrameRate 2>&1 | Out-String
         $exitCode = $LASTEXITCODE
         $resultPath = Join-Path $runTemp 'LiveModelLoopResult.json'
         if (Test-Path -LiteralPath $resultPath -PathType Leaf) { $liveResult = Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json }

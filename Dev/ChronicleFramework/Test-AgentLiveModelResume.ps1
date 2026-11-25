@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
@@ -8,6 +9,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $loop = Join-Path $PSScriptRoot 'Agent-DecisionLoop.ps1'
 $provider = Join-Path $PSScriptRoot 'Agent-OpenAICompatibleProvider.ps1'
@@ -80,7 +82,7 @@ $frameFailure = Join-Path $runDirectory 'LiveResume-failure.bmp'
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @(), [int]$CommandTimeout = 0) {
     $effectiveTimeout = if ($CommandTimeout -gt 0) { $CommandTimeout } else { $TimeoutSeconds }
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $effectiveTimeout -AsJson 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $cli $Action @Arguments -TimeoutSeconds $effectiveTimeout -AsJson 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Agent CLI '$Action' failed: $output" }
     try { return $output | ConvertFrom-Json }
     catch { throw "Agent CLI '$Action' returned invalid JSON: $output" }
@@ -123,7 +125,7 @@ try {
     Write-ResumeEvent $firstEvents 'capture-start' $firstCapture.StartedUtc 'capture' $baseline.state $baseline
 
     if ($CrashAfterRecruit) {
-        $firstOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal $goal -AllowedActionNames $allowedActions -PersistCheckpoint -HarnessCrashAfterAction recruit -MaxDecisions 24 -MaxElapsedSeconds 600 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ($prefix + '-initial') 2>&1 | Out-String
+        $firstOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -Goal $goal -AllowedActionNames $allowedActions -PersistCheckpoint -HarnessCrashAfterAction recruit -MaxDecisions 24 -MaxElapsedSeconds 600 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ($prefix + '-initial') 2>&1 | Out-String
         $firstCrashExitCode = $LASTEXITCODE
         if ($firstCrashExitCode -ne 93) { try { $firstLoopTrace = $firstOutput | ConvertFrom-Json } catch { }; throw "Harness did not stop the Agent runtime immediately after the Native recruit action; exit=$firstCrashExitCode output=$firstOutput" }
         $crashObservation = Invoke-AgentCli 'state' @('-CommandId', ($prefix + '-after-runtime-crash'))
@@ -145,7 +147,7 @@ try {
         Write-ResumeEvent $firstEvents 'runtime-terminated-after-native-recruit' ([DateTime]::UtcNow.ToString('O')) 'recruit' $crashObservation.state $null
     }
     else {
-        $firstOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -Goal $goal -AllowedActionNames $allowedActions -PersistCheckpoint -MaxDecisions 2 -MaxElapsedSeconds 240 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ($prefix + '-initial') 2>&1 | Out-String
+        $firstOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -Goal $goal -AllowedActionNames $allowedActions -PersistCheckpoint -MaxDecisions 2 -MaxElapsedSeconds 240 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ($prefix + '-initial') 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) { try { $firstLoopTrace = $firstOutput | ConvertFrom-Json } catch { }; throw "Initial model segment failed before checkpoint save: $firstOutput" }
         $firstLoopTrace = $firstOutput | ConvertFrom-Json
         $initialSteps = @($firstLoopTrace.trace)
@@ -204,7 +206,7 @@ try {
     $secondCapture = Start-ChronicleWindowVideoCapture -ProcessId ([int]$resumeStart.session.processId) -OutputPath $secondVideo -FrameRate $FrameRate
     Write-ResumeEvent $secondEvents 'capture-start-after-reload' $secondCapture.StartedUtc 'capture' $resumeBaseline.state $resumeBaseline
 
-    $resumeOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -AllowedActionNames $allowedActions -ResumeCheckpoint -MaxDecisions 24 -MaxElapsedSeconds 600 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ($prefix + '-resume') 2>&1 | Out-String
+    $resumeOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -AllowedActionNames $allowedActions -ResumeCheckpoint -MaxDecisions 24 -MaxElapsedSeconds 600 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ($prefix + '-resume') 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { try { $resumeLoopTrace = $resumeOutput | ConvertFrom-Json } catch { }; throw "Real-model checkpoint resume failed: $resumeOutput" }
     $resumeLoopTrace = $resumeOutput | ConvertFrom-Json
     $resumeSteps = @($resumeLoopTrace.trace)

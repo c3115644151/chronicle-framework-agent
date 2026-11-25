@@ -1,12 +1,14 @@
-﻿[CmdletBinding()]
+﻿#Requires -Version 7.0
+[CmdletBinding()]
 param()
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $harnessRoot = $PSScriptRoot
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { Split-Path -Parent (Split-Path -Parent $harnessRoot) }
-$contractVersion = '7.675'
+$contractVersion = '7.678'
 $openSpecHarnessPath = Join-Path $harnessRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -50,7 +52,9 @@ foreach ($scriptFile in $harnessPowerShellFiles) {
     $scriptBytes = [IO.File]::ReadAllBytes($scriptFile.FullName)
     $hasUtf8Bom = $scriptBytes.Length -ge 3 -and $scriptBytes[0] -eq 0xEF -and $scriptBytes[1] -eq 0xBB -and $scriptBytes[2] -eq 0xBF
     $hasNonAscii = @($scriptBytes | Where-Object { $_ -ge 0x80 }).Count -gt 0
-    if ($hasNonAscii -and -not $hasUtf8Bom) { throw "PowerShell 5.1 source has non-ASCII text without a UTF-8 BOM: $($scriptFile.Name). Keep script literals ASCII or add a BOM." }
+    if ($hasNonAscii -and -not $hasUtf8Bom) { throw "PowerShell harness source has non-ASCII text without a UTF-8 BOM: $($scriptFile.Name). Keep script literals ASCII or add a BOM." }
+    $scriptText = [Text.Encoding]::UTF8.GetString($scriptBytes).TrimStart([char]0xFEFF)
+    if ($scriptText -notmatch '(?m)^\s*#Requires\s+-Version\s+7\.0') { throw "Harness PowerShell script does not declare #Requires -Version 7.0: $($scriptFile.Name). The Harness runs on PowerShell 7 only." }
 }
 
 $harnessScript = Get-Content (Join-Path $harnessRoot 'Run-Harness.ps1') -Raw -Encoding UTF8
@@ -1834,7 +1838,7 @@ if ($startupEvidenceSource -notmatch 'function Ensure-ChronicleSteamClientReady'
 }
 if (-not (Test-ChronicleStartupDialogEvidenceSerialization)) { throw 'Startup dialog evidence retained a live UI Automation object instead of a serializable snapshot.' }
 if (-not (Test-ChronicleReceiptSerialization)) { throw 'Receipt normalization changed primitive/list data or retained PowerShell object metadata.' }
-$retentionSelfTestOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $testResultsRetentionScript -SelfTest 2>&1 | Out-String
+$retentionSelfTestOutput = & $HarnessPowerShell -NoProfile -File $testResultsRetentionScript -SelfTest 2>&1 | Out-String
 if ($LASTEXITCODE -ne 0 -or -not ($retentionSelfTestOutput | ConvertFrom-Json).Passed) { throw "TestResults retention safety regression failed: $retentionSelfTestOutput" }
 $retentionSource = Get-Content -LiteralPath $testResultsRetentionScript -Raw -Encoding UTF8
 $expectedTimestampFolderPattern = '$_.Name -match ''^\d{8}-\d{6}$'''
@@ -2642,7 +2646,7 @@ if ($harnessScript -notmatch "'PersistentEycCampaign' \{ @\('Preflight', 'Config
     $persistentEycCampaignSource -notmatch 'no verified Native checkpoint') {
     throw 'Persistent EYC Harness must seed from natural StoryMode, resume only a hash- and Campaign-ID-matched Native save, checkpoint from a stable map or verified non-sieged settlement menu, bound save retention and retain cumulative run-cost evidence.'
 }
-$persistentUsageSelfTestOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $harnessRoot 'Test-AgentPersistentStoryModeCampaign.ps1') -UsageSelfTest 2>&1 | Out-String
+$persistentUsageSelfTestOutput = & $HarnessPowerShell -NoProfile -File (Join-Path $harnessRoot 'Test-AgentPersistentStoryModeCampaign.ps1') -UsageSelfTest 2>&1 | Out-String
 $persistentUsageSelfTest = $null
 try { $persistentUsageSelfTest = $persistentUsageSelfTestOutput | ConvertFrom-Json } catch { }
 if ($LASTEXITCODE -ne 0 -or -not $persistentUsageSelfTest.passed -or
@@ -2769,7 +2773,7 @@ $movementTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentMovement.ps
 $holdTestSource = Get-Content (Join-Path $harnessRoot 'Test-AgentHold.ps1') -Raw -Encoding UTF8
 if ($decisionLoopSource -notmatch "moveToPoint = @\('X','Y','Surface'\)" -or $agentLoopProviderSource -notmatch "CHRONICLE_TEST_PROVIDER_MODE -eq 'point'" -or $agentLoopProviderSource -notmatch "action = 'moveToPoint'") { throw 'The Agent decision loop must permit a provider to request the free-point moveToPoint action; its movement result is covered by the dedicated movement phase.' }
 if ($decisionLoopSource -notmatch 'fastForward = @\(\)' -or $agentLoopProviderSource -notmatch "CHRONICLE_TEST_PROVIDER_MODE -eq 'timeModes'" -or $agentLoopProviderSource -notmatch "3 \{ 'pause' \}" -or $agentLoopProviderSource -notmatch "CHRONICLE_TEST_PROVIDER_MODE -eq 'waitingResume'" -or $agentLoopTest -notmatch '\$TimeControlOnly' -or $agentLoopTest -notmatch 'NativeTimeControlActionsRouted' -or $agentLoopTest -notmatch 'PlayModeNaturallyAdvancedBeforeFastForwardSelection' -or $agentLoopTest -notmatch 'FastForwardNaturallyAdvanced' -or $agentLoopTest -notmatch 'PauseHeldCampaignDay' -or $agentLoopTest -notmatch 'WaitingHoldThenResumeAdvancedNaturally' -or $harnessScript -notmatch "'TimeControlLoop'" -or $developmentDoc -notmatch 'TimeControlLoop') { throw 'Native time controls must verify Play/FastForward/Pause and Hold-waiting resume through their own bounded decision-loop phase, separate from the read-only AgentLoop and Harness-only advance.' }
-if ($harnessScript -notmatch 'Agent decision loop test failed with exit code \$testExitCode' -or $harnessScript -notmatch '\$testOutput = & powershell .*\$agentLoopScript 2>&1 \| Out-String') { throw 'AgentLoop failures must preserve the child test output in the owning Harness run receipt.' }
+if ($harnessScript -notmatch 'Agent decision loop test failed with exit code \$testExitCode' -or $harnessScript -notmatch '\$testOutput = & \$HarnessPowerShell .*\$agentLoopScript 2>&1 \| Out-String') { throw 'AgentLoop failures must preserve the child test output in the owning Harness run receipt.' }
 if ($harnessScript -notmatch '\$buildOutput = & dotnet build .*2>&1 \| Out-String' -or $harnessScript -notmatch 'Build failed with exit code \$buildExitCode') { throw 'Build failures must retain the compiler diagnostic output in the owning Harness run receipt.' }
 if (-not $harnessScript.Contains("agentHostBuildOutput -match 'NU1900'") -or
     -not $harnessScript.Contains("GetAttribute('Include') -ceq 'Microsoft.ML.Tokenizers'") -or
@@ -2777,8 +2781,8 @@ if (-not $harnessScript.Contains("agentHostBuildOutput -match 'NU1900'") -or
     -not $harnessScript.Contains('--locked-mode') -or
     -not $harnessScript.Contains('NuGetAudit=false') -or
     -not $harnessScript.Contains('nugetAuditFallbackUsed')) { throw 'Harness Build may bypass NuGet vulnerability metadata only for the single pinned Host dependency, with locked restore and an explicit receipt.' }
-if ($harnessScript -notmatch 'Agent movement test failed with exit code \$testExitCode' -or $harnessScript -notmatch '\$testOutput = & powershell .*\$movementScript 2>&1 \| Out-String') { throw 'Movement failures must preserve the child test output in the owning Harness run receipt.' }
-if ($harnessScript -notmatch 'Agent recruitment test failed with exit code \$testExitCode' -or $harnessScript -notmatch '\$testOutput = & powershell .*\$recruitmentScript 2>&1 \| Out-String') { throw 'Recruitment failures must preserve the child test output in the owning Harness run receipt.' }
+if ($harnessScript -notmatch 'Agent movement test failed with exit code \$testExitCode' -or $harnessScript -notmatch '\$testOutput = & \$HarnessPowerShell .*\$movementScript 2>&1 \| Out-String') { throw 'Movement failures must preserve the child test output in the owning Harness run receipt.' }
+if ($harnessScript -notmatch 'Agent recruitment test failed with exit code \$testExitCode' -or $harnessScript -notmatch '\$testOutput = & \$HarnessPowerShell .*\$recruitmentScript 2>&1 \| Out-String') { throw 'Recruitment failures must preserve the child test output in the owning Harness run receipt.' }
 if ($movementTestSource -notmatch 'mapSettlementTargets' -or $movementTestSource -notmatch 'TargetSource = ''mapSettlementTargets''' -or $movementTestSource -notmatch 'Capture-HarnessFailureFrame' -or $movementTestSource -notmatch 'reuse it instead of issuing a second identical read' -or $movementTestSource -notmatch 'not currently exposed as a visible Campaign map target') { throw 'Movement regression must navigate from Native visible-marker observations, reuse the arrival receipt, capture an in-engine last frame when possible, and match the current hidden/missing target rejection boundary.' }
 if ($harnessScript -notmatch "'Hold' \{ @\('Preflight', 'Build', 'Hold'\) \}" -or $harnessScript -notmatch "'Hold' \{\s+Invoke-Stage -Name 'Hold'" -or $developmentDoc -notmatch '\| Hold \|' -or $holdTestSource -notmatch "Invoke-AgentCli 'move'" -or $holdTestSource -notmatch "Invoke-AgentCli 'hold'" -or $holdTestSource -notmatch 'NaturalObservationSeconds' -or $holdTestSource -notmatch 'CampaignDayDeltaWhileWaiting' -or $holdTestSource -notmatch 'MovementStoppedAfterNaturalWindow' -or $holdTestSource -notmatch 'StoppableModeWaitingAtHold' -or $holdTestSource -match "Invoke-AgentCli 'advance'|Invoke-AgentCli 'pause'|Invoke-AgentCli 'resume'") { throw 'Hold must independently test moving→native Hold, stable stop, and a natural clock-command-free observation window.' }
 if ($agentLoopProviderSource -notmatch 'OpenStandardInput\(\)' -or $agentLoopProviderSource -notmatch 'System\.Text\.Encoding\]::UTF8' -or $agentLoopProviderSource -notmatch 'StreamReader' -or $agentLoopProviderSource -notmatch '\$requestJson\.IndexOf\(''\{''\)') { throw 'The AgentLoop provider boundary must read raw standard input as UTF-8 with BOM detection and reject non-encoding data before the JSON object.' }

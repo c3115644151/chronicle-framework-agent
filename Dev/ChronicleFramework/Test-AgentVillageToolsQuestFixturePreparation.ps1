@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [string]$SourceSaveName = 'AgentBridgeLifecycle',
@@ -6,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $documentsRoot = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::MyDocuments)) 'Mount and Blade II Bannerlord'
 $sourceSavePath = Join-Path $documentsRoot "Game Saves\$SourceSaveName.sav"
@@ -33,7 +35,7 @@ if ([string]::IsNullOrWhiteSpace($tempRoot) -or -not (Test-Path -LiteralPath $te
 
 function Invoke-NativeCli([string]$Action, [string[]]$Arguments = @(), [int]$CallTimeout = 0) {
     $effectiveTimeout = if ($CallTimeout -gt 0) { $CallTimeout } else { $TimeoutSeconds }
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $effectiveTimeout -AsJson 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $cli $Action @Arguments -TimeoutSeconds $effectiveTimeout -AsJson 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Native fixture-preparation action '$Action' failed: $output" }
     try { return $output | ConvertFrom-Json } catch { throw "Native fixture-preparation action '$Action' returned invalid JSON: $output" }
 }

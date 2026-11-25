@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 $script:AuditedHarnessDiagnosticSource = 'SubModule.cs'
 $script:AuditedHarnessDiagnosticSha256 = 'b558fbc486a433e6f33106c0a8078b646baad66f126c215662ce10b44b570c1b'
 

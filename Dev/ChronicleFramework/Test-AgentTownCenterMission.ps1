@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
@@ -5,6 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $decisionLoop = Join-Path $PSScriptRoot 'Agent-DecisionLoop.ps1'
 $decisionProvider = Join-Path $PSScriptRoot 'Test-AgentLoopProvider.ps1'
@@ -22,7 +24,7 @@ $fixtureHashBefore = (Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Has
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @(), [int]$CommandTimeout = 0) {
     $effectiveTimeout = if ($CommandTimeout -gt 0) { $CommandTimeout } else { $TimeoutSeconds }
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $effectiveTimeout -AsJson 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $cli $Action @Arguments -TimeoutSeconds $effectiveTimeout -AsJson 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Agent CLI '$Action' failed: $output" }
     try { return $output | ConvertFrom-Json }
     catch { throw "Agent CLI '$Action' returned invalid JSON: $output" }
@@ -32,7 +34,7 @@ function Invoke-DecisionLoop([string]$Mode, [int]$DecisionCount, [string]$Prefix
     $previousMode = $env:CHRONICLE_TEST_PROVIDER_MODE
     $env:CHRONICLE_TEST_PROVIDER_MODE = $Mode
     try {
-        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $decisionLoop -DecisionProviderPath $decisionProvider -MaxDecisions $DecisionCount -TimeoutSeconds $TimeoutSeconds -CommandPrefix $Prefix 2>&1 | Out-String
+        $output = & $HarnessPowerShell -NoProfile -File $decisionLoop -DecisionProviderPath $decisionProvider -MaxDecisions $DecisionCount -TimeoutSeconds $TimeoutSeconds -CommandPrefix $Prefix 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) { throw "Decision loop '$Mode' failed: $output" }
         try { return $output | ConvertFrom-Json }
         catch { throw "Decision loop '$Mode' returned invalid JSON: $output" }

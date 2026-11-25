@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
@@ -5,6 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 $loop = Join-Path $PSScriptRoot 'Agent-DecisionLoop.ps1'
 $provider = Join-Path $PSScriptRoot 'Test-AgentLoopProvider.ps1'
@@ -27,7 +29,7 @@ if (-not $env:CHRONICLE_HARNESS_TEMP -or -not (Test-Path -LiteralPath $env:CHRON
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @(), [int]$CommandTimeout = 0) {
     $effectiveTimeout = if ($CommandTimeout -gt 0) { $CommandTimeout } else { $TimeoutSeconds }
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $effectiveTimeout -AsJson 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $cli $Action @Arguments -TimeoutSeconds $effectiveTimeout -AsJson 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Agent CLI '$Action' failed: $output" }
     try { return $output | ConvertFrom-Json }
     catch { throw "Agent CLI '$Action' returned invalid JSON: $output" }
@@ -55,7 +57,7 @@ try {
             $null = Invoke-AgentCli 'load' @('-SaveName', $saveName)
             $started = $true
             $before = Invoke-AgentCli 'state' @('-CommandId', ('checkpoint-before-resume-' + [Guid]::NewGuid().ToString('N')))
-            $resumeOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop -DecisionProviderPath $provider -AllowedActionNames 'mapSettlementTargets,move' -ResumeCheckpoint -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('checkpoint-invalid-' + $scenario.Mode) 2>&1 | Out-String
+            $resumeOutput = & $HarnessPowerShell -NoProfile -File $loop -DecisionProviderPath $provider -AllowedActionNames 'mapSettlementTargets,move' -ResumeCheckpoint -MaxDecisions 1 -TimeoutSeconds $TimeoutSeconds -CommandPrefix ('checkpoint-invalid-' + $scenario.Mode) 2>&1 | Out-String
             $resumeExitCode = $LASTEXITCODE
             $resumeResult = $null
             try { $resumeResult = $resumeOutput | ConvertFrom-Json } catch { }

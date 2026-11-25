@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
@@ -6,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $previousHarnessMode = $env:CHRONICLE_HARNESS_MODE
 $env:CHRONICLE_HARNESS_MODE = 'visual-capture'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
@@ -19,7 +21,7 @@ if (-not (Test-Path $savePath)) { throw "Recruitment fixture not found: $savePat
 $fixtureHashBefore = (Get-FileHash $savePath -Algorithm SHA256).Hash
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
-    $output = & powershell -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $cli $Action @Arguments 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Agent CLI '$Action' failed: $output" }
     return $output | ConvertFrom-Json
 }
@@ -124,7 +126,7 @@ try {
     $previousProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
     $env:CHRONICLE_TEST_PROVIDER_MODE = 'recruitment'
     try {
-        $loopOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $decisionLoop -DecisionProviderPath $decisionProvider -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix "$runPrefix-recruit-loop" 2>&1 | Out-String
+        $loopOutput = & $HarnessPowerShell -NoProfile -File $decisionLoop -DecisionProviderPath $decisionProvider -MaxDecisions 2 -TimeoutSeconds $TimeoutSeconds -CommandPrefix "$runPrefix-recruit-loop" 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) { throw "Recruitment decision loop failed: $loopOutput" }
     $recruitmentLoop = $loopOutput | ConvertFrom-Json
     }

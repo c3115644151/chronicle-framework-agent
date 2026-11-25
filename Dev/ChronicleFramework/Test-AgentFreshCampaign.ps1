@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [int]$TimeoutSeconds = 240,
@@ -14,6 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $harnessRoot = $PSScriptRoot
 . (Join-Path $harnessRoot 'Test-AgentSupport.ps1')
 . (Join-Path $harnessRoot 'HarnessShaderCacheDialog.ps1')
@@ -128,7 +130,7 @@ if ($persistentStoryModeSavePath -and (Test-Path -LiteralPath $persistentStoryMo
 . (Join-Path $harnessRoot 'Test-WindowLayout.ps1')
 
 function Invoke-FreshCampaignAgentCli([string]$Action, [string[]]$Arguments = @{}, [int]$CommandTimeout = 15) {
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $agentCli $Action @Arguments -TimeoutSeconds $CommandTimeout -AsJson 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $agentCli $Action @Arguments -TimeoutSeconds $CommandTimeout -AsJson 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "FreshCampaign Agent CLI '$Action' failed: $output" }
     try { return $output | ConvertFrom-Json }
     catch { throw "FreshCampaign Agent CLI '$Action' returned invalid JSON: $output" }
@@ -1073,7 +1075,7 @@ if ($ValidateRecruitmentProgression) {
             if ([string]::IsNullOrWhiteSpace($modelName)) { $modelName = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'User') }
             if ([string]::IsNullOrWhiteSpace($modelName)) { throw 'Real-model fresh-Campaign evaluation requires a locally configured model name; credentials are never printed.' }
             $modelRunStartedUtc = [DateTime]::UtcNow
-            $modelOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $agentLiveModelLoop -LoadSaveName $progressionSaveName -RecruitmentLoop -FrameRate 10 -TimeoutSeconds $TimeoutSeconds 2>&1 | Out-String
+            $modelOutput = & $HarnessPowerShell -NoProfile -File $agentLiveModelLoop -LoadSaveName $progressionSaveName -RecruitmentLoop -FrameRate 10 -TimeoutSeconds $TimeoutSeconds 2>&1 | Out-String
             $modelExitCode = $LASTEXITCODE
             $modelRunWallClockSeconds = ([DateTime]::UtcNow - $modelRunStartedUtc).TotalSeconds
             try { $liveModelResult = $modelOutput | ConvertFrom-Json }
@@ -1158,7 +1160,7 @@ if ($ValidateRecruitmentProgression) {
         $previousProviderMode = $env:CHRONICLE_TEST_PROVIDER_MODE
         $env:CHRONICLE_TEST_PROVIDER_MODE = 'recruitment'
         try {
-            $loopOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $agentDecisionLoop -DecisionProviderPath $agentLoopProvider -MaxDecisions 2 -TimeoutSeconds ([Math]::Min(15, $TimeoutSeconds)) -CommandPrefix "$progressionCommandPrefix-loop" 2>&1 | Out-String
+            $loopOutput = & $HarnessPowerShell -NoProfile -File $agentDecisionLoop -DecisionProviderPath $agentLoopProvider -MaxDecisions 2 -TimeoutSeconds ([Math]::Min(15, $TimeoutSeconds)) -CommandPrefix "$progressionCommandPrefix-loop" 2>&1 | Out-String
             if ($LASTEXITCODE -ne 0) { throw "FreshCampaign recruitment decision loop failed: $loopOutput" }
             $loop = $loopOutput | ConvertFrom-Json
         }

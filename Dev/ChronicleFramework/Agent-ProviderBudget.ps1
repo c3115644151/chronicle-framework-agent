@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 function New-AgentProviderBudget {
     [CmdletBinding()]
     param(

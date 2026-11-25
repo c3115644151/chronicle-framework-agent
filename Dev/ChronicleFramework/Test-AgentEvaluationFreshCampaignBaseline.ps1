@@ -1,7 +1,9 @@
+#Requires -Version 7.0
 [CmdletBinding()]
 param([ValidateRange(5,5)][int]$Runs = 5)
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $freshCampaignScript = Join-Path $PSScriptRoot 'Test-AgentFreshCampaign.ps1'
 $sessionPath = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\session.json'
 $saveDirectory = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Game Saves'
@@ -36,7 +38,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
     $childExitCode = 1
     $failure = $null
     try {
-        $childOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $freshCampaignScript -ValidateRecruitmentProgression 2>&1 | Out-String
+        $childOutput = & $HarnessPowerShell -NoProfile -File $freshCampaignScript -ValidateRecruitmentProgression 2>&1 | Out-String
         $childExitCode = $LASTEXITCODE
         try { $childResult = $childOutput | ConvertFrom-Json }
         catch { $failure = "FreshCampaign child did not return structured JSON (exit=$childExitCode): $childOutput" }

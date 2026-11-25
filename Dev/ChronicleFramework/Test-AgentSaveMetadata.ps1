@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Agent-SaveMetadata.ps1')
 

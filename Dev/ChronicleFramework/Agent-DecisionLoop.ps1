@@ -1,4 +1,5 @@
-﻿[CmdletBinding()]
+﻿#Requires -Version 7.0
+[CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$DecisionProviderPath,
     [int]$MaxDecisions = 1,
@@ -17,6 +18,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $decisionLoopPolicyPath = Join-Path $PSScriptRoot 'Agent-DecisionLoopPolicy.ps1'
 . $decisionLoopPolicyPath
 $providerBudgetPolicyPath = Join-Path $PSScriptRoot 'Agent-ProviderBudget.ps1'
@@ -68,7 +70,7 @@ function Invoke-AgentCli {
         $cliArguments += "-$key"
         $cliArguments += [string]$Arguments[$key]
     }
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cliPath @cliArguments 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $cliPath @cliArguments 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Agent CLI '$Action' failed: $output" }
     try { return $output | ConvertFrom-Json }
     catch { throw "Agent CLI '$Action' returned invalid JSON: $output" }
@@ -77,15 +79,15 @@ function Invoke-AgentCli {
 function Get-SafeProviderErrorSummary([string]$ProviderStderr, [int]$ExitCode) {
     if ($ProviderStderr -match 'Model provider HTTP request failed with status (\d{3})') { return "Provider HTTP status $($Matches[1]); response body omitted." }
     if ($ProviderStderr -match 'Model provider request timed out after (\d+) seconds') { return "Provider timed out after $($Matches[1]) seconds; request delivery is unknown." }
-    if ($ProviderStderr -match 'Model provider request failed with WebException \(status=([A-Za-z]+); host=([A-Za-z0-9.:-]+); attempt=([0-9/]+);') { return "Provider connection failure status=$($Matches[1]), host=$($Matches[2]), attempt=$($Matches[3])." }
+    if ($ProviderStderr -match 'Model provider request failed with connection failure \(status=([A-Za-z]+); host=([A-Za-z0-9.:-]+); attempt=([0-9/]+);') { return "Provider connection failure status=$($Matches[1]), host=$($Matches[2]), attempt=$($Matches[3])." }
     return "Provider process exited with code $ExitCode; stderr details omitted."
 }
 
 function Invoke-DecisionProvider {
     param([string]$RequestJson)
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-    $startInfo.FileName = (Get-Command powershell.exe -ErrorAction Stop).Source
-    $startInfo.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$providerPath`""
+    $startInfo.FileName = $HarnessPowerShell
+    $startInfo.Arguments = "-NoProfile -File `"$providerPath`""
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardInput = $true

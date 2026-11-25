@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 function Test-UnobstructedCampaignMap {
     param([Parameter(Mandatory = $true)]$State)
 

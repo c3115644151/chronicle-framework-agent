@@ -1,3 +1,5 @@
+#Requires -Version 7.0
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 function Wait-ForAgentSettlementArrival {
     param(
         [Parameter(Mandatory = $true)][string]$CliPath,
@@ -10,7 +12,7 @@ function Wait-ForAgentSettlementArrival {
 
     for ($step = 1; $step -le $MaximumSteps; $step++) {
         $commandId = "$CommandPrefix-step-$step"
-        $output = & powershell -NoProfile -ExecutionPolicy Bypass -File $CliPath advance -Days $StepDays -CommandId $commandId -TimeoutSeconds $TimeoutSeconds 2>&1 | Out-String
+        $output = & $HarnessPowerShell -NoProfile -File $CliPath advance -Days $StepDays -CommandId $commandId -TimeoutSeconds $TimeoutSeconds 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) { throw "Harness time step '$commandId' failed: $output" }
         try { $receipt = $output | ConvertFrom-Json }
         catch { throw "Harness time step '$commandId' returned invalid JSON: $output" }
@@ -61,7 +63,7 @@ function Capture-HarnessFailureFrame {
         CaptureSource = 'captureFrame'
     }
     try {
-        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $CliPath captureFrame -OutputPath $framePath -CommandId $commandId -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
+        $output = & $HarnessPowerShell -NoProfile -File $CliPath captureFrame -OutputPath $framePath -CommandId $commandId -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) { $receipt.CaptureError = $output }
         else {
             try { $capture = $output | ConvertFrom-Json }

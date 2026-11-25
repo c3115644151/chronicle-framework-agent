@@ -1,4 +1,5 @@
-﻿[CmdletBinding()]
+﻿#Requires -Version 7.0
+[CmdletBinding()]
 param(
     [string]$LoadSaveName = 'AgentBridgeLifecycle',
     [string]$CheckpointSaveName,
@@ -22,6 +23,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $freeLlmProfileHelper = Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1'
 . $freeLlmProfileHelper
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
@@ -264,7 +266,7 @@ $chosenSettlementName = ''
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @(), [int]$CommandTimeout = 0) {
     $effectiveTimeout = if ($CommandTimeout -gt 0) { $CommandTimeout } else { $TimeoutSeconds }
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $effectiveTimeout -AsJson 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $cli $Action @Arguments -TimeoutSeconds $effectiveTimeout -AsJson 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Agent CLI '$Action' failed: $output" }
     try { return $output | ConvertFrom-Json }
     catch { throw "Agent CLI '$Action' returned invalid JSON: $output" }
@@ -725,7 +727,7 @@ try {
         $loopArguments = @('-DecisionProviderPath', $provider, '-Goal', $goal, '-AllowedActionNames', $allowedActions, '-MaxDecisions', [string]$maxDecisions, '-MaxElapsedSeconds', [string]$maxElapsedSeconds, '-TimeoutSeconds', [string]$TimeoutSeconds, '-CommandPrefix', ('live-model-' + [Guid]::NewGuid().ToString('N')))
         if ($completionContractBase64) { $loopArguments += @('-CompletionContractBase64', $completionContractBase64) }
         if ($RoadsideBanditNegotiationLoop) { $loopArguments += '-HarnessPrepareSafePassageAfterMove' }
-        $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $loop @loopArguments 2>&1 | Out-String
+        $output = & $HarnessPowerShell -NoProfile -File $loop @loopArguments 2>&1 | Out-String
         $loopExitCode = $LASTEXITCODE
     }
     if ($loopExitCode -ne 0) {

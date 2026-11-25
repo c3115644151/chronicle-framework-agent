@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 function Resolve-OpenSpecExecutable {
     $command = Get-Command openspec.exe -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($command -and (Test-Path -LiteralPath $command.Source -PathType Leaf)) { return [IO.Path]::GetFullPath($command.Source) }

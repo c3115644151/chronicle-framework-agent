@@ -1,4 +1,5 @@
-﻿[CmdletBinding()]
+﻿#Requires -Version 7.0
+[CmdletBinding()]
 param(
     [string]$SourceSaveName = 'AgentBridgeLifecycle',
     [ValidateRange(30,900)][int]$TimeoutSeconds = 300,
@@ -13,6 +14,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
 . (Join-Path $PSScriptRoot 'Test-WindowLayout.ps1')
 $saveRoot = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\Game Saves')).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
@@ -52,7 +54,7 @@ $nativeAiCameraMotionSamples = [System.Collections.Generic.List[object]]::new()
 $cameraMotionComparison = $null
 
 function Invoke-AgentCli([string]$Action, [string[]]$Arguments = @()) {
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $cli $Action @Arguments -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Agent CLI '$Action' failed: $output" }
     try { $receipt = $output | ConvertFrom-Json }
     catch { throw "Agent CLI '$Action' returned invalid JSON: $output" }
@@ -99,7 +101,7 @@ function Invoke-AgentCliExpectedReject([string]$Action, [string[]]$Arguments, [s
     $responseRoot = Join-Path $env:USERPROFILE 'Documents\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\responses'
     $rejectedPath = Join-Path $responseRoot ($CommandId + '.rejected.json')
     if (Test-Path -LiteralPath $rejectedPath) { Remove-Item -LiteralPath $rejectedPath }
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cli $Action @Arguments -CommandId $CommandId -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
+    $output = & $HarnessPowerShell -NoProfile -File $cli $Action @Arguments -CommandId $CommandId -TimeoutSeconds $TimeoutSeconds -AsJson 2>&1 | Out-String
     $receipt = $null
     if ($LASTEXITCODE -eq 0) {
         try { $receipt = $output | ConvertFrom-Json } catch { throw "Native '$Action' returned invalid JSON for an expected rejection: $output" }
