@@ -138,14 +138,12 @@ internal static class AgentHostStoryModeBootstrapLoop
         JsonArray? priorTrace = null,
         JsonArray? priorProviderRouteHistory = null)
     {
-        var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
+        var ledger = new DecisionRunLedger(
+            provider,
+            ReadString(request, "runId"),
+            priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var goal = ReadString(request, "goal") ?? "Complete the original StoryMode Establish Your Clan quest.";
-        var decisions = priorDecisions;
         var nativeActions = 0;
-        long promptTokens = priorPromptTokens;
-        long completionTokens = priorCompletionTokens;
-        var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
-        var routes = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
         var started = Stopwatch.GetTimestamp();
 
         try
@@ -159,7 +157,7 @@ internal static class AgentHostStoryModeBootstrapLoop
             var modelRequest = new JsonObject
             {
                 ["schemaVersion"] = 1,
-                ["runId"] = runId,
+                ["runId"] = ledger.RunId,
                 ["iteration"] = 1,
                 ["goal"] = goal,
                 ["goalScopeClassificationRequired"] = false,
@@ -189,19 +187,7 @@ internal static class AgentHostStoryModeBootstrapLoop
             var providerStartedUtc = DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
             var providerStartedTicks = Stopwatch.GetTimestamp();
             var providerResult = await AgentHostDecisionCycle.DecideStoryModeBootstrapAsync(provider, modelRequest, cancellationToken);
-            decisions++;
-            if (providerResult.PromptTokens.HasValue) promptTokens += providerResult.PromptTokens.Value;
-            if (providerResult.CompletionTokens.HasValue) completionTokens += providerResult.CompletionTokens.Value;
-            routes.Add(new JsonObject
-            {
-                ["decision"] = decisions,
-                ["requestedModelId"] = provider.ModelId,
-                ["responseModelId"] = providerResult.ModelId,
-                ["routedVia"] = providerResult.RoutedVia,
-                ["responseFormatMode"] = providerResult.ResponseFormatMode,
-                ["promptTokens"] = providerResult.PromptTokens,
-                ["completionTokens"] = providerResult.CompletionTokens
-            });
+            ledger.RecordDecision(providerResult);
 
             var decision = providerResult.Decision;
             var action = ReadString(decision, "action");
@@ -238,7 +224,7 @@ internal static class AgentHostStoryModeBootstrapLoop
                 ["providerStartedUtc"] = providerStartedUtc,
                 ["providerElapsedMilliseconds"] = Math.Round(Stopwatch.GetElapsedTime(providerStartedTicks).TotalMilliseconds, 3)
             };
-            trace.Add(traceStep);
+            ledger.Trace.Add(traceStep);
 
             for (var poll = 0; poll < 12; poll++)
             {
@@ -268,15 +254,15 @@ internal static class AgentHostStoryModeBootstrapLoop
         {
             ["status"] = status,
             ["resultKind"] = "storymode-post-skip-native-bootstrap",
-            ["runId"] = runId,
+            ["runId"] = ledger.RunId,
             ["providerModelId"] = provider.ModelId,
-            ["decisions"] = decisions,
+            ["decisions"] = ledger.Decisions,
             ["actionsExecuted"] = nativeActions,
-            ["promptTokens"] = promptTokens,
-            ["completionTokens"] = completionTokens,
+            ["promptTokens"] = ledger.PromptTokens,
+            ["completionTokens"] = ledger.CompletionTokens,
             ["elapsedSeconds"] = Math.Round(Stopwatch.GetElapsedTime(started).TotalSeconds, 3),
-            ["providerRouteHistory"] = routes.DeepClone(),
-            ["trace"] = trace.DeepClone(),
+            ["providerRouteHistory"] = ledger.Routes.DeepClone(),
+            ["trace"] = ledger.Trace.DeepClone(),
             ["termination"] = new JsonObject { ["reason"] = reason, ["completedByProvider"] = false, ["goalVerified"] = false },
             ["failure"] = failure,
             ["failureCode"] = failureCode

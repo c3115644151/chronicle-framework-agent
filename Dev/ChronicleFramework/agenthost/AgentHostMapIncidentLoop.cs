@@ -55,39 +55,38 @@ internal static class AgentHostMapIncidentLoop
         JsonArray? priorTrace = null,
         JsonArray? priorProviderRouteHistory = null)
     {
-        var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
-        var decisions = priorDecisions;
+        var ledger = new DecisionRunLedger(
+            provider,
+            request.ValueKind == JsonValueKind.Object && request.TryGetProperty("runId", out var runIdNode) && runIdNode.ValueKind == JsonValueKind.String
+                ? runIdNode.GetString()
+                : null,
+            priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var actionsExecuted = 0;
-        var promptTokens = priorPromptTokens;
-        var completionTokens = priorCompletionTokens;
-        var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
-        var routes = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
-        JsonObject? lastDecision = null;
-        JsonObject? lastReceipt = null;
 
-        async Task<JsonObject> ResultAsync(string status, string reason, string? failureCode = null, string? failure = null)
+        Task<JsonObject> ResultAsync(string status, string reason, string? failureCode = null, string? failure = null) =>
+            Task.FromResult(BuildResult(status, reason, failureCode, failure));
+
+        JsonObject BuildResult(string status, string reason, string? failureCode, string? failure)
         {
-            double? actualCost = provider is OllamaNativeProvider costMeter ? costMeter.ActualCostEstimateCny : null;
-            double? reservedCost = provider is OllamaNativeProvider reserveMeter ? reserveMeter.ReservedCostUpperBoundCny : null;
+            var costMeter = provider as OllamaNativeProvider;
             var result = new JsonObject
             {
                 ["status"] = status,
-                ["runId"] = runId,
-                ["decisions"] = decisions,
+                ["runId"] = ledger.RunId,
+                ["decisions"] = ledger.Decisions,
                 ["actionsExecuted"] = actionsExecuted,
-                ["promptTokens"] = promptTokens,
-                ["completionTokens"] = completionTokens,
-                ["providerActualCostEstimateCny"] = actualCost,
-                ["providerReservedCostUpperCny"] = reservedCost,
-                ["providerRouteHistory"] = routes.DeepClone(),
-                ["trace"] = trace.DeepClone(),
+                ["promptTokens"] = ledger.PromptTokens,
+                ["completionTokens"] = ledger.CompletionTokens,
+                ["providerActualCostEstimateCny"] = costMeter?.ActualCostEstimateCny,
+                ["providerReservedCostUpperCny"] = costMeter?.ReservedCostUpperBoundCny,
+                ["providerRouteHistory"] = ledger.Routes.DeepClone(),
+                ["trace"] = ledger.Trace.DeepClone(),
                 ["termination"] = new JsonObject { ["reason"] = reason, ["goalVerified"] = status == "completed" },
                 ["failureCode"] = failureCode,
                 ["failure"] = failure
             };
-            if (lastDecision != null) result["lastDecision"] = lastDecision.DeepClone();
-            if (lastReceipt != null) result["lastNativeReceipt"] = lastReceipt.DeepClone();
-            await Task.CompletedTask;
+            if (ledger.LastDecision != null) result["lastDecision"] = ledger.LastDecision.DeepClone();
+            if (ledger.LastNativeReceipt != null) result["lastNativeReceipt"] = ledger.LastNativeReceipt.DeepClone();
             return result;
         }
 
@@ -125,7 +124,7 @@ internal static class AgentHostMapIncidentLoop
                     ["state"] = before["state"]?.DeepClone(),
                     ["incidentJournalObjectives"] = journal?.DeepClone()
                 };
-                var modelRequest = BuildModelRequest(runId, decisions + 1, request, observation, feedback, catalog);
+                var modelRequest = BuildModelRequest(ledger.RunId, ledger.NextDecisionNumber, request, observation, feedback, catalog);
                 var startedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 var startedTicks = Stopwatch.GetTimestamp();
                 ProviderDecisionResult providerResult;
@@ -135,41 +134,21 @@ internal static class AgentHostMapIncidentLoop
                 }
                 catch (AgentHostException exception) when (AgentHostProviderDecisionRecovery.CanRetry(exception.Code, attempt) && attempt + 1 < MaxDecisions)
                 {
-                    decisions++;
-                    routes.Add(new JsonObject
-                    {
-                        ["decision"] = decisions,
-                        ["requestedModelId"] = provider.ModelId,
-                        ["status"] = "provider-failure-before-decision",
-                        ["failureCode"] = exception.Code,
-                        ["nativeActionSent"] = false
-                    });
-                    trace.Add(new JsonObject { ["stage"] = "map-incident-provider-retry", ["failureCode"] = exception.Code, ["nativeActionSent"] = false });
+                    ledger.RecordProviderFailure(exception.Code);
+                    ledger.Trace.Add(new JsonObject { ["stage"] = "map-incident-provider-retry", ["failureCode"] = exception.Code, ["nativeActionSent"] = false });
                     feedback = new JsonObject { ["kind"] = "decision-rejected-before-native", ["code"] = exception.Code, ["requiredNextStep"] = "Choose exactly one OptionIndex from the current incident action catalog." };
                     continue;
                 }
 
-                decisions++;
-                promptTokens += providerResult.PromptTokens ?? 0;
-                completionTokens += providerResult.CompletionTokens ?? 0;
-                routes.Add(new JsonObject
-                {
-                    ["decision"] = decisions,
-                    ["requestedModelId"] = provider.ModelId,
-                    ["responseModelId"] = providerResult.ModelId,
-                    ["routedVia"] = providerResult.RoutedVia,
-                    ["responseFormatMode"] = providerResult.ResponseFormatMode,
-                    ["promptTokens"] = providerResult.PromptTokens,
-                    ["completionTokens"] = providerResult.CompletionTokens
-                });
+                ledger.RecordDecision(providerResult);
                 selectedDecision = providerResult.Decision;
                 var allowedIncidentIndices = (catalog[0] as JsonObject)?["argumentValues"]?["OptionIndex"] as JsonArray ?? new JsonArray();
                 if (!TryResolveIncidentDecision(selectedDecision, catalog[0] as JsonObject, allowedIncidentIndices, out var optionIndex, out var rejection))
                 {
                     if (attempt + 1 >= MaxDecisions)
                     {
-                        lastDecision = selectedDecision.DeepClone() as JsonObject;
-                        trace.Add(new JsonObject
+                        ledger.RecordDecisionRejection(selectedDecision);
+                        ledger.Trace.Add(new JsonObject
                         {
                             ["stage"] = "map-incident-decision-rejected-before-native",
                             ["decision"] = selectedDecision.DeepClone(),
@@ -179,7 +158,7 @@ internal static class AgentHostMapIncidentLoop
                         return await ResultAsync("failed", "incident-decision-unavailable", "map-incident-decision-invalid", rejection);
                     }
                     feedback = new JsonObject { ["kind"] = "decision-rejected-before-native", ["message"] = rejection, ["requiredNextStep"] = "Choose exactly one current Native incident option index from allowedActions." };
-                    trace.Add(new JsonObject { ["stage"] = "map-incident-decision-rejected-before-native", ["decision"] = selectedDecision.DeepClone(), ["rejection"] = rejection, ["nativeActionSent"] = false });
+                    ledger.Trace.Add(new JsonObject { ["stage"] = "map-incident-decision-rejected-before-native", ["decision"] = selectedDecision.DeepClone(), ["rejection"] = rejection, ["nativeActionSent"] = false });
                     continue;
                 }
 
@@ -192,32 +171,30 @@ internal static class AgentHostMapIncidentLoop
                 }
                 catch (AgentHostException exception) when (exception.Code == "native-command-timeout")
                 {
-                    lastDecision = selectedDecision.DeepClone() as JsonObject;
-                    lastReceipt = new JsonObject { ["action"] = "incidentSelect", ["status"] = "timeout-ambiguous", ["error"] = exception.Code };
-                    trace.Add(new JsonObject
+                    ledger.RecordAmbiguousNativeAction(selectedDecision, "incidentSelect", exception.Code);
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "map-incident-action-timeout-ambiguous",
                         ["decision"] = selectedDecision.DeepClone(),
-                        ["nativeReceipt"] = lastReceipt.DeepClone(),
+                        ["nativeReceipt"] = ledger.LastNativeReceipt?.DeepClone(),
                         ["nativeActionReplayed"] = false
                     });
                     return await ResultAsync("failed", "incident-action-result-ambiguous", "native-command-timeout",
                         "The incident outcome may already have been submitted; the Host did not repeat it.");
                 }
 
-                lastDecision = selectedDecision.DeepClone() as JsonObject;
-                lastReceipt = nativeReceipt.DeepClone() as JsonObject;
                 var actionCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 var actionCompleted = string.Equals(ReadString(nativeReceipt, "status"), "completed", StringComparison.Ordinal) &&
                                       ReadBoolean(nativeReceipt["data"] as JsonObject, "submitted") &&
                                       !ReadBoolean(nativeReceipt["data"] as JsonObject, "sameIncidentViewRemains");
-                actionsExecuted += actionCompleted ? 1 : 0;
+                ledger.RecordNativeReceipt(selectedDecision, nativeReceipt);
+                if (actionCompleted) actionsExecuted++;
                 using var afterDocument = await client.ReadStateAsync(cancellationToken);
                 var after = CloneObject(afterDocument.RootElement);
                 var nextIncidentActive = IsActive(afterDocument.RootElement);
                 var sameIncidentViewRemains = ReadBoolean(nativeReceipt["data"] as JsonObject, "sameIncidentViewRemains");
                 var lockStillHeldWithoutNextIncident = !nextIncidentActive && ReadBoolean(ReadContext(after), "timeControlModeLocked");
-                trace.Add(new JsonObject
+                ledger.Trace.Add(new JsonObject
                 {
                     ["stage"] = "map-incident-option-submitted",
                     ["decision"] = selectedDecision.DeepClone(),

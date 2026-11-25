@@ -6,3 +6,5 @@
 **/*.suo
 Dev/ChronicleFramework/harness.local.json
 **/.playwright-cli/
+# Windows font-cache directories that external processes create under the literal %SystemDrive% name.
+**/%SystemDrive%/
