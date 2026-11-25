@@ -601,14 +601,11 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 1800), 10, 86400);
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
-        var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
-        var routeHistory = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
-        var decisionCount = priorDecisions;
+        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens,
+            priorTrace, priorProviderRouteHistory);
         var actionCount = 0;
         var saleActionCount = 0;
         var noTransferableGoodsInPlayerInventory = false;
-        long promptTokens = priorPromptTokens;
-        long completionTokens = priorCompletionTokens;
         string? moveTargetId = null;
         var moveStartPending = false;
         var rejectedProviderDecisions = 0;
@@ -646,19 +643,15 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             {
                 initialCaptivityRecovery = await AgentHostCaptivityRecoveryLoop.RunAsync(
                     request, stateClient, actionClient, actionClient, provider, elapsed.Token,
-                    priorDecisions: decisionCount,
-                    priorPromptTokens: promptTokens,
-                    priorCompletionTokens: completionTokens,
-                    priorTrace: trace,
-                    priorProviderRouteHistory: routeHistory);
+                    priorDecisions: ledger.Decisions,
+                    priorPromptTokens: ledger.PromptTokens,
+                    priorCompletionTokens: ledger.CompletionTokens,
+                    priorTrace: ledger.Trace,
+                    priorProviderRouteHistory: ledger.Routes);
                 if (ReadString(initialCaptivityRecovery, "resultKind") != "captivity-recovered-objective-plan" ||
                     ReadBoolean(initialCaptivityRecovery, "captivityRecoveryVerified") != true)
                     throw new AgentHostException("gold-sale-captivity-prelude-failed", "The original W7-O recovery flow did not return a verified free Campaign Map; no sale action was attempted.");
-                decisionCount = ReadInt(initialCaptivityRecovery, "decisions", decisionCount);
-                promptTokens = ReadLong(initialCaptivityRecovery, "promptTokens", promptTokens);
-                completionTokens = ReadLong(initialCaptivityRecovery, "completionTokens", completionTokens);
-                routeHistory = initialCaptivityRecovery["providerRouteHistory"]?.DeepClone() as JsonArray ?? routeHistory;
-                trace = initialCaptivityRecovery["trace"]?.DeepClone() as JsonArray ?? trace;
+                ledger.AdoptDelegated(initialCaptivityRecovery);
                 currentNative = initialCaptivityRecovery["finalNativeState"]?.DeepClone() as JsonObject
                     ?? throw new AgentHostException("gold-sale-captivity-final-state-missing", "W7-O returned no fresh final Native state for the gold sale loop.");
                 previousReceipt = new JsonObject { ["action"] = "captivityRecovery", ["status"] = "completed", ["resultKind"] = "captivity-recovered-objective-plan" };
@@ -673,7 +666,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             moveTargetId = ReadExistingNativeSettlementMoveTarget(currentNative);
             if (moveTargetId is not null)
             {
-                trace.Add(new JsonObject
+                ledger.Trace.Add(new JsonObject
                 {
                     ["stage"] = "gold-sale-adopted-existing-native-settlement-move",
                     ["targetSettlementId"] = moveTargetId,
@@ -691,7 +684,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             if (ReadBoolean(goldBefore, "met") == true)
                 throw new AgentHostException("gold-sale-objective-already-met", "The official Journal Gold objective is already met; no sale was performed.");
 
-            for (var iteration = 1; decisionCount < maxDecisions; iteration++)
+            for (var iteration = 1; ledger.Decisions < maxDecisions; iteration++)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
                 var state = currentNative["state"] as JsonObject ?? throw new AgentHostException("gold-sale-state-missing", "Native returned no Campaign state.");
@@ -700,17 +693,13 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                     if (!IsPendingNativeTradeConfirmation(state, previousReceipt))
                         throw new AgentHostException("gold-sale-unexpected-native-inquiry", "The Gold sale loop will resolve only the Native Trade Done confirmation that it just received as accepted.");
                     var inquiry = await AgentHostNativeInquiryResolution.RunAsync(stateClient, actionClient, provider, elapsed.Token,
-                        runId + "-trade-inquiry-" + (decisionCount + 1).ToString(CultureInfo.InvariantCulture),
+                        runId + "-trade-inquiry-" + ledger.NextDecisionNumber.ToString(CultureInfo.InvariantCulture),
                         "Reach the current original Establish Your Clan Gold Journal target. Decide whether to accept the exact Native Trade capacity warning using the current sale amount and party state; accepting keeps the over-capacity risk, declining must leave the sale uncommitted.");
-                    decisionCount += ReadInt(inquiry, "decisions", 0);
+                    ledger.RecordDelegated(inquiry);
                     actionCount += ReadInt(inquiry, "actionsExecuted", 0);
-                    promptTokens += ReadLong(inquiry, "promptTokens", 0);
-                    completionTokens += ReadLong(inquiry, "completionTokens", 0);
-                    if (inquiry["providerRouteHistory"] is JsonArray inquiryRoutes)
-                        foreach (var route in inquiryRoutes) routeHistory.Add(route?.DeepClone());
                     var inquiryData = inquiry["nativeReceipt"]?["data"] as JsonObject;
                     var tradeResolution = inquiryData?["tradeResolution"] as JsonObject;
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "native-trade-capacity-inquiry",
                         ["status"] = ReadString(inquiry, "status"),
@@ -738,7 +727,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                         saleActionCount++;
                         previousReceipt = new JsonObject { ["action"] = "tradeConfirm", ["status"] = "completed", ["data"] = tradeResolution.DeepClone() };
                         using (var fresh = await stateClient.ReadStateAsync(elapsed.Token)) currentNative = ParseObject(fresh.RootElement);
-                        trace.Add(new JsonObject { ["stage"] = "native-trade-confirmed-state", ["nativeState"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(currentNative) });
+                        ledger.Trace.Add(new JsonObject { ["stage"] = "native-trade-confirmed-state", ["nativeState"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(currentNative) });
                         var finalState = currentNative["state"] as JsonObject ?? new JsonObject();
                         if (!IsFreeCampaignMap(finalState) || !HasActiveQuest(finalState))
                             throw new AgentHostException("gold-sale-final-map-or-quest-invalid", "After the confirmed sale, Native did not return to a free Map with the original StoryMode quest still active.");
@@ -749,8 +738,8 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                         if (ReadDouble(afterGold, "current", double.MinValue) <= ReadDouble(beforeGold, "current", double.MaxValue))
                             throw new AgentHostException("gold-sale-journal-not-increased", "Native proved the transaction, but the original Quest Journal Gold progress did not advance; no further sale was attempted.");
                         return BuildSuccess(runId, provider, initialNative, currentNative, objectiveSnapshotBefore, objectiveSnapshotAfter,
-                            liveMetricDifferencesBefore, liveMetricDifferencesAfter, saleReceipt, previousReceipt, trace, routeHistory,
-                            decisionCount, actionCount, saleActionCount, promptTokens, completionTokens, campaignDayBefore,
+                            liveMetricDifferencesBefore, liveMetricDifferencesAfter, saleReceipt, previousReceipt, ledger,
+                            actionCount, saleActionCount, campaignDayBefore,
                             timeControlModeBefore, initialCaptivityRecovery);
                     }
 
@@ -770,7 +759,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                         previousReceipt = BuildReceipt("tradeCancelChanges", new JsonObject(), cancelReceipt);
                         using var fresh = await stateClient.ReadStateAsync(elapsed.Token);
                         currentNative = ParseObject(fresh.RootElement);
-                        trace.Add(new JsonObject { ["stage"] = "native-trade-draft-declined-and-discarded", ["nativeReceipt"] = cancelReceipt.DeepClone(), ["nativeState"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(currentNative) });
+                        ledger.Trace.Add(new JsonObject { ["stage"] = "native-trade-draft-declined-and-discarded", ["nativeReceipt"] = cancelReceipt.DeepClone(), ["nativeState"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(currentNative) });
                     }
                     continue;
                 }
@@ -799,7 +788,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 {
                     if (AgentHostNativeMapMovementMonitor.IsStalledNativeSettlementMove(currentNative, moveTargetId))
                     {
-                        trace.Add(new JsonObject
+                        ledger.Trace.Add(new JsonObject
                         {
                             ["stage"] = "gold-sale-stopped-native-move-returned-to-parent",
                             ["targetSettlementId"] = moveTargetId,
@@ -824,7 +813,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                             elapsed.Token);
                         currentNative = movementWatch.NativeReceipt;
                         actionCount += movementWatch.MapPartyTargetPollCount + (movementWatch.PauseReceipt is null ? 0 : 1);
-                        trace.Add(new JsonObject
+                        ledger.Trace.Add(new JsonObject
                         {
                             ["stage"] = "gold-sale-passively-observed-existing-native-move",
                             ["targetSettlementId"] = moveTargetId,
@@ -856,7 +845,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
 
                 var observation = BuildObservation(currentNative, state, objectiveSnapshotBefore, liveMetricDifferencesBefore, saleReceipt);
                 var providerPreviousReceipt = BuildProviderPreviousReceipt(previousReceipt, safeTowns);
-                var modelRequest = BuildDecisionRequest(runId, ReadString(request, "goal"), iteration + decisionCount,
+                var modelRequest = BuildDecisionRequest(runId, ReadString(request, "goal"), iteration + ledger.Decisions,
                     observation, providerPreviousReceipt, decisionFeedback, actionCatalog, controls, moveStartPending);
                 var started = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                 var startedTicks = Stopwatch.GetTimestamp();
@@ -867,12 +856,12 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 }
                 catch (AgentHostException exception) when (AgentHostProviderDecisionRecovery.CanRetry(exception.Code, rejectedProviderDecisions))
                 {
-                    decisionCount++;
+                    ledger.RecordUnsentDecision();
                     rejectedProviderDecisions++;
                     decisionFeedback = AgentHostProviderDecisionRecovery.BuildFeedback(exception.Code, actionCatalog, controls);
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
-                        ["iteration"] = decisionCount,
+                        ["iteration"] = ledger.Decisions,
                         ["stage"] = "decision-rejected-before-native",
                         ["rejectionCode"] = exception.Code,
                         ["nativeActionSent"] = false,
@@ -882,21 +871,9 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                     });
                     continue;
                 }
-                decisionCount++;
+                ledger.RecordDecision(modelDecision);
                 rejectedProviderDecisions = 0;
                 decisionFeedback = null;
-                promptTokens += modelDecision.PromptTokens ?? 0;
-                completionTokens += modelDecision.CompletionTokens ?? 0;
-                routeHistory.Add(new JsonObject
-                {
-                    ["decision"] = decisionCount,
-                    ["requestedModelId"] = provider.ModelId,
-                    ["responseModelId"] = modelDecision.ModelId,
-                    ["routedVia"] = modelDecision.RoutedVia,
-                    ["responseFormatMode"] = modelDecision.ResponseFormatMode,
-                    ["promptTokens"] = modelDecision.PromptTokens,
-                    ["completionTokens"] = modelDecision.CompletionTokens
-                });
 
                 if (ReadBoolean(modelDecision.Decision, "observeAgain"))
                 {
@@ -917,7 +894,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                     currentNative = movementWatch.NativeReceipt;
                     actionCount += movementWatch.MapPartyTargetPollCount + (movementWatch.PauseReceipt is null ? 0 : 1);
                     if (moveStartPending) moveStartPending = false;
-                    trace.Add(BuildStep(decisionCount, observation, modelDecision.Decision, null, started, startedTicks,
+                    ledger.Trace.Add(BuildStep(ledger.Decisions, observation, modelDecision.Decision, null, started, startedTicks,
                         new JsonObject
                         {
                             ["kind"] = movementWatch.InterruptedByVisibleHostileBandit ? AgentHostNativeMapMovementMonitor.FailureCode : "bounded-host-observation",
@@ -944,7 +921,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 {
                     previousReceipt = BuildReceipt(action!, arguments!, receipt);
                     using (var fresh = await stateClient.ReadStateAsync(elapsed.Token)) currentNative = ParseObject(fresh.RootElement);
-                    trace.Add(BuildStep(decisionCount, observation, modelDecision.Decision, previousReceipt, started, startedTicks,
+                    ledger.Trace.Add(BuildStep(ledger.Decisions, observation, modelDecision.Decision, previousReceipt, started, startedTicks,
                         new JsonObject { ["kind"] = "native-capacity-confirmation-pending", ["nativeConfirmationAccepted"] = true },
                         BuildObservation(currentNative, currentNative["state"] as JsonObject ?? new JsonObject(), objectiveSnapshotBefore, liveMetricDifferencesBefore, saleReceipt)));
                     continue;
@@ -1024,7 +1001,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
 
                 previousReceipt = BuildReceipt(action!, arguments!, receipt);
                 using (var fresh = await stateClient.ReadStateAsync(elapsed.Token)) currentNative = ParseObject(fresh.RootElement);
-                trace.Add(BuildStep(decisionCount, observation, modelDecision.Decision, previousReceipt, started, startedTicks, null,
+                ledger.Trace.Add(BuildStep(ledger.Decisions, observation, modelDecision.Decision, previousReceipt, started, startedTicks, null,
                     BuildObservation(currentNative, currentNative["state"] as JsonObject ?? new JsonObject(), objectiveSnapshotBefore, liveMetricDifferencesBefore, saleReceipt)));
 
                 if (action == "menuSelect" && ReadString(arguments, "menuId") == "town" && ReadString(arguments, "optionId") == "town_leave" &&
@@ -1043,8 +1020,8 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                     if (ReadDouble(afterGold, "current", double.MinValue) <= ReadDouble(beforeGold, "current", double.MaxValue))
                         throw new AgentHostException("gold-sale-journal-not-increased", "Native proved the transaction, but the original Quest Journal Gold progress did not advance; no further sale was attempted.");
                     return BuildSuccess(runId, provider, initialNative, currentNative, objectiveSnapshotBefore, objectiveSnapshotAfter,
-                        liveMetricDifferencesBefore, liveMetricDifferencesAfter, saleReceipt, previousReceipt, trace, routeHistory,
-                        decisionCount, actionCount, saleActionCount, promptTokens, completionTokens, campaignDayBefore,
+                        liveMetricDifferencesBefore, liveMetricDifferencesAfter, saleReceipt, previousReceipt, ledger,
+                        actionCount, saleActionCount, campaignDayBefore,
                         timeControlModeBefore, initialCaptivityRecovery);
                 }
             }
@@ -1076,7 +1053,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 timeModeBeforeBudgetExit != ReadString(currentNative, "timeControlMode"))
                 throw new AgentHostException("gold-sale-budget-safe-cancel-postcondition-failed", "Native Cancel did not return to the active EYC Map with unchanged Gold and Campaign time.");
 
-            trace.Add(new JsonObject
+            ledger.Trace.Add(new JsonObject
             {
                 ["stage"] = "native-trade-decision-budget-exhausted-cancelled-unchanged-screen",
                 ["nativeAction"] = "tradeCancel",
@@ -1086,7 +1063,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 ["campaignDayUnchanged"] = true,
                 ["timeControlModeUnchanged"] = true,
                 ["saleActionCount"] = saleActionCount,
-                ["modelDecisionCount"] = decisionCount
+                ["modelDecisionCount"] = ledger.Decisions
             });
             return BuildFailure("gold-sale-budget-exhausted-safe-map-recovered",
                 "The decision limit was reached in an unchanged Native Trade screen; original Native Cancel restored the active Quest Map without sale or time changes.");
@@ -1110,9 +1087,9 @@ internal static class AgentHostEstablishClanGoldSaleLoop
 
         JsonObject BuildFailure(string code, string message)
         {
-            routeHistory.Add(new JsonObject
+            ledger.Routes.Add(new JsonObject
             {
-                ["decision"] = decisionCount + 1,
+                ["decision"] = ledger.NextDecisionNumber,
                 ["requestedModelId"] = provider.ModelId,
                 ["status"] = "failed-before-valid-decision",
                 ["failureCode"] = code,
@@ -1126,19 +1103,19 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 ["runId"] = runId,
                 ["providerModelId"] = provider.ModelId,
                 ["providerConfigurationSource"] = provider.ConfigurationSource,
-                ["decisions"] = decisionCount,
+                ["decisions"] = ledger.Decisions,
                 ["actionsExecuted"] = recoveryActions + actionCount,
                 ["saleActionsExecuted"] = saleActionCount,
-                ["promptTokens"] = promptTokens,
-                ["completionTokens"] = completionTokens,
-                ["providerRouteHistory"] = routeHistory.DeepClone(),
+                ["promptTokens"] = ledger.PromptTokens,
+                ["completionTokens"] = ledger.CompletionTokens,
+                ["providerRouteHistory"] = ledger.Routes.DeepClone(),
                 ["initialNativeState"] = initialNative?.DeepClone(),
                 ["finalNativeState"] = currentNative?.DeepClone(),
                 ["initialCaptivityRecovery"] = initialCaptivityRecovery?.DeepClone(),
                 ["objectiveSnapshotBefore"] = objectiveSnapshotBefore?.DeepClone(),
                 ["objectiveSnapshotAfter"] = objectiveSnapshotAfter?.DeepClone(),
                 ["saleReceipt"] = saleReceipt?.DeepClone(),
-                ["trace"] = trace.DeepClone(),
+                ["trace"] = ledger.Trace.DeepClone(),
                 ["termination"] = new JsonObject { ["reason"] = code, ["completedByProvider"] = false, ["goalVerified"] = false },
                 ["failure"] = message,
                 ["failureCode"] = code
@@ -1751,13 +1728,9 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         JsonArray liveMetricDifferencesAfter,
         JsonObject saleReceipt,
         JsonObject? finalReceipt,
-        JsonArray trace,
-        JsonArray routeHistory,
-        int decisions,
+        DecisionRunLedger ledger,
         int actionsExecuted,
         int saleActionsExecuted,
-        long promptTokens,
-        long completionTokens,
         double campaignDayBefore,
         string? timeControlModeBefore,
         JsonObject? captivityRecovery)
@@ -1776,13 +1749,13 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             ["providerModelId"] = provider.ModelId,
             ["providerConfigurationSource"] = provider.ConfigurationSource,
             ["runId"] = runId,
-            ["decisions"] = decisions,
+            ["decisions"] = ledger.Decisions,
             ["actionsExecuted"] = recoveryActionCount + actionsExecuted,
             ["saleActionsExecuted"] = saleActionsExecuted,
             ["gameplayActionsExecuted"] = recoveryGameplayActions + saleActionsExecuted,
-            ["promptTokens"] = promptTokens,
-            ["completionTokens"] = completionTokens,
-            ["providerRouteHistory"] = routeHistory.DeepClone(),
+            ["promptTokens"] = ledger.PromptTokens,
+            ["completionTokens"] = ledger.CompletionTokens,
+            ["providerRouteHistory"] = ledger.Routes.DeepClone(),
             ["initialNativeState"] = initialNative.DeepClone(),
             ["finalNativeState"] = finalNative.DeepClone(),
             ["captivityRecoveryVerified"] = captivityRecovery is null ? null : JsonValue.Create(ReadBoolean(captivityRecovery, "captivityRecoveryVerified")),
@@ -1817,7 +1790,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             ["originalQuestStillActive"] = HasActiveQuest(finalState),
             ["originalQuestCompletionClaimed"] = false,
             ["termination"] = new JsonObject { ["reason"] = "one-native-sale-and-journal-gold-increase-verified", ["completedByProvider"] = false, ["goalVerified"] = true },
-            ["trace"] = trace.DeepClone()
+            ["trace"] = ledger.Trace.DeepClone()
         };
     }
 
