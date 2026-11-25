@@ -299,6 +299,12 @@ Campaign 地图上的遭遇/战斗由 `MapEvent` 管理；它区分 `BattleTypes
 
 `BattleSimulation.OnPlayerRetreat` 会提交部分 XP 后返回遭遇流程，和 `BattleMission TryExit/RetreatMission`、玩家从地图Party撤退、战败被俘是不同的玩家入口/结果链；真实 Mission与Simulation的损伤/撤退/奖励处理不能互相复制。
 
+### 1 人队伍被劫匪撞上的那一刻（实测）
+
+`freshB` 开局检查点上的一次遭遇（`TestResults/20261125-idle-freshB/IdlePressureResult.json`，零模型请求）给出一条对剧本有用的边界：1 人、0 金、已在挨饿的队伍在 0.87 个战役日内被一支 8 人山贼（强度 8.74、距离 0.43）追上，`context.encounterActive=true`、`menuId=encounter_meeting`、`encounteredPartyId=mountain_bandits_2145`，同时队伍 `healthy` 1→0、`wounded` 0→1。对话里可点只有 `bandit_start_defender_3` 与 `bandit_start_defender_2` 两条投降/讨价还价选项；第二跑换成 `looters_2541` 劫匪，option id 完全相同。
+
+所以「一次遭遇摆在面前」在这个起点上是开局第一天的事，而不是中后期的事；至于这次的人员损失是坐镇模拟结算的、还是遭遇前的饥饿造成的，本节无法区分（见 F11 同名实测段）。
+
 ### Chronicle 当前处理与证据
 
 Observer 在BattleSimulation活动时只提供 finished/retreated/battleState等少量模拟状态，Encounter section输出当前参与方基本身份/loot count；Protocol中battlePause/battleSkip、完成和战后清理入口需以 MAINLINE的精确 actions契约为准。现有测试夹具可以为目标窗口注入明确的battle数据，但这不证明任意自然战斗、所有MapEvent类型和各种Party援军的Autonomous战斗处理已完整支持。
@@ -330,6 +336,16 @@ Party troop progression由 `TroopRoster` 的成员计数/伤员数/XP与 `Charac
 `DesertionCampaignBehavior` 每日仅检查活动、在陆上、非Disbanding、非MapEvent且为Lord/Caravan/Garrison等符合条件、且仍有Regular troop的Party。模型按低Morale、工资限额超支、超PartySizeLimit等算要逃兵数量/选择Troop；Garrison对欠薪还有额外流失分支。实际移除从MemberRoster执行并发TroopsDeserted；队伍成员归零则销毁Party。故“目前人数小于PartySizeLimit”并不代表永不减员，缺粮/欠薪/士气是持续限制。
 
 食物/工资背景及玩家Clan每日付款入口分别见E06/E07；适用于Battle/Season/Army的士兵补充或逃兵结算还由相关WarParty/Army/Settlement Models调整。Roster改变的结果通常跨越上方XP、Food、Wage、Heal、Desertion等循环产生反馈。
+
+### 开局挨饿与第一次遭遇的实测（freshB 检查点，两次跑）
+
+`ChronicleEycDev-freshB-20261123092350-d1a1805e` 是一个可复用的 StoryMode 开局检查点，状态本身就在挨饿：`foodInventory=0`、`food=-0.05`、`foodChange=-0.05`、`moraleContext` 里 `isStarving=true`、`recentEventsMorale=-90`、`effectiveMorale=-64.5`、`dailyWage=0`（1 人没有工资支出）、`recentEventsMorale` 与 `effectiveMorale` 之差正是缺粮惩罚。这个检查点说明「饿」在观察面上是可读的：判断一支队伍是否已在挨饿，不能只看 `food` 是否为零，要读 `moraleContext.isStarving` 与 `effectiveMorale`。
+
+两次独立闲置（`harness/Test-AgentIdlePressure.ps1 -ChunkDays 1 -MaxChunks 12`，收据 `TestResults/20261125-idle-freshB/` 与 `TestResults/20261125-idle-freshB-2/`）给出同一个形状：起跑后 0.82–0.87 天出现一次敌军遭遇（山贼或劫匪），同时 `healthy` 1→0、`wounded` 0→1，`cargoCapacity` 30→10、`speed` 5.189→4.988，而 `itemCount` 仍是 1。停因为 `menu-opened`。
+
+伤兵归因仍未分开：F11 上面的 25 人对照跑（补粮 12 天零伤兵、断粮第 10 天首发 3 名伤兵）说明饥饿本身足以在粮见底那天造出伤兵，而本检查点从存档那一刻就在挨饿，所以这里的伤兵既可能是饥饿、也可能是这次遭遇。要分开需要让主角先躲进城镇再等一天；本条只是把「两个原因都在场」记下来，不据此下结论。`cargoCapacity` 与 `speed` 的下降同样未归因（随队动物损失？伤兵？本例分不出来）。
+
+遭遇对话的观察面：`context.conversation` 给出 `characterId`（`mountain_bandits_chief` / `looter`）、`characterName`（拦路强盗 / 劫匪）、`sentenceText` 与 `options[]`（每项 `id`/`text`/`textId`/`clickable`）。在这个 1 人且已受伤的场合，原版只给出两条 `bandit_start_defender_3`「我们已无力再战，全凭你的处置。」与 `bandit_start_defender_2`「也许我们可以找个两全其美的办法。」——同一个 1 人队伍面对山贼和劫匪拿到的是同一组 option id，说明选项集合由玩家方的处境决定，不由对话文本决定。没有出现「迎战」类选项；这一点在源码层未核实，只记为两次实测的观察。
 
 ### Chronicle当前适配与缺口
 
