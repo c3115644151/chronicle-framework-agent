@@ -204,6 +204,16 @@ W5-I食品下限另以一轮配对Native实测（同模板、不是新Seed，Pro
 
 粮食这一侧没有歧义：`Food` 以「人·日 / 20」为单位，1 件 `IsFood` 物品 +1.0，因此 25 人的队伍每天吃 1.25 单位；本机橄榄报价 9、谷物报价 19–30，折合每人每天 0.45–1.5 第纳尔。两者相加即可算出任意规模队伍的日现金支出。
 
+### 收益侧：主机动作白名单决定能赚哪些钱
+
+支出可以算，收益要先看动作面。主机侧按 slice 收窄动词白名单（`agenthost/NativeMailboxClient.cs`：`SupplySliceActions` 7 个、`VillageToolsQuestActions` 19 个、`BattleSimulationActions` 12 个），不在白名单里的动词即使原版机制存在也执行不了。
+
+EYC 产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanGoldSaleLoop.cs` 只允许 `trade` 且 `direction=sell`、`inventorySide=PlayerInventory`、`amount=1`，加 `sellPrisonerOne`；没有买入动词。该循环以 Quest Journal 的 gold 进度为准核对每笔成交，进度不涨即中止。因此这条路线上的金币只增于「卖掉已经到手的东西」：战后 Loot（`partyLootTransferOne`/`partyTakeAll`）、战俘、任务奖励。
+
+竞技场是原版开局最容易的赚钱路子，当前状态是机制接上、动词未暴露：`mod/AgentTournamentAdapter.cs` 通过 Harmony 捕获原版 `TournamentVM`，提供 `tournamentJoin`/`tournamentWatchRound`/`tournamentSkipRound`/`tournamentSkipAllRounds`/`tournamentLeave` 五个原版 handler，并观测 `canPlayerJoin`/`activeRoundIndex`/`wageredDenars`/`expectedBetDenars`/`prizeItemId`/`result.playerWon`；但 `agenthost` 全仓没有 `tournamentJoin` 引用，任何 slice 白名单都不含它，模型看不到这条路。把它接进动作面需要真机进竞技场 Mission 验证报名与跳过轮次的真实结算，属于扩展玩家动作面。
+
+已记录的邮箱流（`events.jsonl`，921 条事件、38 个 nativeSession）里没有一次 `trade` 或锦标赛动作。这不是模型偏好证据：那些 session 未必经过允许交易的 slice。要判断模型在有交易动词时会不会用，必须有对应运行收据。
+
 ### 货物、负重、动物与战后物资
 
 Party `ItemRoster` 同时承载食品、贸易物、动物与战利品；缓存的 `TotalFoodAtInventory`、`TotalWeightCarried`、`InventoryCapacity`、动物数量会分别影响食物、载重、速度或交易判断。战后 ItemRoster 可能先进入 Encounter 的待领取 Loot Roster，再经原生 InventoryState 领取到 Party；那不是“战斗奖励已到账”的同义词，处理链见 G/H 域及 MAINLINE 的 partyLoot 契约。队伍内囚犯、受伤/健康成员、战利品/库存的转移则由对应 PartyScreen、InventoryLogic 和结算动作分别提交。

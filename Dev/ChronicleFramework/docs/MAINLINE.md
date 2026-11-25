@@ -1005,7 +1005,7 @@ CLI响应目录另核到上述Native `resume`、释放选项及`mapSettlementTar
 
 - 战斗：`MapEventSide` 先根据敌我强度与双方强度比计算战斗声望值；`MapEvent` 再按胜方各队贡献份额和敌方战力被消灭的比例分配，`DefaultBattleRewardModel` 还可能叠加 perk/文化修正。它不是每胜一场给定常数。
 - 受控战斗夹具证明原版结算会依据双方强度、胜方贡献和敌方消灭比例计算声望；单个受控样本不代表野外自然遭遇的典型收益，不能线性外推成达标战斗场数。
-- 锦标赛：`DefaultTournamentModel` 默认胜者给3点，但赛事生成受城镇状态、时间及当地参赛者等条件影响；玩家须进入赛事 Mission。Chronicle 当前没有锦标赛/3D比赛控制能力，因此奖励数值并不等于可用路线。
+- 锦标赛：`DefaultTournamentModel` 默认胜者给3点，但赛事生成受城镇状态、时间及当地参赛者等条件影响；玩家须进入赛事 Mission。`mod/AgentTournamentAdapter.cs` 通过 Harmony 捕获原版 `TournamentVM`，提供 `tournamentJoin`/`tournamentWatchRound`/`tournamentSkipRound`/`tournamentSkipAllRounds`/`tournamentLeave` 五个原版 handler，并观测 `canPlayerJoin`/`wageredDenars`/`expectedBetDenars`/`prizeItemId`/`result.playerWon`；`agenthost` 无 `tournamentJoin` 引用，任何 slice 白名单都不含该动词，三维格斗输入未覆盖。因此奖励数值仍不等于可用路线，且当前连报名都不可达。
 - Issue：源码中存在多个+1至+10左右的奖励分支，但每种 Issue 的触发对象、前置资源、交付方式和成败结果不同；聚合调用点不足以判断哪一种适合作为通用的 Tier 1 前置循环。
 
 当前判断：地图战斗与已有 battle bridge 的复用度最高，只能列为一个可检验候选；不能把P5偷换为“反复打劫匪直到50”。在确定验证场景前，还需从玩家实际可用路径、出现率、损失/收益及尚未适配的入口完成比较，并继续保持 Tier 1 是Agent成熟度夹具而非产品目标。

@@ -130,6 +130,26 @@ agent 侧已经中立：`agenthost` 全部 33 个源文件对 `Hero.MainHero` / 
 
 由此把开局求生的压力源改写为：**雇人的机会成本 + 战役日的现金燃烧 + 无处落脚时的住宿与补粮**；失败条件改为「队伍规模缩水或欠薪导致士气归零」，而不是「金币归零」。金币归零在 25 人之前几乎不会发生，用它判定会得到一个永远通过的场景。
 
+### 9.2 收益面：钱只能从已经拿到手的东西里来
+
+压力曲线算的是支出，收益侧同样由动作面决定，而不是由模型有多聪明决定。主机侧按 slice 收窄动作白名单（`agenthost/NativeMailboxClient.cs` 的 `SupplySliceActions` 7 个动词、`VillageToolsQuestActions` 19 个、`BattleSimulationActions` 12 个），落在白名单以外的动词模型即使知道名字也执行不了。
+
+EYC 这条产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanGoldSaleLoop.cs` 只接受 `trade` 且 `direction=sell`、`inventorySide=PlayerInventory`、`amount=1`，外加 `sellPrisonerOne`。不能买入。于是这个项目里金币只有一条增长链：**先有可卖的东西，再一件一件卖掉**——战利品（`partyLootTransferOne`/`partyTakeAll`）、战俘、任务奖励。卖家一侧的原版回执以 Quest Journal 的 gold 进度为准，交易被原版证明之后才继续下一件。
+
+| 赚钱方式 | 原版里有 | 这套动作面里 |
+| --- | --- | --- |
+| 卖战利品 | 战后 Loot 界面取物再卖 | 有：`partyLootTransferOne`/`partyTakeAll` + `trade`（sell，一次 1 件） |
+| 卖战俘 | 城镇酒馆/监狱卖出 | 有：`sellPrisonerOne` |
+| 任务奖励 | 完成任务由 Issue 结算给金 | 有：任务接受与交付走 `questDetails`/对话分支 |
+| 低价买入高价卖出 | 城镇市场价差 | EYC 路线里没有买入动词；只有 VillageToolsQuest slice 允许买 |
+| 竞技场奖金/赌注 | 报名锦标赛、跳过轮次、看结算 | **没有**：`mod/AgentTournamentAdapter.cs` 已适配 `tournamentJoin`/`tournamentSkipAllRounds` 等五个原版 handler，`agenthost` 全仓零引用，任何白名单都不含它 |
+
+这一行的空缺值得单独说：竞技场是原版开局最容易的赚钱路子，而它在 Chronicle 里是「机制已经接上、动词没有暴露」。所以「模型没去赚奖金」这句话在当前状态下没有信息量——路不在动作面里。评价模型之前先问一句它看得到哪些能换钱的动词，否则会把「路不存在」记成「它没去找」。
+
+把锦标赛接进动作面属于扩展玩家动作面，不是文档任务：它要真机进竞技场 Mission 验证报名、跳过轮次的真实结算与胜者判定，因此在产品看板上单列，不在本轮自行接上。
+
+另一件要交代清楚的事：已记录的邮箱流（`events.jsonl`，921 条事件、38 个 nativeSession）里没有出现过一次 `trade` 或锦标赛动作。这不能当成模型偏好证据——那些 session 未必经过允许交易的 slice——只能说明这条路上没有留下尝试记录。要判断模型在有交易动词时会不会去用，必须有对应的运行收据。
+
 ## 10. 明确不做
 
 - **不把动作广度当 KPI**：动作目录有多少条不是体验，四条判据才是。
