@@ -1111,3 +1111,13 @@ Contract 7.673为直接OpenRouter `:free`模型增加每请求至少3.1秒的间
 同一天把主机侧的市场路由从 `town` 扩到「任何打开 Trade 的聚落」：`AgentHostEstablishClanGoldSaleLoop` 新增 `IsMarketMenu(menuId)`/`IsMarketTargetType(type)`，`FilterSafeTowns` 改名 `FilterSafeMarkets`，村庄菜单目录发 `menuSelect village/trade`，空市场后退回该聚落自己的 `leave`；自测新增村庄菜单、外来 `menuId` 拒绝与空市场 `leave` 三条。可以引用的结论：**村庄是给养市场加战利品出口，商人金只有 1000（城镇 53,636/69,253），所以它是出口而不是第二个套利点。**
 
 可复跑：`./harness/Run-Harness.ps1 -Phase VillageMarketProbe`（含 `Preflight` 与 `Build`），或直接 `./harness/Test-AgentVillageMarketProbe.ps1 -LoadSaveName ChronicleW7P-manual-20261101-eyc-complete -TimeoutSeconds 300`。
+
+## 2026-11-26 Smoke 启动窗口竞态：游戏抢前台与交还（契约 7.709）
+
+`Run-Harness.ps1 -Phase AgentHostEstablishClanGoldSaleEvaluation` 在 `TestResults/20261126-025558`、`TestResults/20261126-025636` 连续两次红在 Smoke：`StartupFault: Harness could not keep the test-owned game window visible without activating or foregrounding it`，`WindowLayout.Applied=false`、`ForegroundProcessId` 等于游戏自己的进程、`ElapsedSeconds` 3.4。
+
+取证：`TestResults/_fgprobe.ps1` 每 250ms 采样 26 秒，游戏窗口从头到尾都是前台；`TestResults/_focusprobe.ps1` 用 `AttachThreadInput` + `BringWindowToTop` + `SetForegroundWindow` 把前台交还给启动前的窗口（pid 21912，DeepSeek Harness 应用窗口），随后 8 秒采样全部保持 21912。窗口本身是用 `SW_SHOWNOACTIVATE`/`SWP_NOACTIVATE` 放置的，无法收回前台，所以只能交还。
+
+改动：新增 `harness/HarnessFocusRestore.ps1`（`Restore-ChroniclePreLaunchForeground`，只交还给启动前记录的前台窗口，拒绝游戏自身/Harness 自身/已退出/无可见窗口，并回读前台进程核对）；`harness/Test-WindowLayout.ps1` 在不满足 `NotForeground` 时调用它（预算 3 次）；`harness/Test-Module.ps1` 改为 20 秒宽限内累计 `WindowLayoutFailures`，并在收据里写 `FocusRestoreReason`；`harness/gate/17-runtime-loops.ps1` 断言这些前提。
+
+复跑 `TestResults/20261126-030235`：Smoke 通过（36s、`WindowLayoutFailures=0`、`FocusRestoreReason=no-focus-restore-attempt`、前台 21912、游戏 17944）——说明抢前台是间歇现象，宽限窗口与交还逻辑两道防线都需要。

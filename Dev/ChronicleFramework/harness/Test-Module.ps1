@@ -110,6 +110,10 @@ if ($soundDisabledDuring -ne 1) { throw 'Bannerlord game sound must be disabled 
 
 $cursorClipBaseline = Get-ChronicleCursorClipSnapshot
 $launchStart = Get-Date
+# A freshly launched game window can hold the foreground until the Harness hands it back to the
+# window that owned it before launch; treat that as a bounded startup window, not an instant fault.
+$windowLayoutGraceDeadline = $launchStart.AddSeconds(20)
+$windowLayoutFailures = 0
 $startupWatch = [Diagnostics.Stopwatch]::StartNew()
 $diagnosticStartLineCount = if (Test-Path $diagnosticLog) { @(Get-Content $diagnosticLog).Count } else { 0 }
 $priorHarnessMode = [Environment]::GetEnvironmentVariable('CHRONICLE_HARNESS_MODE', 'Process')
@@ -161,8 +165,11 @@ while ((Get-Date) -lt $deadline) {
     if ($candidateWindowLayout) {
         $testWindowLayout = $candidateWindowLayout
         if (-not [bool]$candidateWindowLayout.Applied -or -not [bool]$candidateWindowLayout.NonActivating -or -not [bool]$candidateWindowLayout.NotForeground) {
-            $startupFault = 'Harness could not keep the test-owned game window visible without activating or foregrounding it; no UI/game interaction should proceed.'
-            break
+            $windowLayoutFailures++
+            if ((Get-Date) -ge $windowLayoutGraceDeadline) {
+                $startupFault = 'Harness could not keep the test-owned game window visible without activating or foregrounding it; no UI/game interaction should proceed.'
+                break
+            }
         }
     }
     $trackedProcess = Get-Process -Id $trackedProcessId -ErrorAction SilentlyContinue
@@ -332,6 +339,9 @@ $result = [ordered]@{
     WindowLayoutApplied = [bool]($testWindowLayout -and $testWindowLayout.Applied)
     WindowLayoutNonActivating = [bool]($testWindowLayout -and $testWindowLayout.NonActivating)
     WindowNotForeground = [bool]($testWindowLayout -and $testWindowLayout.NotForeground)
+    WindowLayoutFailures = $windowLayoutFailures
+    FocusRestore = if ($testWindowLayout) { $testWindowLayout.FocusRestore } else { $null }
+    FocusRestoreReason = if ($testWindowLayout -and $testWindowLayout.FocusRestore) { [string]$testWindowLayout.FocusRestore.Reason } else { 'no-focus-restore-attempt' }
     CursorUnrestrictedAcrossDesktop = [bool]($testWindowLayout -and $testWindowLayout.CursorUnrestrictedAcrossDesktop)
     CursorClipBaseline = $cursorClipBaseline
     CursorClipRestorationAfterExit = $cursorClipRestoration

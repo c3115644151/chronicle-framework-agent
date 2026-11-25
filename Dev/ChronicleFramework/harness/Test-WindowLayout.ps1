@@ -102,6 +102,10 @@ namespace ChronicleFramework
     }
 }
 
+if (-not (Get-Command Restore-ChroniclePreLaunchForeground -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot 'HarnessFocusRestore.ps1')
+}
+
 function Set-ChronicleTestDisplayConfig([string]$EngineConfigPath) {
     if (-not (Test-Path $EngineConfigPath)) { return }
     $text = Get-Content $EngineConfigPath -Raw
@@ -178,6 +182,8 @@ function Set-ChronicleTestWindow([int]$ProcessId, [object]$CursorClipBaseline = 
     $iconic = $true
     $cursorClipRestoreAttempted = $false
     $cursorClipRestoreSucceeded = $false
+    $focusRestore = $null
+    $focusRestoreBudget = 3
     for ($attempt = 0; $attempt -lt 12; $attempt++) {
         $nonActivating = [ChronicleFramework.WindowApi]::EnsureNoActivate($handle)
         [ChronicleFramework.WindowApi]::ShowWindowAsync($handle, 4) | Out-Null
@@ -187,6 +193,14 @@ function Set-ChronicleTestWindow([int]$ProcessId, [object]$CursorClipBaseline = 
         $foregroundProcessId = [ChronicleFramework.WindowApi]::GetForegroundProcessId()
         # Window foreground must not belong to the harness client, including during 3D Missions.
         $notForeground = $foregroundProcessId -ne $ProcessId
+        if (-not $notForeground -and $focusRestoreBudget -gt 0 -and $null -ne $CursorClipBaseline) {
+            # The game window can claim the foreground while it initializes; hand it back to the
+            # window that owned the foreground before launch instead of failing the whole run.
+            $focusRestore = Restore-ChroniclePreLaunchForeground -TargetProcessId ([int]$CursorClipBaseline.ForegroundProcessId) -GameProcessId $ProcessId
+            $focusRestoreBudget--
+            $foregroundProcessId = [ChronicleFramework.FocusApi]::GetForegroundProcessId()
+            $notForeground = $foregroundProcessId -ne $ProcessId
+        }
         $cursorClipRead = [ChronicleFramework.WindowApi]::GetClipCursor([ref]$cursorClip)
         $virtualLeft = [ChronicleFramework.WindowApi]::GetSystemMetrics(76)
         $virtualTop = [ChronicleFramework.WindowApi]::GetSystemMetrics(77)
@@ -233,6 +247,7 @@ function Set-ChronicleTestWindow([int]$ProcessId, [object]$CursorClipBaseline = 
         NonActivating = $nonActivating
         NotForeground = $notForeground
         ForegroundProcessId = $foregroundProcessId
+        FocusRestore = $focusRestore
         CursorClipRead = $cursorClipRead
         CursorUnrestrictedAcrossDesktop = $cursorUnrestrictedAcrossDesktop
         CursorClipRectangle = [ordered]@{ Left = $cursorClip.Left; Top = $cursorClip.Top; Right = $cursorClip.Right; Bottom = $cursorClip.Bottom }

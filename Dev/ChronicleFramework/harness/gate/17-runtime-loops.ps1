@@ -63,6 +63,20 @@ if (-not (Test-ChronicleNoActivateStyleContract) -or
     $testWindowLayoutSource -match 'SetForegroundWindow|BringWindowToTop') {
     throw 'Harness game windows must remain visible for capture but carry WS_EX_NOACTIVATE, verify the style, and restore only a test-introduced cursor clip to the previously unrestricted desktop bounds without foregrounding or injecting input.'
 }
+$focusRestoreSource = Get-Content (Join-Path $stageRoot 'HarnessFocusRestore.ps1') -Raw -Encoding UTF8
+if ($testWindowLayoutSource -notmatch 'Restore-ChroniclePreLaunchForeground -TargetProcessId' -or
+    $focusRestoreSource -notmatch 'AttachThreadInput' -or
+    $focusRestoreSource -notmatch 'pre-launch-foreground-owner-is-the-harness' -or
+    $focusRestoreSource -notmatch 'pre-launch-foreground-owner-was-the-game' -or
+    $focusRestoreSource -notmatch 'pre-launch-foreground-owner-has-exited' -or
+    $focusRestoreSource -notmatch 'FindVisibleProcessWindow' -or
+    $focusRestoreSource -notmatch 'Restored = \$receipt\.ForegroundProcessIdAfter -ne \$GameProcessId' -or
+    $focusRestoreSource -notmatch 'pre-launch-foreground-owner-restored' -or
+    $smokeModuleSource -notmatch '\$windowLayoutGraceDeadline = \$launchStart\.AddSeconds\(20\)' -or
+    $smokeModuleSource -notmatch '\$windowLayoutFailures\+\+' -or
+    $smokeModuleSource -notmatch 'FocusRestoreReason = if \(\$testWindowLayout -and \$testWindowLayout\.FocusRestore\)') {
+    throw 'A game window that grabs the foreground on startup must be handed back to the recorded pre-launch owner within a bounded startup grace window, never to the Harness process, and the smoke receipt must name the reason when the hand-back is refused.'
+}
 if ($agentCliSource -notmatch "'recoverTestConfig'" -or $testWindowLayoutSource -notmatch "max_framerate = 30" -or $agentCliSource -notmatch 'engine_config\.chronicle-backup' -or $agentCliSource -notmatch 'Restore-ChronicleTestEngineConfig' -or $agentCliSource -notmatch 'engineConfigRestored' -or $agentCliSource -notmatch 'startup-timeout-' -or $agentCliSource -notmatch 'RglErrorLogTail' -or $agentCliSource -notmatch 'WatchdogLogTail' -or $agentCliSource -notmatch 'Ensure-ChronicleSteamClient' -or $startupEvidenceSource -notmatch 'steamwebhelper' -or $startupEvidenceSource -notmatch 'Get-ChronicleSteamClientReadiness' -or $startupEvidenceSource -notmatch 'Bannerlord was not launched' -or $agentCliSource -notmatch 'ConvertTo-ChronicleStartupDialogEvidence' -or $agentCliSource -notmatch 'StreamReader') { throw 'Harness must wait for stable Steam WebHelper readiness, serialize sanitized startup dialog evidence, and preserve Steam API warnings without global input.' }
 if ($freshCampaignTest -notmatch 'FreshCampaign\.initial-state\.json' -or $freshCampaignTest -notmatch 'WriteAllBytes' -or $freshCampaignTest -notmatch 'creationCompleted -and \$initialSnapshotCaptured') { throw 'FreshCampaign must persist the post-creation Agent observation as UTF-8 evidence before passing.' }
 if ($freshCampaignTest -notmatch 'IssueConversationProbeApplicable' -or $freshCampaignTest -notmatch 'IssueConversationProbeSkipped' -or $freshCampaignTestCompact -notmatch 'issueConversationProbePassed = if \(\$issueProbeExpected\).*?\$null' -or $freshCampaignTest -notmatch 'issueConversationProbeOutcomeValid' -or $freshCampaignTest -notmatch 'issueConversationOfferDenied' -or $freshCampaignTest -notmatch 'issueOfferOptionAvailable') { throw 'FreshCampaign must distinguish an applicable offer/denial from a no-issue skip.' }
