@@ -248,6 +248,8 @@ EYC 产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanGoldSal
 
 已记录的邮箱流（`events.jsonl`，921 条事件、38 个 nativeSession）里没有一次 `trade` 或锦标赛动作。这不是模型偏好证据：那些 session 未必经过允许交易的 slice。要判断模型在有交易动词时会不会用，必须有对应运行收据。
 
+比 slice 白名单更早的一层：通用战役循环给模型的清单里根本没有市场动词。`agenthost/AgentHostCampaignLoop.cs:1036` 的 `BuildActionCatalog` 只产出 `mapSettlementTargets`、`move` 和地图对话动词，`moving` 或 `goalVerified` 为真即返回空清单；到达聚落后控件只剩 `done`（`:1083` 的 `BuildControlCatalog`）。自测 `campaign-loop-offers-no-market-verb-outside-objective-slices` 用「站在城镇菜单、金库 900、粮仓 0」的状态把这条边界钉住：`goalVerified=false` 时只给 `move`，到达后只给 `done`。所以「买粮/卖货」不是被 slice 白名单挡掉，而是在这个循环的选项里不存在；买卖动词只出现在被目标调起的 slice（GoldSale、VillageToolsQuest 的买工具、Supply 的那一次买粮）内部。拿「模型没去买粮」当理财能力判据之前，先确认那一刻它手里有没有这个动词。
+
 战俘出售有两条真机收据（均零模型请求）。`TestResults/20261030-012146/RansomCancelRuntime.json`：Ransom 界面暂存一名骑马掠夺者，草稿 +50，原版 Done 后金币 1823→1873、俘虏 7→6。`TestResults/20261125-202821/PrisonerRansomSaleResult.json`（现注册为 `PrisonerRansomSale` 阶段）：夹具战役日 91179.34、金币 2277、俘虏 2 名 `looter`，右侧接收上限 22，两次 `sellPrisonerOne` 把草稿从 5 累到 10，一次 `partyScreenDone` 使金币 2277→2287、俘虏 2→0，`campaignDayBefore/After` 相同、时钟档位 Stop 不变、PartyScreen 关闭回到 `town_backstreet` 地图菜单。两条合起来给出的价格事实是：**looter 5 第纳尔/人、骑马掠夺者 50 第纳尔/人**，同一批 7 名混合俘虏的菜单报价为 374——单价由兵种等级决定，不是由人数决定。逐人转移只改草稿，整笔由一次 Done 提交，因此观察窗口与提交时机都由模型决定。
 
 ### 货物、负重、动物与战后物资

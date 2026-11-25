@@ -293,6 +293,21 @@ internal static class AgentHostCampaignLoop
             throw new AgentHostException("campaign-loop-self-test-completion-gate-failed", "The done control must appear only after Native arrival is verified.");
         results.Add(new { scenario = "campaign-loop-done-requires-native-arrival", passed = true });
 
+        var arrivedTownMenu = new JsonObject
+        {
+            ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = "town", ["timeControlMode"] = "Stop", ["encounterActive"] = false },
+            ["location"] = new JsonObject { ["currentSettlementId"] = "safe", ["targetSettlementId"] = null },
+            ["party"] = new JsonObject { ["isMoving"] = false, ["gold"] = 900, ["foodInventory"] = 0 }
+        };
+        var arrivedTownActions = BuildActionCatalog(safeTargets, moving: false, goalVerified: true, state: arrivedTownMenu);
+        var arrivedTownControls = BuildControlCatalog(moving: false, goalVerified: true, state: arrivedTownMenu);
+        var townMenuQueryActions = BuildActionCatalog(safeTargets, moving: false, goalVerified: false, state: arrivedTownMenu);
+        if (arrivedTownActions.Count != 0 || arrivedTownControls.Count != 1 ||
+            !string.Equals(arrivedTownControls[0]?.GetValue<string>(), "done", StringComparison.Ordinal) ||
+            townMenuQueryActions.Count != 1 || ReadString(townMenuQueryActions[0] as JsonObject, "action") != "move")
+            throw new AgentHostException("campaign-loop-self-test-town-menu-sells-market-verbs", "Standing in a Native town menu with gold and an empty larder must not hand the model a market verb: before arrival only move is listed, after arrival only done is listed, because tradeOptions/trade/tradeConfirm live inside the objective slices rather than the campaign loop.");
+        results.Add(new { scenario = "campaign-loop-offers-no-market-verb-outside-objective-slices", passed = true });
+
         if (!TryResolveCampaignAction(new JsonObject { ["action"] = "move", ["arguments"] = new JsonObject { ["SettlementId"] = "safe" } }, safeTargets, out var action, out var arguments, out var selected, out _) ||
             action != "move" || arguments?["settlementId"]?.GetValue<string>() != "safe" || selected?.Id != "safe")
             throw new AgentHostException("campaign-loop-self-test-target-binding-failed", "A move must bind to the exact ID from the latest safe Native map query.");

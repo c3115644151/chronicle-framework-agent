@@ -183,6 +183,22 @@ EYC 这条产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanG
 
 同一批对比里最有用的是一个数字：**一名 `looter` 只值 5 第纳尔，而一名骑马掠夺者值 50**。按 §9.1 的日烧曲线，25 人队伍每天要付 59–85，靠卖劫匪凑钱等于一天要抓十几个人。所以「卖战俘」不是金库，而是一条薄利、看俘获兵种等级的路线；把它写进场景时，压力源应该是「有没有值得卖的东西」，而不是「肯不肯卖」。这条链也天然适合做判据：每一步只是草稿，模型看得到 `ransomGoldChangeAmount`，必须自己决定卖谁、卖几个、什么时候收手。
 
+### 9.3 决策面：模型做决定的那一刻手里有哪些动词
+
+场景能不能成立，不只取决于世界会出什么事，还取决于**在那一刻模型被允许做什么**。这一层可以直接读代码确认，不需要猜。
+
+通用战役循环（`agenthost/AgentHostCampaignLoop.cs`）给模型的清单只有一个来源：`BuildActionCatalog`（`:1036`）。它产出三种东西——`mapSettlementTargets`、`move`、以及地图对话里的 `dialogueSelect`/`dialogueContinue`；一旦 `moving` 或 `goalVerified` 为真就返回空清单。控件走 `BuildControlCatalog`（`:1083`），到达聚落后只给一个 `done`。
+
+所以有一件事说得很直白：**模型站在城镇菜单里，即使金库 900、粮仓 0，它手里也没有 `tradeOptions`，更没有 `sellPrisonerOne`**。市场与收钱动词只存在于被目标调起的 slice 内部——EYC 的 gold objective（`:723` 的 objective 路由 → `AgentHostEstablishClanGoldSaleLoop`）、VillageToolsQuest 里买工具的那一次 `trade`、Supply slice 允许的那一次买粮。
+
+这条边界现在被自测钉住了：`campaign-loop-offers-no-market-verb-outside-objective-slices`（同一个文件的自测清单，当前 430 个场景）。断言就两句——城镇菜单 + `goalVerified=false` 只给 `move`；到达后 `goalVerified=true` 只给 `done`。它防的是以后有人顺手往战役循环里塞市场动词却不改这段叙述。
+
+对场景设计，这个事实有三个后果：
+
+- 「开局求生」在金钱维度上决策面是空的：模型能决定去哪、打不打，不能决定买不买粮。拿它当「会不会理财」的判据会冤枉模型。
+- 任何「让模型自己管钱」的场景，前提是先把买卖动词放进战役循环，那属于玩家动作面扩展，要走真机验证与产品判断，不是脚本任务。
+- EYC 的 gold 目标给了模型「要赚钱」的选择权，但只给「卖一件」的执行权：它能选要不要赚，选不了怎么赚。这也是 §4 判据的一个可指认实例——不是它没去想，是它那一刻没有这个选项。
+
 ## 10. 明确不做
 
 - **不把动作广度当 KPI**：动作目录有多少条不是体验，四条判据才是。

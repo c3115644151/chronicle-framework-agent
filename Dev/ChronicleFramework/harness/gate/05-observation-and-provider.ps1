@@ -116,6 +116,7 @@ if ($harnessScript -notmatch "'AgentHostCampaignLoopEvaluation' \{ @\('Preflight
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-target-query-precedes-move-and-completion' -or
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-does-not-repeat-map-query-after-empty-result' -or
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-self-test-hostile-meeting-does-not-wait' -or
+    $agentHostCampaignLoopSource -notmatch 'campaign-loop-offers-no-market-verb-outside-objective-slices' -or
     $agentHostCampaignLoopSource -notmatch 'provider-goal-classification-unavailable' -or
     $agentHostCampaignLoopSource -notmatch 'AgentHostProviderDecisionRecovery.CanRetry' -or
     $agentHostCampaignLoopSource -notmatch 'provider-arguments-invalid-json' -or
