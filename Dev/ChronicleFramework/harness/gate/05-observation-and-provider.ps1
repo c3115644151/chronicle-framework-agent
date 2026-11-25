@@ -472,7 +472,7 @@ if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S
     $agentHostRecruitmentLoopSource -notmatch 'MaxDecisions = AgentHostCampaignLoop\.MaxCumulativeDecisions' -or
     $agentHostCompanionLoopSource -notmatch 'MaxDecisions = AgentHostCampaignLoop\.MaxCumulativeDecisions' -or
     $agentHostGoldSaleLoopSource -notmatch 'for \(var iteration = 1; decisionCount < maxDecisions; iteration\+\+\)' -or
-    $agentHostCaptivityRecoveryLoopSource -notmatch 'for \(var loopIndex = 1; decisions < maxDecisions; loopIndex\+\+\)' -or
+    $agentHostCaptivityRecoveryLoopSource -notmatch 'for \(var loopIndex = 1; ledger\.Decisions < maxDecisions; loopIndex\+\+\)' -or
     $agentHostCampaignLoopSource -notmatch 'GetCumulativeDecisionLimit\(maxDecisions\)' -or
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-self-test-child-decision-limit-shrank' -or
     $agentHostCampaignLoopSource -notmatch 'maxElapsedSeconds is >= 1 and <= 86400' -or

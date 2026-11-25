@@ -485,11 +485,8 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
 
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
-        var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
-        var routes = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
-        var decisions = priorDecisions;
-        var promptTokens = priorPromptTokens;
-        var completionTokens = priorCompletionTokens;
+        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens,
+            priorTrace, priorProviderRouteHistory);
         var actionsExecuted = 0;
         var rejected = 0;
         var rejectedDecisionFingerprints = new HashSet<string>(StringComparer.Ordinal);
@@ -540,7 +537,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             }
             trackedIssueQuestId = FindTrainingIssueQuestId(initialState);
 
-            for (var localIndex = 1; decisions < maxDecisions; localIndex++)
+            for (var localIndex = 1; ledger.Decisions < maxDecisions; localIndex++)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
                 if (localIndex > 1)
@@ -564,7 +561,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                     failure = "The Native settlement move remains active while Campaign time is stopped; return it to the EYC parent for the existing bounded original-Move recovery.";
                     failureCode = "native-stalled-move-returned-by-training-issue";
                     termination = failureCode;
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "training-issue-returned-paused-native-move-to-parent",
                         ["campaignDay"] = currentNative?["campaignDay"]?.DeepClone(),
@@ -592,7 +589,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                     using var settledVillagerState = await client.ReadStateAsync(elapsed.Token);
                     var settledVillagerNative = ParseObject(settledVillagerState.RootElement);
                     var settledVillagerDay = ReadDouble(settledVillagerNative, "campaignDay");
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "training-issue-villagers-in-need-conversation-startup-settle",
                         ["attempt"] = villagersInNeedStartupWaits,
@@ -651,16 +648,16 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
 
                 var villagersInNeedConversation = AgentHostEstablishClanRecruitmentLoop.IsVillagersInNeedConversation(state);
                 if (!villagersInNeedConversation &&
-                    ShouldStopUnproductiveTrainingIssueSearch(currentNative!, decisions, priorDecisions, activeTrainingIssue, directOfferAccepted))
+                    ShouldStopUnproductiveTrainingIssueSearch(currentNative!, ledger.Decisions, priorDecisions, activeTrainingIssue, directOfferAccepted))
                 {
                     failure = $"No visible retainer-training Issue became active within the bounded {MaximumTrainingIssueDiscoveryDecisions}-decision discovery budget; returning free Map control to the Gold objective parent.";
                     failureCode = "training-issue-search-budget-exhausted";
                     termination = failureCode;
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "native-training-issue-discovery-budget-exhausted",
                         ["maxLocalDecisions"] = MaximumTrainingIssueDiscoveryDecisions,
-                        ["localDecisionsUsed"] = decisions - priorDecisions,
+                        ["localDecisionsUsed"] = ledger.Decisions - priorDecisions,
                         ["settlementSearchCount"] = visitedSettlements.Count,
                         ["currentSettlementId"] = ReadString(state["location"] as JsonObject, "currentSettlementId"),
                         ["activeTrainingIssue"] = activeTrainingIssue,
@@ -699,12 +696,9 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                     }
                     var inquiryResult = await AgentHostNativeInquiryResolution.RunAsync(client, client, provider, elapsed.Token,
                         runId + "-training-return", "Return the currently trained borrowed troops to the Issue giver to finish the active Native training quest and claim its reward.");
-                    decisions += ReadInt(inquiryResult, "decisions", 0);
-                    promptTokens += ReadLong(inquiryResult, "promptTokens", 0);
-                    completionTokens += ReadLong(inquiryResult, "completionTokens", 0);
+                    ledger.RecordDelegated(inquiryResult);
                     actionsExecuted += ReadInt(inquiryResult, "actionsExecuted", 0);
-                    AppendRoutes(routes, inquiryResult["providerRouteHistory"] as JsonArray);
-                    trace.Add(new JsonObject { ["stage"] = "native-training-return-inquiry", ["result"] = inquiryResult.DeepClone() });
+                    ledger.Trace.Add(new JsonObject { ["stage"] = "native-training-return-inquiry", ["result"] = inquiryResult.DeepClone() });
                     if (ReadString(inquiryResult, "status") != "resolved")
                     {
                         failure = ReadString(inquiryResult, "failure") ?? "The current Native training return inquiry did not resolve.";
@@ -752,22 +746,21 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 var modelPreviousReceipt = BuildSafeModelPreviousReceipt(previousReceipt, visibleSafeTargets);
                 var observation = BuildObservation(currentNative!, eycJournalAfter, issueDetails, trackedIssueQuestId,
                     upgradeOptionsReceipt, modelPreviousReceipt, feedback, visibleSafeTargets);
-                var decisionIndex = decisions + 1;
+                var decisionIndex = ledger.NextDecisionNumber;
                 var modelRequest = BuildDecisionRequest(runId, decisionIndex, goal, observation, modelPreviousReceipt, feedback, catalog, controls);
                 ProviderDecisionResult providerResult;
                 try
                 {
                     providerResult = await AgentHostDecisionCycle.DecideEstablishClanTrainingIssueAsync(provider, modelRequest, elapsed.Token);
-                    decisions++;
+                    ledger.RecordDecision(providerResult);
                     rejectedProviderDecisions = 0;
-                    AddProviderRoute(routes, provider, providerResult, decisions, ref promptTokens, ref completionTokens);
                 }
                 catch (AgentHostException exception) when (AgentHostProviderDecisionRecovery.CanRetry(exception.Code, rejectedProviderDecisions))
                 {
-                    decisions++;
+                    ledger.RecordUnsentDecision();
                     rejectedProviderDecisions++;
                     feedback = AgentHostProviderDecisionRecovery.BuildFeedback(exception.Code, catalog, controls);
-                    trace.Add(BuildDecisionStep(decisionIndex, modelRequest, null, feedback, null, false));
+                    ledger.Trace.Add(BuildDecisionStep(decisionIndex, modelRequest, null, feedback, null, false));
                     continue;
                 }
                 catch (Exception exception)
@@ -775,7 +768,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                     failure = exception is AgentHostException hostException ? hostException.Message : exception.GetType().Name;
                     failureCode = exception is AgentHostException typed ? typed.Code : null;
                     termination = "training-issue-provider-failed";
-                    trace.Add(BuildDecisionStep(decisionIndex, modelRequest, null, feedback, null, false));
+                    ledger.Trace.Add(BuildDecisionStep(decisionIndex, modelRequest, null, feedback, null, false));
                     break;
                 }
 
@@ -786,7 +779,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                     if (!controls.OfType<JsonValue>().Any(value => value.GetValue<string>() == "observeAgain") || waitSeconds != AgentHostNativeMapMovementMonitor.MaximumWatchWindowSeconds)
                     {
                         feedback = new JsonObject { ["kind"] = "control-rejected-before-wait", ["nativeActionSent"] = false };
-                        trace.Add(BuildDecisionStep(decisionIndex, modelRequest, decision, feedback, null, false));
+                        ledger.Trace.Add(BuildDecisionStep(decisionIndex, modelRequest, decision, feedback, null, false));
                         continue;
                     }
                     var targetSettlementId = ReadString(state["location"] as JsonObject, "targetSettlementId");
@@ -804,7 +797,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                         ["visibleHostileBanditTargets"] = movementWatch.VisibleHostileBanditTargets.DeepClone(),
                         ["nativePauseReceipt"] = movementWatch.PauseReceipt?.DeepClone()
                     };
-                    trace.Add(BuildDecisionStep(decisionIndex, modelRequest, decision,
+                    ledger.Trace.Add(BuildDecisionStep(decisionIndex, modelRequest, decision,
                         new JsonObject
                         {
                             ["kind"] = movementWatch.InterruptedByVisibleHostileBandit
@@ -834,7 +827,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                             ["requiredNextStep"] = BuildRejectedDecisionNextStep(catalog),
                             ["nativeActionSent"] = false
                         };
-                        trace.Add(BuildDecisionStep(decisionIndex, modelRequest, decision, feedback, null, false));
+                        ledger.Trace.Add(BuildDecisionStep(decisionIndex, modelRequest, decision, feedback, null, false));
                         failure = "The provider repeated the same unlisted Native action without a catalog or state change; this route returned control to the EYC parent.";
                         failureCode = "training-issue-repeated-rejected-action";
                         termination = failureCode;
@@ -848,7 +841,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                         ["requiredNextStep"] = BuildRejectedDecisionNextStep(catalog),
                         ["nativeActionSent"] = false
                     };
-                    trace.Add(BuildDecisionStep(decisionIndex, modelRequest, decision, feedback, null, false));
+                    ledger.Trace.Add(BuildDecisionStep(decisionIndex, modelRequest, decision, feedback, null, false));
                     if (rejected > MaxRejectedDecisions)
                     {
                         failure = "The model repeatedly selected a Native Issue action outside the current visible catalog.";
@@ -867,15 +860,11 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                     battleRequestNode["goal"] = "Train the current borrowed retainers for the active Native Landlord Training Issue. Resolve one currently visible weak hostile Bandit through Native BattleSimulation to earn experience, then return to the current Issue Journal; do not enter a realtime Mission or alter the clock.";
                     using var battleRequest = JsonDocument.Parse(battleRequestNode.ToJsonString());
                     var battle = await AgentHostBattleSimulationLoop.RunAsync(battleRequest.RootElement, battleClient, provider, elapsed.Token,
-                        priorDecisions: decisions, priorPromptTokens: promptTokens, priorCompletionTokens: completionTokens,
-                        priorTrace: trace, priorProviderRouteHistory: routes, recoverPlayerCaptivity: true);
+                        priorDecisions: ledger.Decisions, priorPromptTokens: ledger.PromptTokens, priorCompletionTokens: ledger.CompletionTokens,
+                        priorTrace: ledger.Trace, priorProviderRouteHistory: ledger.Routes, recoverPlayerCaptivity: true);
                     AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("trainingIssueBattleSimulation", battle);
-                    decisions = ReadInt(battle, "decisions", decisions);
-                    promptTokens = ReadLong(battle, "promptTokens", promptTokens);
-                    completionTokens = ReadLong(battle, "completionTokens", completionTokens);
+                    ledger.AdoptDelegated(battle);
                     actionsExecuted += ReadInt(battle, "actionsExecuted", 0);
-                    trace = battle["trace"]?.DeepClone() as JsonArray ?? trace;
-                    routes = battle["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
                     if (ReadString(battle, "status") != "completed")
                     {
                         failure = ReadString(battle, "failure") ?? "The Native BattleSimulation did not return to a verified Campaign Map.";
@@ -900,7 +889,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 catch (AgentHostException exception)
                 {
                     feedback = new JsonObject { ["kind"] = "native-action-rejected-before-state-change", ["failureCode"] = exception.Code, ["message"] = exception.Message };
-                    trace.Add(BuildDecisionStep(decisionIndex, modelRequest, decision, feedback, null, false));
+                    ledger.Trace.Add(BuildDecisionStep(decisionIndex, modelRequest, decision, feedback, null, false));
                     if (++rejected > MaxRejectedDecisions)
                     {
                         failure = exception.Message;
@@ -947,7 +936,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                 var afterActionConversation = (currentNative["state"]?["context"] as JsonObject)?["conversation"] as JsonObject;
                 if (afterActionConversation is null && !activeTrainingIssue && (action is "dialogueSelect" or "dialogueContinue"))
                     talkedToIssueGiver = false;
-                trace.Add(BuildDecisionStep(decisionIndex, modelRequest, decision, feedback, previousReceipt, nativeCompleted));
+                ledger.Trace.Add(BuildDecisionStep(decisionIndex, modelRequest, decision, feedback, previousReceipt, nativeCompleted));
                 if (action == "mapSettlementTargets" && visibleSafeTargets?.Count == 0)
                 {
                     failure = "No currently visible safe settlement target was returned; no move was invented.";
@@ -975,7 +964,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             failure = exception is AgentHostException hostException ? hostException.Message : exception.GetType().Name;
             failureCode = exception is AgentHostException typed ? typed.Code : null;
             termination = "training-issue-loop-failed";
-            trace.Add(new JsonObject { ["stage"] = "training-issue-loop-failed", ["failure"] = failure, ["detail"] = exception.Message.Length > 500 ? exception.Message[..500] : exception.Message });
+            ledger.Trace.Add(new JsonObject { ["stage"] = "training-issue-loop-failed", ["failure"] = failure, ["detail"] = exception.Message.Length > 500 ? exception.Message[..500] : exception.Message });
         }
 
         try { if (currentNative is not null) eycJournalAfter = await ReadEycJournalAsync(client, CancellationToken.None); }
@@ -996,15 +985,15 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         {
             ["status"] = status, ["resultKind"] = "establish-clan-training-issue", ["runId"] = runId,
             ["providerModelId"] = provider.ModelId, ["providerConfigurationSource"] = provider.ConfigurationSource,
-            ["decisions"] = decisions, ["actionsExecuted"] = actionsExecuted, ["promptTokens"] = promptTokens,
-            ["completionTokens"] = completionTokens, ["failure"] = resultFailure, ["failureCode"] = resultFailureCode,
+            ["decisions"] = ledger.Decisions, ["actionsExecuted"] = actionsExecuted, ["promptTokens"] = ledger.PromptTokens,
+            ["completionTokens"] = ledger.CompletionTokens, ["failure"] = resultFailure, ["failureCode"] = resultFailureCode,
             ["termination"] = resultTermination, ["trainingIssueQuestId"] = trackedIssueQuestId,
             ["issueGiverSettlementId"] = issueGiverSettlementId, ["directOfferAccepted"] = directOfferAccepted,
             ["issueJournal"] = issueDetails?.DeepClone(), ["eycGoldJournalBefore"] = eycJournalBefore?.DeepClone(),
             ["eycGoldJournalAfter"] = eycJournalAfter?.DeepClone(), ["eycGoldJournalDelta"] = double.IsFinite(goldDelta) ? JsonValue.Create(goldDelta) : null,
             ["goldObjectiveVerified"] = IsGoldObjectiveMet(eycJournalAfter) || (double.IsFinite(goldDelta) && goldDelta > 0), ["explicitClockActionCount"] = explicitClockActions,
             ["initialNativeState"] = initialNative?.DeepClone(), ["finalNativeState"] = currentNative?.DeepClone(),
-            ["providerRouteHistory"] = routes.DeepClone(), ["trace"] = trace.DeepClone()
+            ["providerRouteHistory"] = ledger.Routes.DeepClone(), ["trace"] = ledger.Trace.DeepClone()
         };
     }
 
@@ -1531,25 +1520,6 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         ["actionExecuted"] = actionExecuted,
         ["explicitClockAction"] = false
     };
-
-    private static void AddProviderRoute(JsonArray routes, IAgentHostDecisionProvider provider, ProviderDecisionResult result,
-        int decision, ref long promptTokens, ref long completionTokens)
-    {
-        if (result.PromptTokens.HasValue) promptTokens += result.PromptTokens.Value;
-        if (result.CompletionTokens.HasValue) completionTokens += result.CompletionTokens.Value;
-        routes.Add(new JsonObject
-        {
-            ["decision"] = decision, ["requestedModelId"] = provider.ModelId, ["responseModelId"] = result.ModelId,
-            ["routedVia"] = result.RoutedVia, ["responseFormatMode"] = result.ResponseFormatMode,
-            ["promptTokens"] = result.PromptTokens, ["completionTokens"] = result.CompletionTokens
-        });
-    }
-
-    private static void AppendRoutes(JsonArray destination, JsonArray? source)
-    {
-        if (source is null) return;
-        foreach (var item in source) destination.Add(item?.DeepClone());
-    }
 
     private static JsonObject MapState(string? menuId, bool moving = false) =>
         NativeState(menuId, menuId is "village" or "town" or "castle" ? "settlement-a" : null, new JsonArray(), moving: moving);

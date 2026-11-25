@@ -85,6 +85,56 @@ internal sealed class DecisionRunLedger
     /// </summary>
     internal void RecordUnsentDecision() => Decisions++;
 
+    /// <summary>
+    /// Adopts a subflow that counted from zero and reported only its own work: the decisions, tokens and route
+    /// rows are added to this run, and the subflow's trace rows belong to the caller's story rather than its own.
+    /// </summary>
+    internal void RecordDelegated(JsonObject receipt)
+    {
+        Decisions += ReadInt(receipt, "decisions");
+        PromptTokens += ReadLong(receipt, "promptTokens");
+        CompletionTokens += ReadLong(receipt, "completionTokens");
+        AppendRoutes(receipt);
+    }
+
+    /// <summary>
+    /// Adopts a subflow that continued this run's snapshot: its totals are the run's totals, and its route rows and
+    /// trace already begin with the rows this ledger handed it, so they replace rather than add.
+    /// </summary>
+    internal void AdoptDelegated(JsonObject receipt)
+    {
+        Decisions = ReadInt(receipt, "decisions", Decisions);
+        PromptTokens = ReadLong(receipt, "promptTokens", PromptTokens);
+        CompletionTokens = ReadLong(receipt, "completionTokens", CompletionTokens);
+        if (receipt["providerRouteHistory"] is JsonArray routes)
+            Replace(Routes, routes);
+        if (receipt["trace"] is JsonArray trace)
+            Replace(Trace, trace);
+    }
+
+    private void AppendRoutes(JsonObject receipt)
+    {
+        if (receipt["providerRouteHistory"] is JsonArray rows)
+        {
+            foreach (var row in rows) Routes.Add(row?.DeepClone());
+            return;
+        }
+
+        if (receipt["providerRoute"] is JsonObject single) Routes.Add(single.DeepClone());
+    }
+
+    private static void Replace(JsonArray target, JsonArray source)
+    {
+        target.Clear();
+        foreach (var node in source) target.Add(node?.DeepClone());
+    }
+
+    private static int ReadInt(JsonObject receipt, string name, int fallback = 0) =>
+        receipt[name] is JsonValue value && value.TryGetValue<int>(out var count) ? count : fallback;
+
+    private static long ReadLong(JsonObject receipt, string name, long fallback = 0) =>
+        receipt[name] is JsonValue value && value.TryGetValue<long>(out var total) ? total : fallback;
+
     /// <summary>Records the decision the scenario refused to send to Native, so the receipt still names it.</summary>
     internal void RecordDecisionRejection(JsonObject decision)
     {

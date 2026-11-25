@@ -52,12 +52,9 @@ internal static class AgentHostStoryModeSetupLoop
         JsonArray? priorProviderRouteHistory = null)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
-        var decisions = priorDecisions;
+        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens,
+            priorTrace, priorProviderRouteHistory);
         var actions = 0;
-        long promptTokens = priorPromptTokens;
-        long completionTokens = priorCompletionTokens;
-        var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
-        var routes = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
         var started = false;
 
         try
@@ -99,12 +96,12 @@ internal static class AgentHostStoryModeSetupLoop
                         ["state"] = state.DeepClone(),
                         ["stage"] = "first-banner-notification"
                     };
-                    var modelRequest = BuildActionRequest(runId, decisions + 1,
+                    var modelRequest = BuildActionRequest(runId, ledger.NextDecisionNumber,
                         "Complete the current Native StoryMode first-banner notification and continue the original setup.",
                         observation, new JsonObject { ["action"] = "continueSceneNotification", ["arguments"] = new JsonArray() });
                     var decision = await DecideWithRecoveryAsync(
                         token => AgentHostDecisionCycle.DecideStoryModeSceneNotificationAsync(provider, modelRequest, token), modelRequest);
-                    CountDecision(decision);
+                    ledger.RecordDecision(decision);
                     var chosen = ReadString(decision.Decision, "action");
                     if (chosen != "continueSceneNotification" || HasArguments(decision.Decision))
                         return Result("failed", "storymode-scene-notification-decision-invalid", "The model did not choose the current Native notification continuation action.", decision.Decision);
@@ -132,15 +129,10 @@ internal static class AgentHostStoryModeSetupLoop
 
                     started = true;
                     var resolution = await AgentHostNativeInquiryResolution.RunAsync(stateClient, inquiryClient, provider, cancellationToken,
-                        runId + "-setup-inquiry-" + (decisions + 1).ToString(CultureInfo.InvariantCulture));
-                    decisions += ReadInt(resolution, "decisions", 0);
+                        runId + "-setup-inquiry-" + ledger.NextDecisionNumber.ToString(CultureInfo.InvariantCulture));
+                    ledger.RecordDelegated(resolution);
                     actions += ReadInt(resolution, "actionsExecuted", 0);
-                    promptTokens += ReadLong(resolution, "promptTokens", 0);
-                    completionTokens += ReadLong(resolution, "completionTokens", 0);
-                    if (resolution["providerRouteHistory"] is JsonArray inquiryRoutes)
-                        foreach (var route in inquiryRoutes) routes.Add(route?.DeepClone());
-                    else if (resolution["providerRoute"] is JsonObject route) routes.Add(route.DeepClone());
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "storymode-setup-inquiry",
                         ["inquiryKind"] = kind,
@@ -167,12 +159,12 @@ internal static class AgentHostStoryModeSetupLoop
                         ["state"] = state.DeepClone(),
                         ["stage"] = "main-hero-clan-banner-editor"
                     };
-                    var modelRequest = BuildActionRequest(runId, decisions + 1,
+                    var modelRequest = BuildActionRequest(runId, ledger.NextDecisionNumber,
                         "Complete the current Native BannerEditor setup using its current banner unless a requested customization is supported.",
                         observation, new JsonObject { ["action"] = "bannerEditorDone", ["arguments"] = new JsonArray() });
                     var decision = await DecideWithRecoveryAsync(
                         token => AgentHostDecisionCycle.DecideStoryModeBannerEditorAsync(provider, modelRequest, token), modelRequest);
-                    CountDecision(decision);
+                    ledger.RecordDecision(decision);
                     if (ReadString(decision.Decision, "action") != "bannerEditorDone" || HasArguments(decision.Decision))
                         return Result("failed", "storymode-banner-editor-decision-invalid", "The model did not choose the current Native BannerEditor Done action.", decision.Decision);
                     using var receiptDocument = await bannerEditorClient.CompleteStoryModeBannerEditorAsync(cancellationToken);
@@ -204,23 +196,6 @@ internal static class AgentHostStoryModeSetupLoop
             return Result("failed", exception is AgentHostException host ? host.Code : "storymode-setup-failed", exception.Message);
         }
 
-        void CountDecision(ProviderDecisionResult decision)
-        {
-            decisions += 0; // The resolver already counted its own decisions; direct UI stages are counted here below.
-            promptTokens += decision.PromptTokens ?? 0;
-            completionTokens += decision.CompletionTokens ?? 0;
-            routes.Add(new JsonObject
-            {
-                ["requestedModelId"] = decision.ModelId,
-                ["responseModelId"] = decision.ModelId,
-                ["routedVia"] = decision.RoutedVia,
-                ["responseFormatMode"] = decision.ResponseFormatMode,
-                ["promptTokens"] = decision.PromptTokens,
-                ["completionTokens"] = decision.CompletionTokens
-            });
-            decisions++;
-        }
-
         async Task<ProviderDecisionResult> DecideWithRecoveryAsync(
             Func<CancellationToken, Task<ProviderDecisionResult>> decide,
             JsonObject request)
@@ -235,17 +210,9 @@ internal static class AgentHostStoryModeSetupLoop
                 try { return await decide(cancellationToken); }
                 catch (AgentHostException exception) when (AgentHostProviderDecisionRecovery.CanRetry(exception.Code, attempt))
                 {
-                    decisions++;
                     previousFailure = exception.Code;
-                    routes.Add(new JsonObject
-                    {
-                        ["decision"] = decisions,
-                        ["requestedModelId"] = provider.ModelId,
-                        ["status"] = "provider-failure-before-decision",
-                        ["failureCode"] = exception.Code,
-                        ["nativeActionSent"] = false
-                    });
-                    trace.Add(new JsonObject
+                    ledger.RecordProviderFailure(exception.Code);
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "storymode-setup-provider-retry",
                         ["failureCode"] = exception.Code,
@@ -259,7 +226,7 @@ internal static class AgentHostStoryModeSetupLoop
 
         void AddTrace(string stage, ProviderDecisionResult decision, JsonObject receipt, JsonObject observation)
         {
-            trace.Add(new JsonObject
+            ledger.Trace.Add(new JsonObject
             {
                 ["stage"] = stage,
                 ["decision"] = decision.Decision.DeepClone(),
@@ -273,12 +240,12 @@ internal static class AgentHostStoryModeSetupLoop
             var result = new JsonObject
             {
                 ["status"] = status,
-                ["decisions"] = decisions,
+                ["decisions"] = ledger.Decisions,
                 ["actionsExecuted"] = actions,
-                ["promptTokens"] = promptTokens,
-                ["completionTokens"] = completionTokens,
-                ["trace"] = trace.DeepClone(),
-                ["providerRouteHistory"] = routes.DeepClone(),
+                ["promptTokens"] = ledger.PromptTokens,
+                ["completionTokens"] = ledger.CompletionTokens,
+                ["trace"] = ledger.Trace.DeepClone(),
+                ["providerRouteHistory"] = ledger.Routes.DeepClone(),
                 ["termination"] = new JsonObject { ["reason"] = termination }
             };
             if (failure != null) result["failure"] = failure;
