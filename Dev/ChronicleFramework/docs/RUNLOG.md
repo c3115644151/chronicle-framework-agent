@@ -5,6 +5,9 @@
 
 记录要求：一次运行一段，写清触发方式（哪个阶段/哪条命令）、观察到的原版行为、失败时的根因与修复、以及留下哪些收据路径（`TestResults/<runId>`）。不在本文件复制动态任务状态。
 
+
+关于收据留存：`TestResults/<runId>` 目录会被每次阶段运行末尾的 retention（`harness/Prune-TestResults.ps1`）清理，只保留最近若干个与 `DEVELOPMENT.md`、`MAINLINE.md`、`RUNLOG.md` 点名引用的运行。文档中点名的 run id 共 1,096 个，2026-11-26 盘上实际存在 148 个目录——差额主要是 `docs/Research/**` 与 `SYSTEM_INVENTORY.md` 引用的历史运行。所以本文件里的收据路径是**当时那次运行的证据指向，不保证今天还能打开**；要重跑同一观察，用同一条脚本与同一组参数（例如 `harness/Test-AgentIdlePressure.ps1 -LoadSaveName ChronicleEycDev-opening-20261126 -ChunkDays 1 -MaxChunks 1`）而不是指望旧目录。需要长期留盘的收据，必须在 `Prune-TestResults.ps1 -ReferenceDocumentPaths` 里被点名，或被写进上面三份默认文档。
+
 ## 2026-11-21 … 2026-11-22 开发与 Harness 契约沿革（原 DEVELOPMENT.md 时间条目）
 
 以下条目原在 `docs/DEVELOPMENT.md` 顶部，与契约版本段落混在一起。它们记录的是每次真实运行与诊断，故整体移到本文件，逐字保留（含引用的 `TestResults/` 收据）。契约层面的稳定结论留在 DEVELOPMENT 的 `Contract 7.<n>` 段落里。
