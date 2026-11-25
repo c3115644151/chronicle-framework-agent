@@ -79,6 +79,12 @@ internal sealed class DecisionRunLedger
         });
     }
 
+    /// <summary>
+    /// Records a decision attempt that produced no decision at all: a provider error inside the scenario's bounded
+    /// allowance. Only the count moves, because no route was chosen and there is nothing to route.
+    /// </summary>
+    internal void RecordUnsentDecision() => Decisions++;
+
     /// <summary>Records the decision the scenario refused to send to Native, so the receipt still names it.</summary>
     internal void RecordDecisionRejection(JsonObject decision)
     {

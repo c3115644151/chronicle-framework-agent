@@ -299,13 +299,9 @@ internal static class AgentHostVillageToolsQuestLoop
 
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
-        var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
-        var decisions = priorDecisions;
+        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var actionsExecuted = 0;
         var rejected = 0;
-        var promptTokens = priorPromptTokens;
-        var completionTokens = priorCompletionTokens;
-        var providerRouteHistory = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
         var questId = string.Empty;
         var sawQuestActive = false;
         var questDetailsObservedForActiveQuest = false;
@@ -401,29 +397,17 @@ internal static class AgentHostVillageToolsQuestLoop
                 try
                 {
                     providerResult = await AgentHostDecisionCycle.DecideVillageToolsQuestAsync(provider, modelRequest, elapsed.Token);
-                    decisions++;
-                    if (providerResult.PromptTokens.HasValue) promptTokens += providerResult.PromptTokens.Value;
-                    if (providerResult.CompletionTokens.HasValue) completionTokens += providerResult.CompletionTokens.Value;
-                    providerRouteHistory.Add(new JsonObject
-                    {
-                        ["decision"] = decisions,
-                        ["requestedModelId"] = provider.ModelId,
-                        ["responseModelId"] = providerResult.ModelId,
-                        ["routedVia"] = providerResult.RoutedVia,
-                        ["responseFormatMode"] = providerResult.ResponseFormatMode,
-                        ["promptTokens"] = providerResult.PromptTokens,
-                        ["completionTokens"] = providerResult.CompletionTokens
-                    });
+                    ledger.RecordDecision(providerResult);
                 }
                 catch (AgentHostException exception) when (IsRecoverableProviderError(exception.Code) && rejected < 3)
                 {
-                    decisions++;
+                    ledger.RecordUnsentDecision();
                     rejected++;
                     var currentConversation = currentNative?["state"]?["context"]?["conversation"] as JsonObject;
                     feedback = BuildProviderDecisionUnavailableFeedback(ExtractUnavailableActionName(exception.Message),
                         AgentHostVillageToolsQuestPolicy.GetToolsTaskRemainingCount(questDetailsReceipt) ?? 0,
                         catalog, previousReceipt, currentConversation, exception.Message, exception.Code);
-                    trace.Add(new JsonObject { ["iteration"] = decisionIndex, ["stage"] = "decision-rejected-before-native", ["feedback"] = feedback.DeepClone() });
+                    ledger.Trace.Add(new JsonObject { ["iteration"] = decisionIndex, ["stage"] = "decision-rejected-before-native", ["feedback"] = feedback.DeepClone() });
                     continue;
                 }
                 catch (Exception exception)
@@ -431,7 +415,7 @@ internal static class AgentHostVillageToolsQuestLoop
                     failure = exception is AgentHostException hostException ? hostException.Code : exception.GetType().Name;
                     failureCode = exception is AgentHostException typed ? typed.Code : null;
                     termination = "provider-failed";
-                    trace.Add(new JsonObject { ["iteration"] = decisionIndex, ["stage"] = "provider-failed", ["failure"] = failure, ["detail"] = Truncate(exception.Message, 300) });
+                    ledger.Trace.Add(new JsonObject { ["iteration"] = decisionIndex, ["stage"] = "provider-failed", ["failure"] = failure, ["detail"] = Truncate(exception.Message, 300) });
                     break;
                 }
 
@@ -450,14 +434,14 @@ internal static class AgentHostVillageToolsQuestLoop
                             ["nativeInventoryVerifiedAfterTurnIn"] = inventoryVerifiedAfterTurnIn,
                             ["requiredNextStep"] = activeQuest is null ? "Verify the current MainHero inventory through the listed native inventory options." : "Continue the current Native Quest using a listed action."
                         };
-                        trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, feedback, null, observationAfter: observation));
+                        ledger.Trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, feedback, null, observationAfter: observation));
                         if (rejected > 2) { failure = "The model repeatedly proposed completion before Native Quest and inventory postconditions passed."; termination = "premature-done-rejected"; break; }
                         continue;
                     }
                     termination = "native-quest-and-inventory-observed";
-                    trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, null, null));
-                    return BuildResult("completed", runId, provider, decisions, actionsExecuted, promptTokens, completionTokens,
-                        termination, null, null, startDay, currentNative, trace, providerRouteHistory, questId, sawQuestActive, inventoryVerifiedAfterTurnIn);
+                    ledger.Trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, null, null));
+                    return BuildResult("completed", runId, provider, ledger, actionsExecuted,
+                        termination, null, null, startDay, currentNative, questId, sawQuestActive, inventoryVerifiedAfterTurnIn);
                 }
 
                 if (ReadBoolean(decision, "observeAgain"))
@@ -467,14 +451,14 @@ internal static class AgentHostVillageToolsQuestLoop
                     if (!controlsAllowed || waitSeconds is < 1 or > 10)
                     {
                         feedback = new JsonObject { ["kind"] = "control-rejected-before-wait", ["nativeActionSent"] = false };
-                        trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, feedback, null, observationAfter: observation));
+                        ledger.Trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, feedback, null, observationAfter: observation));
                         continue;
                     }
                     await Task.Delay(TimeSpan.FromSeconds(waitSeconds), elapsed.Token);
                     using var afterWait = await client.ReadStateAsync(elapsed.Token);
                     currentNative = JsonNode.Parse(afterWait.RootElement.GetRawText())!.AsObject();
                     feedback = null;
-                    trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, null, null,
+                    ledger.Trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, null, null,
                         observationAfter: BuildObservation(currentNative!, questId, sawQuestActive, inventoryVerifiedAfterTurnIn),
                         control: new JsonObject { ["kind"] = "bounded-observe-again", ["waitSeconds"] = waitSeconds }));
                     continue;
@@ -485,7 +469,7 @@ internal static class AgentHostVillageToolsQuestLoop
                     rejected++;
                     feedback = BuildActionPreconditionFeedback(decision, catalog, rejection,
                         AgentHostVillageToolsQuestPolicy.GetToolsQuestMapTargetType(questDetailsReceipt));
-                    trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, feedback, null, observationAfter: observation));
+                    ledger.Trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, feedback, null, observationAfter: observation));
                     if (rejected > 2) { failure = "The model exceeded the bounded pre-Native rejection allowance."; termination = "rejection-limit"; break; }
                     continue;
                 }
@@ -503,7 +487,7 @@ internal static class AgentHostVillageToolsQuestLoop
                     failure = "Native action timed out with an ambiguous result; it was not replayed.";
                     failureCode = exception.Code;
                     termination = "native-action-result-ambiguous";
-                    trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, null,
+                    ledger.Trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, null,
                         new JsonObject { ["action"] = action, ["status"] = "timeout-ambiguous" }));
                     break;
                 }
@@ -554,7 +538,7 @@ internal static class AgentHostVillageToolsQuestLoop
                 previousReceipt = receipt;
                 using (var refreshed = await client.ReadStateAsync(elapsed.Token)) currentNative = JsonNode.Parse(refreshed.RootElement.GetRawText())!.AsObject();
                 feedback = ReadString(receipt, "status") == "completed" ? null : new JsonObject { ["kind"] = "native-action-rejected", ["action"] = action, ["receipt"] = receipt.DeepClone() };
-                trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, feedback, receipt,
+                ledger.Trace.Add(BuildDecisionStep(decisionIndex, decisionStarted, modelRequest, decision, feedback, receipt,
                     observationAfter: BuildObservation(currentNative!, questId, sawQuestActive, inventoryVerifiedAfterTurnIn),
                     actionExecuted: ReadString(receipt, "status") == "completed"));
                 if (feedback is not null) rejected++; else rejected = 0;
@@ -577,11 +561,11 @@ internal static class AgentHostVillageToolsQuestLoop
             failure = exception is AgentHostException hostException ? hostException.Message : exception.GetType().Name;
             failureCode = exception is AgentHostException typed ? typed.Code : null;
             termination = "village-tools-loop-failed";
-            trace.Add(new JsonObject { ["stage"] = "loop-failed", ["failure"] = failure, ["detail"] = Truncate(exception.Message, 500) });
+            ledger.Trace.Add(new JsonObject { ["stage"] = "loop-failed", ["failure"] = failure, ["detail"] = Truncate(exception.Message, 500) });
         }
 
-        return BuildResult("failed", runId, provider, decisions, actionsExecuted, promptTokens, completionTokens,
-            termination ?? "village-tools-loop-failed", failure, failureCode, startDay, currentNative, trace, providerRouteHistory, questId, sawQuestActive, inventoryVerifiedAfterTurnIn);
+        return BuildResult("failed", runId, provider, ledger, actionsExecuted,
+            termination ?? "village-tools-loop-failed", failure, failureCode, startDay, currentNative, questId, sawQuestActive, inventoryVerifiedAfterTurnIn);
     }
 
     private static JsonObject BuildDecisionRequest(string runId, int iteration, string goal, JsonObject observation,
@@ -815,20 +799,20 @@ internal static class AgentHostVillageToolsQuestLoop
         }
     };
 
-    private static JsonObject BuildResult(string status, string runId, IAgentHostDecisionProvider provider, int decisions, int actions,
-        long promptTokens, long completionTokens, string termination, string? failure, string? failureCode, double startDay,
-        JsonObject? native, JsonArray trace, JsonArray providerRouteHistory, string questId, bool sawQuest, bool inventoryVerified) => new()
+    private static JsonObject BuildResult(string status, string runId, IAgentHostDecisionProvider provider, DecisionRunLedger ledger, int actions,
+        string termination, string? failure, string? failureCode, double startDay,
+        JsonObject? native, string questId, bool sawQuest, bool inventoryVerified) => new()
     {
         ["status"] = status,
         ["runId"] = runId,
         ["contractId"] = "native-village-tools-quest-v1",
         ["providerModelId"] = provider.ModelId,
         ["providerConfigurationSource"] = provider.ConfigurationSource,
-        ["decisions"] = decisions,
+        ["decisions"] = ledger.Decisions,
         ["actionsExecuted"] = actions,
-        ["promptTokens"] = promptTokens,
-        ["completionTokens"] = completionTokens,
-        ["providerRouteHistory"] = providerRouteHistory.DeepClone(),
+        ["promptTokens"] = ledger.PromptTokens,
+        ["completionTokens"] = ledger.CompletionTokens,
+        ["providerRouteHistory"] = ledger.Routes.DeepClone(),
         ["startingCampaignDay"] = double.IsFinite(startDay) ? JsonValue.Create(startDay) : null,
         ["endingCampaignDay"] = native is null ? null : native["campaignDay"]?.DeepClone(),
         ["questId"] = questId,
@@ -837,7 +821,7 @@ internal static class AgentHostVillageToolsQuestLoop
         ["termination"] = new JsonObject { ["reason"] = termination, ["goalVerified"] = status == "completed" },
         ["failure"] = failure,
         ["failureCode"] = failureCode,
-        ["trace"] = trace,
+        ["trace"] = ledger.Trace,
         ["lastObservation"] = native is null ? null : BuildObservation(native, questId, sawQuest, inventoryVerified)
     };
 
