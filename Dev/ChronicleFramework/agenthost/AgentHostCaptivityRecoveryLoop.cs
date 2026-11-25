@@ -249,9 +249,7 @@ internal static class AgentHostCaptivityRecoveryLoop
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
 
-        var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
-        var routes = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
-        var decisions = priorDecisions;
+        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var actionCount = 0;
         var passiveWaitCount = 0;
         var rejectedProviderDecisions = 0;
@@ -269,7 +267,7 @@ internal static class AgentHostCaptivityRecoveryLoop
         var initialMode = ReadString(initialState["context"] as JsonObject, "timeControlMode");
         var current = initialNative.DeepClone() as JsonObject ?? throw new AgentHostException("captivity-recovery-observation-invalid", "The initial Native state could not be cloned.");
 
-        for (var loopIndex = 1; decisions < maxDecisions; loopIndex++)
+        for (var loopIndex = 1; ledger.Decisions < maxDecisions; loopIndex++)
         {
             elapsed.Token.ThrowIfCancellationRequested();
             var state = current["state"] as JsonObject ?? throw new AgentHostException("captivity-recovery-state-missing", "Native returned no current Campaign state.");
@@ -283,7 +281,7 @@ internal static class AgentHostCaptivityRecoveryLoop
                     if (!IsUsableFreeMap(verifiedState) ||
                         ReadString(verifiedState["storyModeEstablishClanStatus"] as JsonObject, "status") != "active")
                         throw new AgentHostException("captivity-recovery-completion-not-confirmed", "The recovery subflow must verify an active Establish Your Clan quest and a usable free Campaign Map before returning control to its parent.");
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "captivity-recovered-return-to-parent",
                         ["campaignDay"] = verifiedNative["campaignDay"]?.DeepClone(),
@@ -296,13 +294,13 @@ internal static class AgentHostCaptivityRecoveryLoop
                         ["resultKind"] = "captivity-recovered-return-to-parent",
                         ["providerModelId"] = provider.ModelId,
                         ["providerConfigurationSource"] = provider.ConfigurationSource,
-                        ["decisions"] = decisions,
+                        ["decisions"] = ledger.Decisions,
                         ["actionsExecuted"] = actionCount,
                         ["gameplayActionsExecuted"] = actionCount,
                         ["explicitTimeActions"] = explicitTimeActions.DeepClone(),
-                        ["promptTokens"] = priorPromptTokens,
-                        ["completionTokens"] = priorCompletionTokens,
-                        ["providerRouteHistory"] = routes.DeepClone(),
+                        ["promptTokens"] = ledger.PromptTokens,
+                        ["completionTokens"] = ledger.CompletionTokens,
+                        ["providerRouteHistory"] = ledger.Routes.DeepClone(),
                         ["captivityRecoveryVerified"] = true,
                         ["passiveCaptivityPollCount"] = passiveWaitCount,
                         ["initialTimeControlMode"] = initialMode,
@@ -311,26 +309,25 @@ internal static class AgentHostCaptivityRecoveryLoop
                         ["campaignDayEnd"] = verifiedNative["campaignDay"]?.DeepClone(),
                         ["finalNativeState"] = verifiedNative.DeepClone(),
                         ["termination"] = new JsonObject { ["reason"] = "captivity-recovered-return-to-parent", ["completedByProvider"] = true, ["goalVerified"] = false },
-                        ["trace"] = trace.DeepClone()
+                        ["trace"] = ledger.Trace.DeepClone()
                     };
                 }
                 var terminalObservation = BuildObservation(current, state);
                 var terminalRequest = BuildRequest(runId, ReadString(request, "goal"), terminalObservation, previousReceipt,
-                    null, new JsonArray(), new JsonArray("done"), decisions + 1);
+                    null, new JsonArray(), new JsonArray("done"), ledger.NextDecisionNumber);
                 var terminalDecision = await AgentHostDecisionCycle.DecideCaptivityRecoveryAsync(provider, terminalRequest, elapsed.Token);
-                decisions++;
-                AddRoute(routes, provider, terminalDecision, decisions, ref priorPromptTokens, ref priorCompletionTokens);
+                ledger.RecordDecision(terminalDecision);
                 if (ReadBoolean(terminalDecision.Decision, "done") != true)
                     throw new AgentHostException("captivity-recovery-completion-not-confirmed", "Only Native-verified free Campaign Map state may offer done for captivity recovery.");
-                trace.Add(BuildTrace(decisions, terminalObservation, terminalDecision.Decision, null, new JsonArray("done")));
+                ledger.Trace.Add(BuildTrace(ledger.Decisions, terminalObservation, terminalDecision.Decision, null, new JsonArray("done")));
 
                 var objectivePlan = await AgentHostEstablishYourClanGoalLoop.RunAsync(
                     request, stateClient, questDetailsClient, provider, elapsed.Token,
-                    priorDecisions: decisions,
-                    priorPromptTokens: priorPromptTokens,
-                    priorCompletionTokens: priorCompletionTokens,
-                    priorTrace: trace,
-                    priorProviderRouteHistory: routes);
+                    priorDecisions: ledger.Decisions,
+                    priorPromptTokens: ledger.PromptTokens,
+                    priorCompletionTokens: ledger.CompletionTokens,
+                    priorTrace: ledger.Trace,
+                    priorProviderRouteHistory: ledger.Routes);
                 using var postPlanDocument = await stateClient.ReadStateAsync(elapsed.Token);
                 var postPlanNative = ParseObject(postPlanDocument.RootElement);
                 var postPlanState = postPlanNative["state"] as JsonObject ?? new JsonObject();
@@ -340,13 +337,13 @@ internal static class AgentHostCaptivityRecoveryLoop
                     ["resultKind"] = "captivity-recovered-objective-plan",
                     ["providerModelId"] = provider.ModelId,
                     ["providerConfigurationSource"] = provider.ConfigurationSource,
-                    ["decisions"] = ReadInt(objectivePlan, "decisions", decisions),
+                    ["decisions"] = ReadInt(objectivePlan, "decisions", ledger.Decisions),
                     ["actionsExecuted"] = actionCount + ReadInt(objectivePlan, "actionsExecuted", 0),
                     ["gameplayActionsExecuted"] = actionCount,
                     ["explicitTimeActions"] = explicitTimeActions.DeepClone(),
-                    ["promptTokens"] = ReadLong(objectivePlan, "promptTokens", priorPromptTokens),
-                    ["completionTokens"] = ReadLong(objectivePlan, "completionTokens", priorCompletionTokens),
-                    ["providerRouteHistory"] = objectivePlan["providerRouteHistory"]?.DeepClone() ?? routes.DeepClone(),
+                    ["promptTokens"] = ReadLong(objectivePlan, "promptTokens", ledger.PromptTokens),
+                    ["completionTokens"] = ReadLong(objectivePlan, "completionTokens", ledger.CompletionTokens),
+                    ["providerRouteHistory"] = objectivePlan["providerRouteHistory"]?.DeepClone() ?? ledger.Routes.DeepClone(),
                     ["captivityRecoveryVerified"] = true,
                     ["captivityChoiceOptionId"] = captivityChoiceOptionId,
                     ["passiveCaptivityPollCount"] = passiveWaitCount,
@@ -376,9 +373,9 @@ internal static class AgentHostCaptivityRecoveryLoop
                 using var nextDocument = await stateClient.ReadStateAsync(elapsed.Token);
                 current = ParseObject(nextDocument.RootElement);
                 passiveWaitCount++;
-                trace.Add(new JsonObject
+                ledger.Trace.Add(new JsonObject
                 {
-                    ["iteration"] = decisions,
+                    ["iteration"] = ledger.Decisions,
                     ["passiveCaptivityWait"] = true,
                     ["waitSeconds"] = 2,
                     ["menuBefore"] = ReadString(beforeContext, "menuId"),
@@ -402,7 +399,7 @@ internal static class AgentHostCaptivityRecoveryLoop
                     $"No supported Native captivity action is available: menuId={ReadString(context, "menuId") ?? "<none>"}; captivityMenuId={ReadString(context?["captivity"] as JsonObject, "currentMenuId") ?? "<none>"}; time={ReadString(context, "timeControlMode") ?? "<none>"}; isWaitMenu={ReadBoolean(context, "isWaitMenu")}; isWaitActive={ReadBoolean(context, "isWaitActive")}; enabledOptionIds=[{optionIds}].");
             }
             var observation = BuildObservation(current, state);
-            var modelRequest = BuildRequest(runId, ReadString(request, "goal"), observation, previousReceipt, decisionFeedback, actionCatalog, controls, decisions + 1);
+            var modelRequest = BuildRequest(runId, ReadString(request, "goal"), observation, previousReceipt, decisionFeedback, actionCatalog, controls, ledger.NextDecisionNumber);
             ProviderDecisionResult result;
             try
             {
@@ -410,12 +407,12 @@ internal static class AgentHostCaptivityRecoveryLoop
             }
             catch (AgentHostException exception) when (AgentHostProviderDecisionRecovery.CanRetry(exception.Code, rejectedProviderDecisions))
             {
-                decisions++;
+                ledger.RecordUnsentDecision();
                 rejectedProviderDecisions++;
                 decisionFeedback = AgentHostProviderDecisionRecovery.BuildFeedback(exception.Code, actionCatalog, controls);
-                trace.Add(new JsonObject
+                ledger.Trace.Add(new JsonObject
                 {
-                    ["iteration"] = decisions,
+                    ["iteration"] = ledger.Decisions,
                     ["stage"] = "decision-rejected-before-native",
                     ["rejectionCode"] = exception.Code,
                     ["nativeActionSent"] = false,
@@ -425,10 +422,9 @@ internal static class AgentHostCaptivityRecoveryLoop
                 });
                 continue;
             }
-            decisions++;
+            ledger.RecordDecision(result);
             rejectedProviderDecisions = 0;
             decisionFeedback = null;
-            AddRoute(routes, provider, result, decisions, ref priorPromptTokens, ref priorCompletionTokens);
             if (!TryResolveAction(result.Decision, actionCatalog, state, out var action, out var arguments, out var rejection))
                 throw new AgentHostException("captivity-recovery-decision-invalid", rejection ?? "The model did not choose a currently allowed Native captivity action.");
 
@@ -450,7 +446,7 @@ internal static class AgentHostCaptivityRecoveryLoop
                 ["timing"] = new JsonObject { ["actionStartedUtc"] = beforeReceipt, ["actionCompletedUtc"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture) }
             };
             previousReceipt = receiptWithTiming.DeepClone() as JsonObject;
-            trace.Add(BuildTrace(decisions, observation, result.Decision, receiptWithTiming, actionCatalog));
+            ledger.Trace.Add(BuildTrace(ledger.Decisions, observation, result.Decision, receiptWithTiming, actionCatalog));
         }
 
         throw new AgentHostException("captivity-recovery-budget-exhausted", "The bounded Native Captivity loop did not regain a usable Campaign Map before the elapsed/decision budget.");
@@ -548,23 +544,6 @@ internal static class AgentHostCaptivityRecoveryLoop
         ["actionExecuted"] = receipt != null && ReadString(receipt, "status") is "accepted" or "completed",
         ["actionReceipt"] = receipt?.DeepClone()
     };
-
-    private static void AddRoute(JsonArray routes, IAgentHostDecisionProvider provider, ProviderDecisionResult result, int decision,
-        ref long promptTokens, ref long completionTokens)
-    {
-        if (result.PromptTokens.HasValue) promptTokens += result.PromptTokens.Value;
-        if (result.CompletionTokens.HasValue) completionTokens += result.CompletionTokens.Value;
-        routes.Add(new JsonObject
-        {
-            ["decision"] = decision,
-            ["requestedModelId"] = provider.ModelId,
-            ["responseModelId"] = result.ModelId,
-            ["routedVia"] = result.RoutedVia,
-            ["responseFormatMode"] = result.ResponseFormatMode,
-            ["promptTokens"] = result.PromptTokens,
-            ["completionTokens"] = result.CompletionTokens
-        });
-    }
 
     private static IReadOnlyList<JsonObject> GetEnabledOptions(JsonObject state) =>
         (state["availableMenuOptions"] as JsonArray)?.OfType<JsonObject>()
