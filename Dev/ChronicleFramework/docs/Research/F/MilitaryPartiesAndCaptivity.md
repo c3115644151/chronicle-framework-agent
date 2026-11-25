@@ -348,6 +348,8 @@ Party troop progression由 `TroopRoster` 的成员计数/伤员数/XP与 `Charac
 
 这条机制的对照实验在 25 人夹具上做成了 2×2（`harness/Test-AgentIdlePressure.ps1`，1 天/块、零模型请求）：断粮跑 `TestResults/20261125-idle-hp-starved/IdlePressureResult.json` 里前 9 天粮为正、主角 HP 一直 100/100、伤兵 0；粮变负的第 10 天起 HP 100→87→68→49、伤兵 0→3→9→14。补粮跑 `TestResults/20261125-idle-hp-fed/IdlePressureResult.json`（起点 24.5 单位粮）12 天里 HP 始终 100/100、伤兵始终 0。两跑金币曲线逐日相同（每天 −78）。结论：**饥饿是唯一在场的原因；伤兵数 = 当前 HP 低于 20% 门槛的人数**，不是战伤计数，因此可以在零战斗的等待里增长。
 
+原生开局检查点（金 1000、1 人、粮 2.00 单位、HP 100/100、Renown 20、战役日 91077.375）由 `harness/Test-AgentFreshCampaign.ps1 -StoryModeEycSetup -StoryModeEycPersistentSeed` 产出，存档 `ChronicleEycDev-opening-20261126.sav`（SHA256 `6E04DD0ADE983732FC42CD9739F2AA8C2873BBB1AC3E7F9CA88FBF142B0CD0D7`），开局菜单是 `training_field_menu`（`training_field_enter`/`training_field_leave`），放任不管 0.34–0.435 个战役日即被劫匪（`looters_390`/`looters_394`）拦住。收据 `TestResults/20261126-opening-seed/` 与 `TestResults/20261126-opening-baseline/IdlePressureResult.json`。
+
 城墙里也做了一次同样的对照（`harness/Test-AgentIdlePressure.ps1 -ShelterInTown -ChunkDays 4 -MaxChunks 3`，收据 `TestResults/20261126-idle-sheltered-2/IdlePressureResult.json`）：同一 25 人夹具进城等待 12 天，每个采样点都是 `menuId=town`、`encounteredPartyId=town_ES3`，粮 12.5 → −1.3 的同一块里伤兵 0 → 15、健康 25 → 9、人数 25 → 24、士气 42 → 6。城墙内没有别的队伍能截住它，伤兵照涨，所以这条因果不需要地图遭遇也成立。同一夹具补粮另跑（`TestResults/20261126-idle-stocked/IdlePressureResult.json`，先买 18 单位 grain 花 216 金、粮 30 → 14.9）12 天里伤兵 0、人数 25、士气 47；三跑金币曲线都是每天 −78。
 
 `cargoCapacity` 30 → 10 与 `speed` 5.189 → 4.988 仍未归因（随队动物损失？伤兵？本例分不出来）。

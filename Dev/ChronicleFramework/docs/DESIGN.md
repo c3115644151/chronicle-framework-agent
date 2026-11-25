@@ -147,6 +147,10 @@ agent 侧已经中立：`agenthost` 全部 33 个源文件对 `Hero.MainHero` / 
 - **模型第一次真正要做选择的地方是一段已经输掉的遭遇**：对话里只有投降与讨价还价两条（两支劫匪给的是同一组 option id，说明这组选项由「玩家已被打败」这个状态决定，而不是由对话文本决定）。战场上「打不打」这个选项不在对话里。
 - **金 0 让「交钱」这条路等于没有**：这句台词指向的筹码不在手里，于是这个场景的第一个决策连「花多少钱买平安」都问不出来。
 
+**StoryMode 原生开局检查点现在有了，那 1000 金是真的现金。** 用 `harness/Test-AgentFreshCampaign.ps1 -StoryModeEycSetup -StoryModeEycPersistentSeed -PersistentStoryModeSaveName ChronicleEycDev-opening-20261126` 从原生开局跳过教程并把检查点留在存档目录：`ChronicleEycDev-opening-20261126.sav`，SHA256 `6E04DD0ADE983732FC42CD9739F2AA8C2873BBB1AC3E7F9CA88FBF142B0CD0D7`。加载后实测 gold **1000**、1 人、粮 2.00 单位、士气 49、HP 100/100、Renown 20、战役日 91077.375（收据 `TestResults/20261126-opening-baseline/IdlePressureResult.json` 与 `TestResults/20261126-opening-seed/Temp/scratch.json/FreshStoryMode.post-skip-map-state.json`）。上表按 EYC 任务日志假设的 1000 金从此有存档背书；`freshB` 那个 0 金检查点代表的是「已经从挨饿里截出来的一份残局」，不是开局。
+
+两条仪器事实跟着定下来。**一是原生开局不是空菜单**：检查点停在 `training_field_menu`，`training_field_enter`「回去训练。」与 `training_field_leave`「离开」两项都可点；`IdlePressure` 现在开局先按原版走一次 `training_field_leave`（零耗时，`leftAtCampaignDay` 与起点相同），并在回执里记下 `Opening`。**二是 1000 金在开局构不成压力**：1 人队伍工资 0、粮 0.05 单位/天，账面上「看不到头」；开局第一件真事还是遭遇——放任不管，两次跑分别在 0.34 与 0.435 个战役日被劫匪拦住（`looters_390` / `looters_394`，`menuId=encounter_meeting`），粮 2.00 → 1.95、金不动。所以「开局求生」的压力源不在这份现金上，而在那次已经输掉的遭遇里。
+
 **伤兵是怎么回事，现在量出来了，而且和遭遇无关。** 观察面新加了 `party.heroHitPoints`/`heroMaxHitPoints`（`mod/AgentObserver.cs` 的 party 块），于是「挨饿」不再只能从伤兵人数反推。给 `IdlePressure` 补一个 `-ShelterInTown` 与 HP 采样后，同一 25 人夹具跑两遍（1 天/块，零模型请求）：断粮那条 `TestResults/20261125-idle-hp-starved/IdlePressureResult.json`，补粮那条 `TestResults/20261125-idle-hp-fed/IdlePressureResult.json`。
 
 | 天 | 断粮：主角 HP / 伤兵 / 粮 | 补粮：主角 HP / 伤兵 / 粮 |
