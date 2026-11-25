@@ -1,0 +1,52 @@
+name: Bug report
+description: Something in the Mod, the agent host or the harness behaves incorrectly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste API keys, save files or player data. If the problem involves a key, say so without showing it.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Describe the behaviour, not the fix you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have happened
+    validations:
+      required: true
+  - type: input
+    id: run-id
+    attributes:
+      label: Harness run id
+      description: The directory name under Dev/ChronicleFramework/TestResults that shows the failure, if there is one.
+      placeholder: "20261125-111228"
+  - type: textarea
+    id: receipt
+    attributes:
+      label: Receipt excerpt
+      description: The failing phase's JSON receipt or the exact error text. Redact paths if needed.
+      render: text
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Bannerlord build, .NET SDK, PowerShell, Mod commit.
+      placeholder: "Bannerlord 1.4.8 / .NET 8.0.x / pwsh 7.4 / commit 7c313e1"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Mod in game (menus, dialogue, trade, party, quests, map, battle)
+        - Agent host (model loop, catalog, receipts)
+        - Harness (phases, gates, workspace setup)
+        - Documentation
+    validations:
+      required: true

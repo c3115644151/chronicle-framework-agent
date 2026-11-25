@@ -9,11 +9,29 @@ on:
 permissions:
   contents: read
 
+env:
+  # Must match the CLI the harness contract was validated against.
+  OPENSPEC_VERSION: 1.16.0
+
 jobs:
   docs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
+      - name: Install the pinned OpenSpec CLI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'openspec.zip'
+          $expanded = Join-Path $env:RUNNER_TEMP 'openspec'
+          $url = "https://github.com/Fission-AI/OpenSpec/releases/download/v$env:OPENSPEC_VERSION/openspec-windows-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $expanded -Force
+          $exe = Get-ChildItem -LiteralPath $expanded -Filter 'openspec.exe' -Recurse -File |
+            Select-Object -First 1
+          if (-not $exe) { throw 'The OpenSpec release package did not contain openspec.exe.' }
+          Split-Path -Parent $exe.FullName | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          & $exe.FullName --version
       - name: Validate documentation routing and harness contracts
         shell: pwsh
         run: ./Dev/ChronicleFramework/harness/Check-Docs.ps1

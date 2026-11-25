@@ -1,0 +1,39 @@
+name: Capability request
+description: A player action the agent cannot take yet, or a system it does not observe.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: action
+    attributes:
+      label: What can a player do that the agent cannot
+      description: Describe it as a player would perform it in the vanilla UI.
+    validations:
+      required: true
+  - type: textarea
+    id: entry
+    attributes:
+      label: Where the player enters it
+      description: The menu, dialogue, settlement overlay, map interaction or mission screen it starts from.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why the agent needs it
+      description: Which goal or subgoal fails without this action.
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Map movement or encounters
+        - Settlement menu or overlay
+        - Dialogue or inquiry
+        - Trade, barter or inventory
+        - Party, recruitment or prisoners
+        - Quest
+        - Battle or mission
+        - Captivity
+        - Observation only
+    validations:
+      required: true
