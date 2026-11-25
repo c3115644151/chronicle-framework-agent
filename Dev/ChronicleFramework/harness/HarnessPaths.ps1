@@ -19,7 +19,8 @@ function Get-HarnessLayout {
         ProjectRoot        = $root
         HarnessRoot        = $harnessRoot
         StageRoot          = $harnessRoot
-        GateRoot           = $harnessRoot
+        GateRoot           = Join-Path $harnessRoot 'gate'
+        StagesRoot         = Join-Path $harnessRoot 'stages'
         DocsRoot           = $docsRoot
         ModRoot            = $modRoot
         ModulePackageRoot  = Join-Path $modRoot 'module'
@@ -38,7 +39,7 @@ function Test-HarnessLayout {
         [Parameter(Mandatory)]$Layout
     )
 
-    $required = @('ProjectRoot', 'HarnessRoot', 'DocsRoot', 'ModRoot', 'ModulePackageRoot', 'AgentHostRoot', 'ToolRoot')
+    $required = @('ProjectRoot', 'HarnessRoot', 'GateRoot', 'StagesRoot', 'DocsRoot', 'ModRoot', 'ModulePackageRoot', 'AgentHostRoot', 'ToolRoot')
     $failures = New-Object System.Collections.Generic.List[string]
     foreach ($key in $required) {
         $path = [string]$Layout[$key]
