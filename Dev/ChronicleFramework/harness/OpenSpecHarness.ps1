@@ -32,6 +32,11 @@ function Get-OpenSpecWorkspaceSummary {
     )
 
     $executable = Resolve-OpenSpecExecutable
+    # The CLI resolves the OpenSpec root from the process working directory, so the
+    # summary must never depend on where the caller happened to be sitting.
+    $openspecRoot = Split-Path -Parent $PSScriptRoot
+    $previousLocation = $PWD.ProviderPath
+    Push-Location -LiteralPath $openspecRoot
     $previousTelemetry = [Environment]::GetEnvironmentVariable('OPENSPEC_TELEMETRY', 'Process')
     try {
         [Environment]::SetEnvironmentVariable('OPENSPEC_TELEMETRY', '0', 'Process')
@@ -72,5 +77,6 @@ function Get-OpenSpecWorkspaceSummary {
     }
     finally {
         [Environment]::SetEnvironmentVariable('OPENSPEC_TELEMETRY', $previousTelemetry, 'Process')
+        Pop-Location
     }
 }
