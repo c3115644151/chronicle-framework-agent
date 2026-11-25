@@ -351,6 +351,9 @@ Party troop progression由 `TroopRoster` 的成员计数/伤员数/XP与 `Charac
 
 遭遇对话的观察面：`context.conversation` 给出 `characterId`（`mountain_bandits_chief` / `looter`）、`characterName`（拦路强盗 / 劫匪）、`sentenceText` 与 `options[]`（每项 `id`/`text`/`textId`/`clickable`）。在这个 1 人且已受伤的场合，原版只给出两条 `bandit_start_defender_3`「我们已无力再战，全凭你的处置。」与 `bandit_start_defender_2`「也许我们可以找个两全其美的办法。」——同一个 1 人队伍面对山贼和劫匪拿到的是同一组 option id，说明选项集合由玩家方的处境决定，不由对话文本决定。没有出现「迎战」类选项；这一点在源码层未核实，只记为两次实测的观察。
 
+这次遭遇是分布而不是定值，现在有重放证据：`harness/Test-AgentOpeningScenario.ps1`（注册为 `OpeningScenario` 阶段）每轮都从存档重新加载、只走路不做任何动作、遇到第一个要回答的东西就停；两轮 `-Repeats 3 -ScenarioDays 2.0` 共六次全部在 0.747 / 0.747 / 0.933 / 0.864 / 0.974 / 1.194 个战役日被拦下（`mountain_bandits_2145` 两次、`mountain_bandits_2289` 一次，同一位 `mountain_bandits_chief`「拦路强盗」，三句不同台词），撞上时主角 HP 分别是 9 / 9 / 6 / 7 / 5 / 1，`healthy=0`、`wounded=1` 在相遇之前就已经成立。收据 `TestResults/20261125-opening-scenario/OpeningScenarioResult.json` 与 `TestResults/20261125-opening-scenario-2/Temp/OpeningScenarioResult.json`。把此前两条 `IdlePressure` 收据（0.873 / 0.817 天）与一次 1.2 天静默的探针也算进来，同一存档九次重放全部在 1.2 个战役日内分叉：遭遇是约半天尺度的分布，不是定律。
+
+同一批收据把「模型手里有什么选项」也说清了。三次抓到的对话选项恒为 `bandit_start_defender_3`（`LLEffOga`）与 `bandit_start_defender_2`（`aQYMefHU`），两条都可点。战斗 slice 的动作面（`agenthost/AgentHostBattleSimulationLoop.cs:1104-1131`）只允许 `bandit_start_defender_1`、`common_encounter_ultimatum`、`common_bandit_surrender_declined`，以及 `recoverPlayerCaptivity` 为真且本次没有迎战选项时的 `_3`。这批对话没有 `_1`、`_2` 不在名单，于是走 EYC/Autonomy 路线时模型在开局这一刻看得见的动作只有一个：认输。`_2` 在 VillageToolsQuest slice（`agenthost/AgentHostVillageToolsQuestLoop.cs:1148`）与 safe-passage barter 的 harness 路径（`harness/Test-AgentSafePassageBarterContext.ps1:228`）里都能用，所以缺的是 slice 选择，不是原版能力。
 ### Chronicle当前适配与缺口
 
 Observer输出主队成员/健康/伤兵/俘虏总数与Party SizeLimit，不输出每个兵种、UpgradeXP/UpgradeTargets、兵种技能/工资、招募上限/报名槽、逐兵伤病状态或模型推算逃兵风险。Protocol存在RecruitmentVM专用的一人招募流程和战后部分Party处理，但没有通用PartyScreen兵种转移、升级候选/费用核验、医疗治理或Roster rollback/retry动作；单兵总数变化不能替代“升级成功/伤病恢复/内部交换”细节。

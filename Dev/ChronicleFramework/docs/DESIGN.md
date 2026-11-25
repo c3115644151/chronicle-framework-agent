@@ -165,6 +165,7 @@ agent 侧已经中立：`agenthost` 全部 33 个源文件对 `Hero.MainHero` / 
 
 仍未归因的只剩 `cargoCapacity` 30 → 10 与 `speed` 5.189 → 4.988（`itemCount` 始终是 1，出现在 freshB 那次遭遇前后，本轮没有单独量）。
 
+这个判断现在有重放证据。`OpeningScenario` 阶段（`harness/Test-AgentOpeningScenario.ps1 -Repeats 3 -ScenarioDays 2.0`，零模型请求：每次重放都把存档重新加载一遍，只走路、不做任何动作，走到第一个「要你回答」的东西就停）在同一检查点上跑了两轮共六次，六次全部被拦：0.747 / 0.747 / 0.933 / 0.864 / 0.974 / 1.194 个战役日，遇到的永远是同一位拦路强盗（`mountain_bandits_chief`，`mountain_bandits_2145` 两次、`mountain_bandits_2289` 一次）、三句不同台词、同一组两个可点选项。撞上时主角 HP 分别是 9/9/6/7/5/1（起点 23/100，一路走一路掉），队伍在相遇之前就已经是「0 健康 + 1 伤兵」。收据 `TestResults/20261125-opening-scenario/OpeningScenarioResult.json` 与 `TestResults/20261125-opening-scenario-2/Temp/OpeningScenarioResult.json`。把两条 `IdlePressure` 收据（0.873 / 0.817 天）与一次 1.2 天静默的探针一起算，同一个存档九次重放全部在 1.2 个战役日内分叉、没有一次走到第二天——遭遇是约半天尺度上的分布，不是定值，也不是「全天安全」，所以仪器记录每次的分叉，而不是断言一定会有遭遇。
 这改变开局求生的形状：它的第一个决策点不是「雇不雇」，也不是「破产前怎么省」，而是**一次已经输掉的遭遇里的两句话**。要让它成为能测东西的场景，仪器必须先说得清「一开始就被打败」这条路上模型有什么可选的（现在只有投降与讨价还价），而不是把它当成一道理财题。真正的成本决策要等它能活下来、有钱、有兵之后才出现；在那之前拿「它会不会算日工资」当判据，是在问一个它还没走到的岔路口。
 
 **实测：放任不管，世界在 12 天里做了什么。** 这是本场景第一个真正跑起来的仪器（`IdlePressure` 阶段，零模型请求，1 天/块；夹具 `ChronicleW7P-manual-20261101-eyc-complete`，25 人 / 2277 金 / 12.5 单位粮；收据 `TestResults/20261125-idle-pressure-daily/IdlePressureResult.json`，采样 13 点）：
@@ -236,6 +237,14 @@ EYC 这条产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanG
 - 任何「让模型自己管钱」的场景，前提是先把买卖动词放进战役循环，那属于玩家动作面扩展，要走真机验证与产品判断，不是脚本任务。
 - EYC 的 gold 目标给了模型「要赚钱」的选择权，但只给「卖一件」的执行权：它能选要不要赚，选不了怎么赚。这也是 §4 判据的一个可指认实例——不是它没去想，是它那一刻没有这个选项。
 
+**实测：开局那一刻，模型手里只有一个动作。** 三次重放抓到的现场对话里，可点的选项始终是同两个：`bandit_start_defender_3`（TextObject `LLEffOga`「我们已无力再战，全凭你的处置。」）与 `bandit_start_defender_2`（`aQYMefHU`「也许我们可以找个两全其美的办法。」）。而战斗 slice 的动作面（`agenthost/AgentHostBattleSimulationLoop.cs:1104-1131`）只收 `bandit_start_defender_1`、`common_encounter_ultimatum`、`common_bandit_surrender_declined`，外加 `recoverPlayerCaptivity` 为真、且这次对话里没有迎战选项时的 `_3`。这次对话里没有 `_1`，`_2` 从来不在名单上，于是 EYC/Autonomy 路线走到开局这一刻，模型被列出的动作恰好一个：认输。
+
+这不是能力缺口，是 slice 选择的缺口：`bandit_start_defender_2` 在别处已经能用——VillageToolsQuest slice 把它当「找折中办法」（`agenthost/AgentHostVillageToolsQuestLoop.cs:1148`、`agenthost/AgentHostVillageToolsQuestPolicy.cs:729`），safe-passage 那条 harness 也走通过（`harness/Test-AgentSafePassageBarterContext.ps1:228` 选中它之后进 barter）。战斗 slice 里没有 barter 动词，所以它把这条路过滤掉了。
+
+对场景设计，后果有两个：
+
+- 「开局求生」现在不能拿「它会怎么谈」当判据，因为它拿不到谈判动词；能判的只有「它认不认这个已经输掉的结局，以及认输之后怎么爬起来」。
+- 想让开局出现真正的分叉，得先把谈判/交钱这条路暴露进战斗 slice（先真机核对 barter 之后原版走向，再补动词），那是产品级动作面扩展，不是脚本任务。
 ## 10. 明确不做
 
 - **不把动作广度当 KPI**：动作目录有多少条不是体验，四条判据才是。
