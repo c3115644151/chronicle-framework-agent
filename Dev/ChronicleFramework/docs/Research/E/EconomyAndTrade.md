@@ -196,6 +196,14 @@ W5-I候选目标的食品下限另以一轮配对Native实测（同模板、不�
 
 W5-I食品下限另以一轮配对Native实测（同模板、不是新Seed，ProvisionAmount=1）：购买1个橄榄，当前报价9，Gold 900→891、Food 0.95→1.95、FoodInventory 0→1；自然跨过三个daily tick后 Gold 861、Food 1.05、FoodInventory 1、DailyWage 10、Morale 49。对应无补给分支三日后 Food 0.05、Gold 870。收据TestResults/20261009-123759/Temp/MultiDaySupplyBaselineResult.json通过，源档哈希不变、进程清理。由此只确认在该固定6人Town场景、该类报价下购买1单位已达到“三日后Food≥1.0”的候选门槛；不能推广到别的队伍组成/市场，也不代表真实模型已能规划。
 
+### 工资与粮食随人数的实测标定（1.4.8 安装版）
+
+四组互相独立的收据给出同一个线性关系：每日工资 = 2 ×（非主角成员数），每日粮食消耗 = 0.05 × 成员数。数据点是 1 人（工资 0、FoodChange −0.05）、2 人（2、−0.1）、6 人（10、−0.3）、8 人（14、——）、11 人（20、——）；6 人点来自 W5-H 的 `MultiDaySupplyBaseline`，8/11 人点来自 `TestResults/20261029-live-storymode/StoryModeVillagePath.json`（招募 7 名志愿者后 `dailyWage` 14，继续三次招募后 20），1/2 人点来自 `Documents/Mount and Blade II Bannerlord/AgentRuns/ChronicleAgent/events.jsonl` 里 921 条真实 `state` 回执的分布（`members 1 | dailyWage 0 | foodChange −0.05` 出现 903 次，`members 2 | wage 2 | foodChange −0.1` 出现 18 次）。
+
+斜率 2 与本文 §181 记录的「默认基础工资随 Tier 从 1/2/3/5/8/12/17 起算」不符：同样是一阶新兵，实测每人 2 而不是 1。未知项留在未知：可能是安装版 `DefaultPartyWageModel` 的修正项、招募兵种的 Tier 档位判定、或主角作为 Leader 的模型修正，本轮没有单兵级工资读回可比对。使用方法：按 2×人数做预算时留一倍余量，不要把它当作公式常量。
+
+粮食这一侧没有歧义：`Food` 以「人·日 / 20」为单位，1 件 `IsFood` 物品 +1.0，因此 25 人的队伍每天吃 1.25 单位；本机橄榄报价 9、谷物报价 19–30，折合每人每天 0.45–1.5 第纳尔。两者相加即可算出任意规模队伍的日现金支出。
+
 ### 货物、负重、动物与战后物资
 
 Party `ItemRoster` 同时承载食品、贸易物、动物与战利品；缓存的 `TotalFoodAtInventory`、`TotalWeightCarried`、`InventoryCapacity`、动物数量会分别影响食物、载重、速度或交易判断。战后 ItemRoster 可能先进入 Encounter 的待领取 Loot Roster，再经原生 InventoryState 领取到 Party；那不是“战斗奖励已到账”的同义词，处理链见 G/H 域及 MAINLINE 的 partyLoot 契约。队伍内囚犯、受伤/健康成员、战利品/库存的转移则由对应 PartyScreen、InventoryLogic 和结算动作分别提交。
