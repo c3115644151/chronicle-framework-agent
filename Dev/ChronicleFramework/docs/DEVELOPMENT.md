@@ -581,7 +581,7 @@ Agent decision provider may terminate a bounded loop with an explicit `{done: tr
 默认入口：
 
 ```powershell
-pwsh -NoProfile -File .\Dev\ChronicleFramework\Run-Harness.ps1 -Phase All
+pwsh -NoProfile -File .\Dev\ChronicleFramework\harness\Run-Harness.ps1 -Phase All
 ```
 
 AgentLoop 的 `observeAgain` 是循环调度控制，不属于游戏动作：只允许在 Native `move` 已完成、Campaign Map仍在自然运行、主队仍移动且目标尚未抵达时，请求 1–10 秒的宿主侧等待；允许的Native时间档是 `StoppablePlay` 或 `UnstoppableFastForward`。遭遇、菜单、弹窗或停止时间都不能靠宿主等待解决，执行器会拒绝该等待、刷新Native观察并把 `control-unavailable` 反馈给模型，不发送暂停/快进/时间步进命令，也不重复下达移动。若模型推理期间主队已自然抵达目标，同样将过期等待作为无副作用拒绝反馈；没有匹配的已完成Move回执则失败关闭。Native拒绝一个动作后，循环把失败动作和原因放在本步回执/反馈中，但保留上一个已完成的Native回执供重规划使用，不能把失败提案当成最后一次成功游戏状态。执行器会检查条件，Native `currentSettlementId` 与移动回执的目标一致时，只有“移动到达”这一窄目标会把 `nativeMoveArrival` 送给模型；循环另可设墙钟总时限，超限失败并留收据。为了避免无关背包/技能内容和上一回执的完整状态副本挤占短上下文，地图旅行白名单严格为 `mapSettlementTargets,move` 时，模型输入使用 `campaign-map-travel` 字段视图；地图旅行+招募白名单时使用 `campaign-settlement-recruitment`，只传相关位置、队伍/金币、时间、危险和当前招募菜单入口。两种视图都将模型侧上一回执压为有限的 `stateSummary`，聚落目标/招募报价也各自摘要；原生观察/回执、执行器校验和游戏状态不被裁剪。Provider将UTF-8 JSON作为字节发送；面对模型输出的 positional array，只在元素数精确等于当前动作参数列表长度时按列表顺序映射，最终仍由执行器检查参数名/值。缺少模型 rationale 时会明确标为 `rationaleSource=provider-fallback`，不会伪称为模型理由。`LiveModelArrival`、`LiveModelRecruitment` 与 `LiveModelSafePassageRecruitment` 是显式、耗时的选择性阶段（不进入 `All`），使用真实配置Provider和disposable战役。`LiveModelSafePassageRecruitment`用视觉Harness专用的Native Bandit fixture，在一次Move后创建当前可观察的hostile party，等待原版`encounter_meeting`真实出现，再让模型通过`dialogueSelect`与Native BarterVM完成和平通行并继续招募；夹具详情只进Harness收据，不进入模型观察。`recruitOptions/recruit` 不打开Gauntlet招募窗口、不模拟焦点，因此不能声称已经验证玩家可视招募弹窗路径。各阶段均验证Campaign自然时间、窗口视频关键帧、源存档hash及进程清理。LiveModel Harness优先从进程环境读取服务配置，缺项时才继承已有的用户级环境值；阶段内的超时/输出Token覆盖只作用于测试子进程并在结束恢复。
