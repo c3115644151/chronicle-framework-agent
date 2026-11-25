@@ -118,12 +118,9 @@ internal static class AgentHostSupplyLoop
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
 
-        var trace = new List<JsonObject>();
+        var ledger = new DecisionRunLedger(provider, runId);
         var nativeActionsExecuted = 0;
-        var decisionCount = 0;
         var rejectedCount = 0;
-        long inputTokens = 0;
-        long outputTokens = 0;
         JsonObject? previousReceipt = null;
         JsonObject? feedback = null;
         string lastProviderCompletedUtc = string.Empty;
@@ -153,7 +150,7 @@ internal static class AgentHostSupplyLoop
             for (var iteration = 1; iteration <= maxDecisions; iteration++)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
-                if (decisionCount >= maxDecisions) break;
+                if (ledger.Decisions >= maxDecisions) break;
 
                 loopStage = "evaluate-completion-contract";
                 var nativeObservation = currentNative ?? throw new AgentHostException("native-observation-missing", "The Host lost its current Native observation.");
@@ -184,14 +181,12 @@ internal static class AgentHostSupplyLoop
                 {
                     loopStage = "provider-call";
                     providerResult = await AgentHostDecisionCycle.DecideSupplyAsync(provider, modelRequest, elapsed.Token);
-                    decisionCount++;
+                    ledger.RecordDecision(providerResult);
                     lastProviderCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                    if (providerResult.PromptTokens.HasValue) inputTokens += providerResult.PromptTokens.Value;
-                    if (providerResult.CompletionTokens.HasValue) outputTokens += providerResult.CompletionTokens.Value;
                 }
                 catch (AgentHostException exception) when (IsRecoverableProviderDecisionError(exception.Code) && rejectedCount < MaxRejectedDecisions)
                 {
-                    decisionCount++;
+                    ledger.RecordProviderFailure(exception.Code);
                     rejectedCount++;
                     lastProviderCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                     feedback = new JsonObject
@@ -205,7 +200,7 @@ internal static class AgentHostSupplyLoop
                         ["requiredNextStep"] = GetRequiredNextStep(nativeObservation, previousReceipt, targetSettlementId!, startingDailyTick),
                         ["instruction"] = "Use the latest Native observation and current action/control catalogs; do not repeat the rejected shape."
                     };
-                    trace.Add(BuildRejectedDecisionStep(iteration, decisionStartedUtc, lastProviderCompletedUtc, nativeObservation, feedback, Stopwatch.GetTimestamp() - providerStarted));
+                    ledger.Trace.Add(BuildRejectedDecisionStep(iteration, decisionStartedUtc, lastProviderCompletedUtc, nativeObservation, feedback, Stopwatch.GetTimestamp() - providerStarted));
                     continue;
                 }
                 catch (Exception exception)
@@ -213,7 +208,7 @@ internal static class AgentHostSupplyLoop
                     failure = exception is AgentHostException hostException ? hostException.Code : exception.GetType().Name;
                     terminationReason = "provider-failed";
                     var providerFailureDetail = exception.Message.Length > 400 ? exception.Message[..400] : exception.Message;
-                    trace.Add(BuildFailedProviderStep(iteration, decisionStartedUtc, DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture), nativeObservation, failure, providerFailureDetail, Stopwatch.GetTimestamp() - providerStarted));
+                    ledger.Trace.Add(BuildFailedProviderStep(iteration, decisionStartedUtc, DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture), nativeObservation, failure, providerFailureDetail, Stopwatch.GetTimestamp() - providerStarted));
                     break;
                 }
 
@@ -235,7 +230,7 @@ internal static class AgentHostSupplyLoop
                             ["requiredNextStep"] = GetRequiredNextStep(nativeObservation, previousReceipt, targetSettlementId, startingDailyTick),
                             ["instruction"] = "This stop proposal was not executed. Do not repeat done; follow requiredNextStep using only the listed current action/control."
                         };
-                        trace.Add(BuildDecisionOnlyStep(iteration, decisionStartedUtc, providerCompletedUtc, nativeObservation, decision, feedback, Stopwatch.GetTimestamp() - providerStarted));
+                        ledger.Trace.Add(BuildDecisionOnlyStep(iteration, decisionStartedUtc, providerCompletedUtc, nativeObservation, decision, feedback, Stopwatch.GetTimestamp() - providerStarted));
                         if (rejectedCount > MaxRejectedDecisions)
                         {
                             failure = "The provider repeated stop proposals while Native completion conditions were still unmet.";
@@ -248,7 +243,7 @@ internal static class AgentHostSupplyLoop
                     completedByProvider = true;
                     goalVerified = true;
                     terminationReason = "native-completion-contract-passed";
-                    trace.Add(BuildDecisionOnlyStep(iteration, decisionStartedUtc, providerCompletedUtc, nativeObservation, decision, null, Stopwatch.GetTimestamp() - providerStarted));
+                    ledger.Trace.Add(BuildDecisionOnlyStep(iteration, decisionStartedUtc, providerCompletedUtc, nativeObservation, decision, null, Stopwatch.GetTimestamp() - providerStarted));
                     break;
                 }
 
@@ -256,7 +251,7 @@ internal static class AgentHostSupplyLoop
                 {
                     failure = "The Host does not expose model-driven polling during an accepted Native rest; the Host owns that asynchronous action until it completes.";
                     terminationReason = "model-poll-during-native-rest-rejected";
-                    trace.Add(BuildDecisionOnlyStep(iteration, decisionStartedUtc, providerCompletedUtc, nativeObservation, decision, new JsonObject { ["kind"] = "control-rejected-before-wait", ["nativeActionSent"] = false }, Stopwatch.GetTimestamp() - providerStarted));
+                    ledger.Trace.Add(BuildDecisionOnlyStep(iteration, decisionStartedUtc, providerCompletedUtc, nativeObservation, decision, new JsonObject { ["kind"] = "control-rejected-before-wait", ["nativeActionSent"] = false }, Stopwatch.GetTimestamp() - providerStarted));
                     break;
                 }
 
@@ -276,7 +271,7 @@ internal static class AgentHostSupplyLoop
                         ["reason"] = validationError ?? "The decision was not a listed Native action.",
                         ["nativeActionSent"] = false
                     };
-                    trace.Add(BuildRejectedActionStep(iteration, decisionStartedUtc, providerCompletedUtc, nativeObservation, decision, feedback, Stopwatch.GetTimestamp() - providerStarted));
+                    ledger.Trace.Add(BuildRejectedActionStep(iteration, decisionStartedUtc, providerCompletedUtc, nativeObservation, decision, feedback, Stopwatch.GetTimestamp() - providerStarted));
                     if (rejectedCount > MaxRejectedDecisions)
                     {
                         failure = "The decision exceeded the bounded pre-Native rejection allowance.";
@@ -299,7 +294,7 @@ internal static class AgentHostSupplyLoop
                 if (actionReceipt["state"] is not JsonObject)
                     throw new AgentHostException("native-action-post-state-missing", "Native action receipt did not include its post-action state.");
                 var afterAction = actionReceipt;
-                trace.Add(BuildNativeActionStep(iteration, decisionStartedUtc, providerCompletedUtc, nativeActionStartedUtc, nativeActionCompletedUtc, nativeObservation, afterAction, decision, actionReceipt, actionExecuted, Stopwatch.GetTimestamp() - providerStarted));
+                ledger.Trace.Add(BuildNativeActionStep(iteration, decisionStartedUtc, providerCompletedUtc, nativeActionStartedUtc, nativeActionCompletedUtc, nativeObservation, afterAction, decision, actionReceipt, actionExecuted, Stopwatch.GetTimestamp() - providerStarted));
 
                 if (actionStatus is not ("completed" or "accepted"))
                 {
@@ -355,12 +350,12 @@ internal static class AgentHostSupplyLoop
                         nativeGameProcessId,
                         startingIdentity,
                         elapsed.Token);
-                    trace.Add(restCompletion.MonitorStep);
+                    ledger.Trace.Add(restCompletion.MonitorStep);
                     currentNative = restCompletion.CurrentObservation;
                     previousReceipt = restCompletion.FinalReceipt;
                     if (restCompletion.LeaveReceipt is not null)
                     {
-                        trace.Add(restCompletion.LeaveStep!);
+                        ledger.Trace.Add(restCompletion.LeaveStep!);
                         nativeActionsExecuted++;
                     }
                     if (restCompletion.RequestedRestCompleted)
@@ -409,14 +404,14 @@ internal static class AgentHostSupplyLoop
             ["failureDetail"] = failureDetail,
             ["failureStack"] = failureStack,
             ["lastSelectedAction"] = lastSelectedAction,
-            ["trace"] = new JsonArray(trace.Select(step => (JsonNode?)step).ToArray()),
+            ["trace"] = ledger.Trace.DeepClone(),
             ["lastObservation"] = currentNative?.DeepClone(),
             ["actionsExecuted"] = nativeActionsExecuted,
-            ["decisions"] = decisionCount,
+            ["decisions"] = ledger.Decisions,
             ["providerBudget"] = new JsonObject { ["mode"] = "token-only-local", ["maxOutputTokensPerCall"] = ReadIntEnvironment("CHRONICLE_LLM_MAX_TOKENS", 256, 64, 4096), ["maxProviderCalls"] = maxDecisions },
             ["providerModelId"] = provider.ModelId,
             ["providerConfigurationSource"] = provider.ConfigurationSource,
-            ["providerUsage"] = new JsonObject { ["promptTokens"] = inputTokens, ["completionTokens"] = outputTokens, ["cost"] = (JsonNode?)null },
+            ["providerUsage"] = new JsonObject { ["promptTokens"] = ledger.PromptTokens, ["completionTokens"] = ledger.CompletionTokens, ["cost"] = (JsonNode?)null },
             ["timing"] = new JsonObject { ["providerCompletedUtc"] = lastProviderCompletedUtc },
             ["termination"] = new JsonObject
             {
