@@ -86,6 +86,11 @@ internal interface IAgentHostGoldSaleNativeClient : IAgentHostCampaignNativeClie
     Task<JsonDocument> ExecuteGoldSaleActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken);
 }
 
+internal interface IAgentHostTownTradeNativeClient : IAgentHostCampaignNativeClient
+{
+    Task<JsonDocument> ExecuteTownTradeActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken);
+}
+
 internal interface IAgentHostRecruitmentNativeClient : IAgentHostCampaignNativeClient
 {
     Task<JsonDocument> ExecuteRecruitmentActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken);

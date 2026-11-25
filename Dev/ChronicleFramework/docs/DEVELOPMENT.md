@@ -1,6 +1,12 @@
 ﻿# Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.715
+Contract version: 7.716
+
+## Contract 7.716 — give the town buy leg its own Host boundary
+
+#143 needs a buy verb, but the sell-only Gold slice and the MapState-only Campaign loop cannot carry it. A separate `town-trade` action profile now exposes only market navigation, `tradeOptions`, buy-side `trade`, `tradeConfirm`/`tradeCancel`/`tradeCancelChanges` and `inventoryDone`; it stays out of `AllSupportedActions` so MCM and existing full-scope runs do not silently gain a buy verb.
+
+`IAgentHostTownTradeNativeClient` and `NativeMailboxClient.ValidateTownTradeAction` accept only `direction=buy`, `inventorySide=OtherInventory`, a lower-case observed item VM id, and `amount>=1`. Sell, PlayerInventory, zero amounts, borrowed Ransom verbs and clock controls are rejected before any Native command. The contract self-test now also pins the accepted profile and the bounded mailbox.
 
 ## Contract 7.715 — share visual-mode authorization and measure a live opponent fixture
 

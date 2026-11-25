@@ -10,7 +10,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
     IAgentHostQuestDetailsNativeClient, IAgentHostCaptivityRecoveryNativeClient, IAgentHostGoldSaleNativeClient,
     IAgentHostRecruitmentNativeClient, IAgentHostSupplyNativeClient, IAgentHostCompanionHiringNativeClient, IAgentHostStoryModeBootstrapNativeClient,
     IAgentHostNativeInquiryClient, IAgentHostStoryModeBannerEditorNativeClient, IAgentHostEstablishClanTrainingIssueNativeClient,
-    IAgentHostQuestTroopScreenNativeClient, IAgentHostCampaignCheckpointNativeClient
+    IAgentHostQuestTroopScreenNativeClient, IAgentHostCampaignCheckpointNativeClient, IAgentHostTownTradeNativeClient
 {
     private static readonly HashSet<string> SupplySliceActions = new(StringComparer.Ordinal)
     {
@@ -156,6 +156,12 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         return SendAsync(action, arguments, acceptedResponseExpected: action == "tradeConfirm", cancellationToken);
     }
 
+    public Task<JsonDocument> ExecuteTownTradeActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+    {
+        ValidateTownTradeAction(action, arguments);
+        return SendAsync(action, arguments, acceptedResponseExpected: action == "tradeConfirm", cancellationToken);
+    }
+
     public Task<JsonDocument> ExecuteRecruitmentActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
     {
         ValidateRecruitmentAction(action, arguments);
@@ -286,6 +292,66 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             catch (AgentHostException exception) when (exception.Code == "native-action-not-in-recruitment-scope") { }
         }
         return [new { scenario = "native-recruitment-mailbox-allows-quest-dialogue-current-offers-and-bounded-recruit-all", validCases = 8, invalidCases = 11, passed = true }];
+    }
+
+    internal static void ValidateTownTradeAction(string action, JsonObject arguments)
+    {
+        static bool HasOnlyKeys(JsonObject value, params string[] keys) => value.Count == keys.Length && keys.All(value.ContainsKey);
+        static bool HasText(JsonObject value, string key) => value[key] is JsonValue node && node.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text);
+        static bool IsLowerIdentifier(JsonObject value, string key) => value[key] is JsonValue node && node.TryGetValue<string>(out var text) &&
+            !string.IsNullOrWhiteSpace(text) && text.All(character => character is >= 'a' and <= 'z' or >= '0' and <= '9' or '_' or '-');
+
+        var valid = action switch
+        {
+            "mapSettlementTargets" or "tradeOptions" or "tradeConfirm" or "tradeCancel" or "tradeCancelChanges" or "inventoryDone" => arguments.Count == 0,
+            "move" => HasOnlyKeys(arguments, "settlementId") && HasText(arguments, "settlementId"),
+            "menuSelect" => HasOnlyKeys(arguments, "menuId", "optionId") && HasText(arguments, "menuId") && HasText(arguments, "optionId"),
+            "trade" => HasOnlyKeys(arguments, "direction", "itemViewModelId", "inventorySide", "amount") &&
+                arguments["direction"] is JsonValue directionNode && directionNode.TryGetValue<string>(out var direction) && direction == "buy" &&
+                arguments["inventorySide"] is JsonValue sideNode && sideNode.TryGetValue<string>(out var side) && side == "OtherInventory" &&
+                IsLowerIdentifier(arguments, "itemViewModelId") && arguments["amount"] is JsonValue amountNode && amountNode.TryGetValue<int>(out var amount) && amount >= 1,
+            _ => false
+        };
+        if (!valid)
+            throw new AgentHostException("native-action-not-in-town-trade-scope", "The town-trade adapter accepts only safe movement, current Town or Village menu selection, buy-side trade quotes, amount, confirmation, cancellation and inventory exit.");
+    }
+
+    internal static IReadOnlyList<object> RunTownTradeActionContractSelfTests()
+    {
+        var validCases = new (string Action, string Json)[]
+        {
+            ("mapSettlementTargets", "{}"),
+            ("move", "{\"settlementId\":\"visible-safe-town\"}"),
+            ("menuSelect", "{\"menuId\":\"town\",\"optionId\":\"trade\"}"),
+            ("tradeOptions", "{}"),
+            ("trade", "{\"direction\":\"buy\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),
+            ("trade", "{\"direction\":\"buy\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"OtherInventory\",\"amount\":3}"),
+            ("tradeConfirm", "{}"),
+            ("tradeCancel", "{}"),
+            ("tradeCancelChanges", "{}"),
+            ("inventoryDone", "{}")
+        };
+        foreach (var item in validCases) ValidateTownTradeAction(item.Action, JsonNode.Parse(item.Json)!.AsObject());
+        var invalidCases = new (string Action, string Json)[]
+        {
+            ("trade", "{\"direction\":\"sell\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),
+            ("trade", "{\"direction\":\"buy\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"PlayerInventory\",\"amount\":1}"),
+            ("trade", "{\"direction\":\"buy\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"OtherInventory\",\"amount\":0}"),
+            ("trade", "{\"direction\":\"buy\",\"itemViewModelId\":\"current-goods-id\",\"inventorySide\":\"OtherInventory\",\"amount\":1,\"extra\":true}"),
+            ("menuSelect", "{\"menuId\":\"town\"}"),
+            ("pause", "{}"),
+            ("sellPrisonerOne", "{\"troopId\":\"looter\"}")
+        };
+        foreach (var item in invalidCases)
+        {
+            try
+            {
+                ValidateTownTradeAction(item.Action, JsonNode.Parse(item.Json)!.AsObject());
+                throw new AgentHostException("native-town-trade-invalid-action-accepted", "The town-trade adapter accepted a sell, missing argument, borrowed sell verb or hidden clock control.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "native-action-not-in-town-trade-scope") { }
+        }
+        return [new { scenario = "native-town-trade-mailbox-allows-only-buy-quotes-and-bounded-market-navigation", validCases = validCases.Length, invalidCases = invalidCases.Length, passed = true }];
     }
 
     internal static void ValidateGoldSaleAction(string action, JsonObject arguments)

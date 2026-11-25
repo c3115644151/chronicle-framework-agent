@@ -28,6 +28,13 @@ internal static class AgentHostCampaignLoop
     internal static readonly HashSet<string> RecruitmentActions = new(StringComparer.Ordinal) { "recruitOptions", "recruit", "recruitAll", "prisonerRecruitmentOptions", "recruitPrisoner" };
     internal static readonly HashSet<string> CompanionHiringActions = new(StringComparer.Ordinal) { "missionSceneAgents", "missionNavigateToAgent", "missionInteract", "missionLeave" };
     internal static readonly HashSet<string> TrainingIssueActions = new(StringComparer.Ordinal) { "partyUpgradeOptions", "upgradeTroop" };
+    // The buy leg is a separate bounded profile: the Gold-sale slice stays sell-only, and the
+    // general Campaign loop exits outside MapState, so a market purchase needs its own route.
+    internal static readonly HashSet<string> TownTradeActions = new(StringComparer.Ordinal)
+    {
+        "mapSettlementTargets", "move", "menuSelect", "tradeOptions", "trade", "tradeConfirm",
+        "tradeCancel", "tradeCancelChanges", "inventoryDone"
+    };
     internal static readonly HashSet<string> AllSupportedActions = new(ApprovedActions.Concat(BattleSimulationActions).Concat(GoldSaleActions).Concat(RecruitmentActions).Concat(CompanionHiringActions).Concat(TrainingIssueActions), StringComparer.Ordinal);
 
     internal readonly record struct ActionProfile(string Name, IReadOnlyCollection<string> Actions);
@@ -38,6 +45,7 @@ internal static class AgentHostCampaignLoop
         new("battle", BattleSimulationActions),
         new("captivity", CaptivityRecoveryActions),
         new("gold-sale", GoldSaleActions),
+        new("town-trade", TownTradeActions),
         new("all-supported", AllSupportedActions)
     };
 
@@ -52,6 +60,14 @@ internal static class AgentHostCampaignLoop
             !AllSupportedActions.Contains("sellPrisonerOne") || !AllSupportedActions.Contains("partyScreenCancel"))
             throw new AgentHostException("campaign-loop-ransom-sale-actions-missing", "The current Gold sale scope and product MCM start catalog must include Native one-prisoner Ransom transfer, Done and Cancel.");
         results.Add(new { scenario = "campaign-loop-gold-sale-scope-includes-native-ransom-transfer-done-cancel", passed = true });
+        if (TownTradeActions.Contains("sellPrisonerOne") || TownTradeActions.Contains("partyScreenDone") ||
+            AllSupportedActions.Contains("inventoryDone") && TownTradeActions.Contains("partyTakeAll"))
+            throw new AgentHostException("campaign-loop-town-trade-scope-leaked-sale-actions", "The buy profile must stay separate from the sell-only Gold slice and from battle aftermath verbs.");
+        if (!TownTradeActions.Contains("trade") || !TownTradeActions.Contains("tradeOptions") || !TownTradeActions.Contains("tradeConfirm") ||
+            SupportedActionProfiles.Count(profile => profile.Name == "town-trade") != 1 ||
+            !IsSupportedRequestedActionSet(new HashSet<string>(TownTradeActions, StringComparer.Ordinal)))
+            throw new AgentHostException("campaign-loop-town-trade-profile-missing", "The bounded Native town market purchase set must be an accepted Host profile of its own.");
+        results.Add(new { scenario = "campaign-loop-town-trade-is-a-separate-accepted-buy-profile", passed = true });
         results.AddRange(AgentHostMapIncidentLoop.RunContractSelfTestsAsync().GetAwaiter().GetResult());
         results.AddRange(AgentHostStoryModeBootstrapLoop.RunContractSelfTests());
         if (new[] { 0, 30, 80, 159, MaxCumulativeDecisions - 1 }.Any(prior => prior >= GetCumulativeDecisionLimit(MaxCumulativeDecisions)) ||

@@ -1197,6 +1197,10 @@ $env:CHRONICLE_LLM_MAX_TOKENS='1000'
 根因是预算口径而不是模型偏好：`MaximumTrainingIssueDiscoveryDecisions = 32`（`agenthost/AgentHostEstablishClanTrainingIssueLoop.cs:13`），而整场只有 26 个决策；发现预算永远等不到自己的止损点，先耗尽共享预算，于是带着 `training-issue-budget-exhausted` 退出，排在后面的战斗兜底拿不到任何决策。
 
 改法（`AgentHostCampaignLoop.TrainingIssueSkipReason` + `AgentHostEstablishClanTrainingIssueLoop.HasReachableTrainingIssue`）：训练腿只在「委托已经够得着」且「剩余预算 ≥ 32」时进入，否则跳过并记录 `trainingIssueAttempt.skippedReason`。自测新增场景 `gold-objective-skips-training-issue-discovery-unless-a-giver-is-visible-and-the-remaining-budget-covers-its-search`（431 场景全绿、模型调用 0）。
+## 2026-11-26 城镇买入腿的主机侧地基（契约 7.716）
+
+本轮没有启动游戏、没有真实模型请求。源码侧新增独立 `TownTradeActions` 与 `town-trade` profile；`NativeMailboxClient` 新增 `IAgentHostTownTradeNativeClient`、独立校验与 contract self-test。这一增量只钉住主机边界，不把零模型市场探针改写成模型能力证据。
+
 ## 2026-11-26 自主运行里的可见对手夹具（契约 7.715）
 
 为了回答“没有可见敌人时战斗兜底是否只是无米之炊”，`Test-AgentLiveModelLoop.ps1` 新增 `-FixtureOpponent`，启动 `visual-opponent-fixture`。该模式只生成一个 3 人 `chronicle_harness_looters` 敌队，不补玩家兵、不播种战利品、敌方 AI 保持运行；模型看到什么、是否交战，都来自它自己的决策。

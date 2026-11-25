@@ -716,6 +716,10 @@ AgentHostRuntime 的切片动作集必须与 `AgentHostCampaignLoop.SupportedAct
 `TestResults/20261126-live-host-opening4` 证明这套顺序会吃掉整场预算：26 决策的运行里，②用了 21 动作 / 26 决策在 `castle_EW3` 与 `castle_village_EW3_1` 之间找委托（城堡本身没有训练委托），金币恒为 1022，最终 `training-issue-budget-exhausted`，③一次未被调用。
 
 现行规则：`TrainingIssueSkipReason(nativeStateReceipt, remainingDecisions)` 在「无可达训练委托」（`HasReachableTrainingIssue`：Journal 里已有训练委托 / 当前聚落 overlay 里有带训练标记的委托英雄 / 村民求助对话已打开）时返回 `no-reachable-training-issue`，在剩余预算 < 32 时返回 `training-issue-discovery-longer-than-remaining-budget`；命中任一即跳过②，把预算交给③，并在回执 `trainingIssueAttempt.skippedReason` 里留痕。
+城镇买入腿的主机边界（`agenthost/AgentHostCampaignLoop.cs`、`agenthost/NativeMailboxClient.cs`）：`TownTradeActions` 是独立 profile `{mapSettlementTargets,move,menuSelect,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges,inventoryDone}`，不并入 `AllSupportedActions`；`IAgentHostTownTradeNativeClient.ExecuteTownTradeActionAsync` 走独立校验，只允许 `direction=buy` + `inventorySide=OtherInventory` + 小写当前报价 id + `amount>=1`，sell/PlayerInventory/时钟动词在发送前拒绝。
+
+这条边界是 #143 的地基而非完整收入腿：有界决策 loop、额度上限（库存/负重/金币）与 A→B 城净收益收据仍需下一增量。现有 `TestResults/20261126-market-probe-3/4` 只证明 Native 侧买→旅行→卖可行（flax 9→15，单程毛利上限 426，扣 78 日工资净 348），不证明 Host 已把买入开放给模型。
+
 ### Campaign存档内的Agent目标Checkpoint
 
 本机1.4.8的`CampaignBehaviorBase.SyncData(IDataStore)`会随Native Campaign存档序列化行为字段；

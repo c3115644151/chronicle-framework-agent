@@ -300,6 +300,17 @@ if ($harnessScript -notmatch "'AgentHostEstablishClanGoldSaleEvaluation' \{ @\('
     $agentHostLiveModelLoopSource -notmatch 'EstablishClanGoldSaleVerification') {
     throw 'W7-P must keep native goods/Ransom sales within current observed options, publish only sell quantities its own mailbox will send, expose Native Ransom rollback, isolate campaign goal scope, and preserve source/visual/cleanup evidence.'
 }
+if ($agentHostCampaignLoopSource -notmatch 'TownTradeActions' -or
+    $agentHostCampaignLoopSource -notmatch 'campaign-loop-town-trade-is-a-separate-accepted-buy-profile' -or
+    $agentHostDecisionCycleSource -notmatch 'IAgentHostTownTradeNativeClient' -or
+    $agentHostMailboxSource -notmatch 'ExecuteTownTradeActionAsync' -or
+    $agentHostMailboxSource -notmatch 'ValidateTownTradeAction' -or
+    $agentHostMailboxSource -notmatch 'direction == "buy"' -or
+    $agentHostMailboxSource -notmatch 'side == "OtherInventory"' -or
+    $agentHostMailboxSource -notmatch 'native-town-trade-mailbox-allows-only-buy-quotes-and-bounded-market-navigation' -or
+    $agentHostProviderSelfTestSource -notmatch 'RunTownTradeActionContractSelfTests') {
+    throw 'The town market buy leg must be a separate accepted Host profile with its own bounded mailbox: buy direction, OtherInventory side, positive amount, and no sale or clock-control verbs.'
+}
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\-BattleSimulationLoop' -or

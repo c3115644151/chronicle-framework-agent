@@ -289,6 +289,12 @@ EYC 产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanGoldSal
 - **同一件货在 `sellOffers` 里可以有多行**，按堆叠与修正分开，价格不同；成交按被选中那一行的报价结算，所以判据要用「成交前后金币差 = 该行报价 × 件数」。
 
 夹具 `ChronicleW7P-manual-20261101-eyc-complete` 周边没有敌意队伍（只有 3 支商队），因此这条链的自然入口要靠地图上另找劫匪；`BattleLootSale` 用 harness fixture 模式生成的 `chronicle_harness_looters` 与 `seedVisualLoot` 播种，收据里 `lootOrigin` 明确写成 `seeded-fixture-after-native-autoresolve(count=N,naturalDrop=False)`，不冒充自然掉落。自然掉落的战利品量与兵种对应关系仍未量。
+### 城镇买入腿的主机侧边界
+
+`TestResults/20261126-market-probe-3/4` 用零模型证明了 Native 买入可行：`town_ES3` 的 flax 9/件、`town_EW2` 收 15、单程毛利上限 426，扣 78 日工资净 348；但当时的动作目录只暴露地图动作，Gold 切片又只允许 sell，所以模型看不到这条收益。
+
+本轮在 Host 侧建立独立 `town-trade` profile 与 `IAgentHostTownTradeNativeClient`：交易参数仅 `direction=buy`、`inventorySide=OtherInventory`、当前报价的小写 `itemViewModelId` 和正整数 `amount`；`tradeConfirm` 是唯一等待 completed 回执的动作。额度上限（库存/负重/金币）仍由后续有界 loop 绑定当前报价，不能从这条传输白名单推断模型已经能选择买入。
+
 ### 货物、负重、动物与战后物资
 
 Party `ItemRoster` 同时承载食品、贸易物、动物与战利品；缓存的 `TotalFoodAtInventory`、`TotalWeightCarried`、`InventoryCapacity`、动物数量会分别影响食物、载重、速度或交易判断。战后 ItemRoster 可能先进入 Encounter 的待领取 Loot Roster，再经原生 InventoryState 领取到 Party；那不是“战斗奖励已到账”的同义词，处理链见 G/H 域及 MAINLINE 的 partyLoot 契约。队伍内囚犯、受伤/健康成员、战利品/库存的转移则由对应 PartyScreen、InventoryLogic 和结算动作分别提交。
