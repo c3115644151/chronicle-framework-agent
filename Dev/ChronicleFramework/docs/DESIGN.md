@@ -307,6 +307,30 @@ EYC/Autonomy 的 BattleSimulation 调用点都带 `recoverPlayerCaptivity: true`
 - **本地模型可以做场景仪器**：零成本、零凭据、可重复，适合先把「它会怎么选」看清楚，再决定要不要花上游配额去验语义能力。
 - **不要拿 3B 的语义判断当产品结论**：它在 0 金的队伍上选 `gold`，说明它读不懂「没有货就没有钱」；这类结论要用更大的模型复验，不能写进验收。
 
+### 9.5 判决器与第二次跑：它自己开完了局，也真的卖出了一件东西
+
+场景要能判，第二个前提是「同一份 run 能读成结论」。`harness/Get-ScenarioVerdict.ps1 -RunPath <run>` 把一次真实模型运行的 `Temp/AgentHostProgress.jsonl` 与 `Temp/LiveModelLoopResult.json` 读成 `Temp/ScenarioVerdict.json`：五项检查（观测是否带战役状态、战役时间是否单调、队伍是否还在、每条决策是否落成动作/控制/分类、是否走到终局记录）加上场景要量的数量（决策数、动作数、要求停手与被拒次数、等待次数、走过多少战役日、金币、队伍、粮食、最低士气）。
+
+判定口径有两条容易踩的坑，都已经写进脚本注释。第一是**决策形状不止一种**：Campaign loop 回 `control` 或 `action`，目标子流程回 `{stop:true}`、`{observeAgain:true}` 或 `{goalClassification}`；只认 `control` 的读者会把一次要求停手四次的运行读成 0 次。第二是**战役时间要按序列分别判**：子流程记录里的 `nativeStateBefore` 是子流程开始时的快照，但记录写在子流程结束时，把它和决策序列混在一张表里比较，会在时间从未倒退的运行上报出三次「倒退」。
+
+判决器的 `passed` 只表示「这场运行能被判定」，不表示目标达成；目标达成看 `goalVerified` 与 `hostTermination`。把这两件事分开，是因为场景要能记录失败的回执，否则只剩成功案例可留。
+
+第二次真实模型运行用开局存档 `ChronicleEycDev-opening-20261126`（1000 金、1 人），同样的 `llama3.2:3b` + `json_schema`，零外部凭据（收据 `TestResults/20261126-live-host-opening1`）：34 次决策、70 个 Native 动作、0.633 个战役日、61,213 输入与 770 输出 token，终局 `gold-sale-no-safe-native-action`。
+
+这一轮比第一轮多出三件事：
+
+- **开局是它自己走完的**：`submitStoryModeClanName` 与 `bannerEditorDone` 两个原版开局界面都由模型提交，中间没有任何脚本替它选名字或旗。存档仍报 `FixtureUnchanged`，说明这些选择没有写回夹具。
+- **它真的卖出了一件东西**：进城 → `tradeOptions` → `trade` → `tradeConfirm`，Host 用任务日志核对金币 `1000 → 1022`，回执 `one-native-sale-and-journal-gold-increase-verified`（23 个动作）。这是 §9.2 那张表里「卖战利品/库存」一格的第一条自然收据。
+- **它两次被同一条训练任务路线弹回**：`goldTrainingIssueIncome` 三次 `observeAgain` 之后报 `native-stalled-move-returned-by-training-issue`，外层 `gold` 用同一个码收尾——地图上「已下令移动、被暂停、却还没到目标」这个状态由主机判定并交回父级，不是模型自己选的路。
+
+**这一轮暴露的真正缺口在村庄。** 最后一段金币路线里，队伍站在 `castle_village_EW3_2`（村庄），原版 `availableMenuOptions` 明确给出 `trade` 且 `available && enabled`，但主机在问模型之前就报了 `gold-sale-no-safe-native-action`：`AgentHostEstablishClanGoldSaleLoop` 的市场白名单只收 `type == town`。也就是说**同一个原生动作在玩家手里可用、在收入路线上不存在**。这正是 §9.2 那句判据的反例——评价模型之前先看它手里有哪些能换钱的动词；这一次缺的不是模型的意图，是「路」本身。机制记在 MAINLINE，产品缺口开成 issue #144。
+
+对场景设计，这一轮的后果有三条：
+
+- **仪器先于剧本**：判决器必须先于场景表存在，否则每跑一次都要人工读日志，场景就没法批量比较。
+- **失败的回执也是场景数据**：这轮 `goalVerified=false`，但它给出了「自己开完局」「卖出第一件」「被停滞移动弹回」「村庄市场不可见」四条可行动事实，比一个笼统的 `failed` 有用得多。
+- **800 秒墙钟里 70 个动作，说明预算单位仍是决策**：0.633 个战役日只够走完开局加一次买卖；要看一个场景里「钱开始烧」的压力曲线（§9.1），决策预算得按场景给到几十次，而不是按秒。
+
 ## 10. 明确不做
 
 - **不把动作广度当 KPI**：动作目录有多少条不是体验，四条判据才是。

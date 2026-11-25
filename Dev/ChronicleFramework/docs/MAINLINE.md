@@ -688,6 +688,14 @@ Host只接受一组精确动作集，`AgentHostCampaignLoop.SupportedActionProfi
 
 第一批真实模型收据`TestResults/20261126-live-host-autonomy5`（llama3.2:3b、json_schema、24决策/1800秒预算、夹具`ChronicleEycDev-freshB-20261123092350-d1a1805e`）：24次决策、28个Native动作、61,121输入token/658输出token、3.3个战役日。行为链为分类`establish-your-clan`→查settlement→向`castle_village_EW6_2`移动→匪徒打断后要求`stop`被拒、只能`observeAgain`→查party→`pursue`→对话选最后通牒→`encounter/attack`（1人队）→被俘→`menu_captivity_end_wilderness_escape/mno_continue`逃脱→选`gold`→移向`town_B1`→再被`mountain_bandits_2289`拦→`pursue`→对话后`leave`不接战→改选`partySize`→移向村庄→两次要求`stop`（一次`observeAgain`，一次`recruitment-model-stopped-with-safe-actions`）→再选`gold`→`gold-sale-budget-exhausted`。终局Gold 0、1人、站在村庄菜单，四个目标全未变。该收据同时证明模型确实在玩（有战斗、被俘、逃脱、拒战），以及3B模型24次决策内没有任何收益。
 
+第二批真实模型收据`TestResults/20261126-live-host-opening1`（同配方、夹具`ChronicleEycDev-opening-20261126`、1000金/1人）：34决策、70个Native动作、61,213输入/770输出token、0.633战役日，`Passed=false`。开局两屏由模型自己提交（`submitStoryModeClanName`与`bannerEditorDone`），随后它真的卖出一件东西：`menuSelect`→`tradeOptions`→`trade`→`tradeConfirm`，Host以任务日志核对金币`1000→1022`，子流程回执`one-native-sale-and-journal-gold-increase-verified`（23动作）。此后训练任务金币路线三次`observeAgain`后以`native-stalled-move-returned-by-training-issue`交回父级，父级`gold`同码收尾（33动作）。
+
+该轮最后失败的机制是收入面的真实缺口：子流程`nativeStateAfter`为`menuId="village"`、`currentSettlementId=castle_village_EW3_2`、`gold=1022`，`availableMenuOptions`中`trade`为`available=true, enabled=true`（原版村庄菜单确实给玩家交易入口）；而`AgentHostEstablishClanGoldSaleLoop.FilterSafeTowns`只收`type == town`，`BuildActionCatalog`在村庄菜单下产出空catalog与空controls，循环在向模型发请求之前就抛`gold-sale-no-safe-native-action`。`mod/AgentTradeAdapter.cs`本身区分`isTownMerchantTrade = settlement?.IsTown == true && settlement.SettlementComponent != null`与`menuId == "village"`，即adapter已支持村庄菜单交易；缺的是主机侧的市场路由，不是Native能力。
+
+停滞移动的判据与交接码：`AgentHostNativeMapMovementMonitor.IsStalledNativeSettlementMove`要求`timeControlMode==Stop`、`MapState`、无`menuId`/`escapeMenu`/`inquiry`/`encounter`/`captivity`/`sceneNotification`、`party.isMoving`为真、`targetSettlementId`非空、`targetPartyId`为空且尚未抵达目标（可传`expectedTargetSettlementId`限定）。命中后各子流程各自交接：训练任务回`native-stalled-move-returned-by-training-issue`，金币售卖回`gold-sale-paused-native-move-handoff`，两者都把该目标交回`AgentHostCampaignLoop`重发而不是自行改路。
+
+`harness/Get-ScenarioVerdict.ps1 -RunPath <run>`把一次真实运行读成`Temp/ScenarioVerdict.json`：五项检查（`observations-carry-campaign-state`、`campaign-time-monotonic`、`party-survived`、`every-decision-ended-in-action-control-or-classification`、`run-reached-a-terminal-outcome`）与场景量（决策/动作/停手/被拒/等待/战役日/金币/队伍/粮食/最低士气）。两条口径由这批run校出并已写死：决策形状必须归一化（Campaign loop回`control`或`action`，目标子流程回`{stop:true}`、`{observeAgain:true}`或`{goalClassification}`，只认`control`会把四次停手读成0次）；`campaignDay`必须按序列分别判（决策观测序列非递减、每个子流程窗口`nativeStateBefore<=nativeStateAfter`），把子流程before与决策序列混排会假报倒退——autonomy5的`stops`由0纠正为3，opening1的相邻倒退由3纠正为0。
+
 ### Campaign存档内的Agent目标Checkpoint
 
 本机1.4.8的`CampaignBehaviorBase.SyncData(IDataStore)`会随Native Campaign存档序列化行为字段；
