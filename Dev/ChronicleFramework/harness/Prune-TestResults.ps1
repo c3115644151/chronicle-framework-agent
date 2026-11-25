@@ -14,7 +14,7 @@ $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($EvidenceRoot)) { $EvidenceRoot = Join-Path (Split-Path -Parent $PSScriptRoot) 'TestResults' }
 if (-not $ReferenceDocumentPaths -or $ReferenceDocumentPaths.Count -eq 0) {
     $docsRoot = Join-Path (Split-Path -Parent $PSScriptRoot) 'docs'
-    $ReferenceDocumentPaths = @((Join-Path $docsRoot 'DEVELOPMENT.md'), (Join-Path $docsRoot 'MAINLINE.md'))
+    $ReferenceDocumentPaths = @((Join-Path $docsRoot 'DEVELOPMENT.md'), (Join-Path $docsRoot 'MAINLINE.md'), (Join-Path $docsRoot 'RUNLOG.md'))
 }
 
 function Test-IndexedCapture {

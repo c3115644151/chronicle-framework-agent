@@ -109,7 +109,7 @@ Dev/ChronicleFramework/
   TestResults/ local evidence (gitignored)
 ```
 
-docs\DEVELOPMENT.md is the contract: every observable behaviour the Mod may expose, and the acceptance rule for it. docs\MAINLINE.md holds mechanism facts and open unknowns. When code and document disagree, that is a bug, and -Phase Docs is what reports it.
+docs\DEVELOPMENT.md is the contract: every observable behaviour the Mod may expose, and the acceptance rule for it. docs\MAINLINE.md holds mechanism facts and open unknowns; docs\RUNLOG.md keeps the dated record of real runs; docs\DESIGN.md is about the experience rather than the plumbing. When code and document disagree, that is a bug, and -Phase Docs is what reports it.
 
 ## Design rules
 

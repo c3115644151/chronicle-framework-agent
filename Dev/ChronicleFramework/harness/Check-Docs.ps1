@@ -28,7 +28,7 @@ function Resolve-SourceArtifact {
 $localSettingsPath = Join-Path $harnessRoot 'harness.local.json'
 $localSettings = if (Test-Path -LiteralPath $localSettingsPath) { Get-Content -LiteralPath $localSettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }
 $projectRoot = if ($localSettings -and $localSettings.repositoryRoot) { [IO.Path]::GetFullPath([string]$localSettings.repositoryRoot) } else { [string]$layout.RepositoryRoot }
-$contractVersion = '7.684'
+$contractVersion = '7.685'
 $openSpecHarnessPath = Join-Path $stageRoot 'OpenSpecHarness.ps1'
 if (-not (Test-Path -LiteralPath $openSpecHarnessPath -PathType Leaf)) { throw 'OpenSpec Harness integration is missing.' }
 . $openSpecHarnessPath
@@ -37,7 +37,7 @@ if ([IO.Path]::GetFullPath([string]$openSpecSummary.Root) -ne [IO.Path]::GetFull
 if ($openSpecSummary.ActiveChangeCount -gt 1) { throw 'OpenSpec must contain at most one active change; GitHub Project remains the product task board.' }
 $contextState = Get-Content (Join-Path $docsRoot 'ContextState.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $taskTrackerUrl = [string]$contextState.taskTracker.projectUrl
-$requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md')
+$requiredRootPaths = @('DEVELOPMENT.md', 'DESIGN.md', 'SYSTEM_INVENTORY.md', 'RUNLOG.md')
 $routedPaths = @(
     $requiredRootPaths
     @($contextState.defaultRead | ForEach-Object { [string]$_ })
