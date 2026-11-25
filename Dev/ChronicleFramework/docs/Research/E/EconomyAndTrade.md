@@ -214,6 +214,8 @@ EYC 产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanGoldSal
 
 已记录的邮箱流（`events.jsonl`，921 条事件、38 个 nativeSession）里没有一次 `trade` 或锦标赛动作。这不是模型偏好证据：那些 session 未必经过允许交易的 slice。要判断模型在有交易动词时会不会用，必须有对应运行收据。
 
+战俘出售有两条真机收据（均零模型请求）。`TestResults/20261030-012146/RansomCancelRuntime.json`：Ransom 界面暂存一名骑马掠夺者，草稿 +50，原版 Done 后金币 1823→1873、俘虏 7→6。`TestResults/20261125-202821/PrisonerRansomSaleResult.json`（现注册为 `PrisonerRansomSale` 阶段）：夹具战役日 91179.34、金币 2277、俘虏 2 名 `looter`，右侧接收上限 22，两次 `sellPrisonerOne` 把草稿从 5 累到 10，一次 `partyScreenDone` 使金币 2277→2287、俘虏 2→0，`campaignDayBefore/After` 相同、时钟档位 Stop 不变、PartyScreen 关闭回到 `town_backstreet` 地图菜单。两条合起来给出的价格事实是：**looter 5 第纳尔/人、骑马掠夺者 50 第纳尔/人**，同一批 7 名混合俘虏的菜单报价为 374——单价由兵种等级决定，不是由人数决定。逐人转移只改草稿，整笔由一次 Done 提交，因此观察窗口与提交时机都由模型决定。
+
 ### 货物、负重、动物与战后物资
 
 Party `ItemRoster` 同时承载食品、贸易物、动物与战利品；缓存的 `TotalFoodAtInventory`、`TotalWeightCarried`、`InventoryCapacity`、动物数量会分别影响食物、载重、速度或交易判断。战后 ItemRoster 可能先进入 Encounter 的待领取 Loot Roster，再经原生 InventoryState 领取到 Party；那不是“战斗奖励已到账”的同义词，处理链见 G/H 域及 MAINLINE 的 partyLoot 契约。队伍内囚犯、受伤/健康成员、战利品/库存的转移则由对应 PartyScreen、InventoryLogic 和结算动作分别提交。

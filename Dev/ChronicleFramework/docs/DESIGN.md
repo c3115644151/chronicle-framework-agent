@@ -139,7 +139,7 @@ EYC 这条产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanG
 | 赚钱方式 | 原版里有 | 这套动作面里 |
 | --- | --- | --- |
 | 卖战利品 | 战后 Loot 界面取物再卖 | 有：`partyLootTransferOne`/`partyTakeAll` + `trade`（sell，一次 1 件） |
-| 卖战俘 | 城镇酒馆/监狱卖出 | 有：`sellPrisonerOne` |
+| 卖战俘 | 城镇酒馆/监狱卖出 | 有：`sellPrisonerOne` 逐人暂存 + 一次 `partyScreenDone` 提交（两条真机收据见下） |
 | 任务奖励 | 完成任务由 Issue 结算给金 | 有：任务接受与交付走 `questDetails`/对话分支 |
 | 低价买入高价卖出 | 城镇市场价差 | EYC 路线里没有买入动词；只有 VillageToolsQuest slice 允许买 |
 | 竞技场奖金/赌注 | 报名锦标赛、跳过轮次、看结算 | **没有**：`mod/AgentTournamentAdapter.cs` 已适配 `tournamentJoin`/`tournamentSkipAllRounds` 等五个原版 handler，`agenthost` 全仓零引用，任何白名单都不含它 |
@@ -149,6 +149,10 @@ EYC 这条产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanG
 把锦标赛接进动作面属于扩展玩家动作面，不是文档任务：它要真机进竞技场 Mission 验证报名、跳过轮次的真实结算与胜者判定，因此在产品看板上单列，不在本轮自行接上。
 
 另一件要交代清楚的事：已记录的邮箱流（`events.jsonl`，921 条事件、38 个 nativeSession）里没有出现过一次 `trade` 或锦标赛动作。这不能当成模型偏好证据——那些 session 未必经过允许交易的 slice——只能说明这条路上没有留下尝试记录。要判断模型在有交易动词时会不会去用，必须有对应的运行收据。
+
+卖战俘这一行现在有运行收据，而且收据把「谁在定价」讲清楚了。`TestResults/20261030-012146/RansomCancelRuntime.json`（零模型请求）在 `town_backstreet → sell_some_prisoners` 的 Ransom 界面里只暂存一名骑马掠夺者：草稿报价 +50，原版 Done 后金币 1823→1873、俘虏 7→6。`TestResults/20261125-202821/PrisonerRansomSaleResult.json`（零模型请求，现已注册为 `PrisonerRansomSale` 阶段可复跑）把同一动作拉到多人：夹具战役日 91179.34、金币 2277、俘虏 2 名 `looter`，右侧接收上限 22、开屏草稿 0，两次 `sellPrisonerOne looter` 把草稿从 5 累到 10，一次 `partyScreenDone` 使金币 2277→2287、俘虏 2→0，战役日与时钟档位前后完全不变，页面关闭回到地图。
+
+同一批对比里最有用的是一个数字：**一名 `looter` 只值 5 第纳尔，而一名骑马掠夺者值 50**。按 §9.1 的日烧曲线，25 人队伍每天要付 59–85，靠卖劫匪凑钱等于一天要抓十几个人。所以「卖战俘」不是金库，而是一条薄利、看俘获兵种等级的路线；把它写进场景时，压力源应该是「有没有值得卖的东西」，而不是「肯不肯卖」。这条链也天然适合做判据：每一步只是草稿，模型看得到 `ransomGoldChangeAmount`，必须自己决定卖谁、卖几个、什么时候收手。
 
 ## 10. 明确不做
 

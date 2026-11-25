@@ -347,7 +347,7 @@ Observer输出主队成员/健康/伤兵/俘虏总数与Party SizeLimit，不输
 
 本体 `PartyVM` 暴露主队/对方的 Prisoner 列表、俘虏容量警告、转移全部俘虏/解雇等命令，以及在适用模式出现的俘虏招募弹窗；战后则进入 F10 记录的 PartyState/PartyScreen 流程。俘虏英雄的 Barter/对话释放属于另一条交互，不等同于普通兵俘转移。各操作受 PartyScreen 模式、Roster 容量、可转移对象和行动上下文限制。这里确认的是源码中的玩家界面模型能力；从地图按钮到不同 PartyScreen/酒馆/地牢/对话的每一种可视入口与确认流程尚未逐项实测，不将其压成一个“管理俘虏”按钮。
 
-Chronicle 主队观察输出俘虏总数，当前 PartyState 观察分别序列化左右双方成员与 Prisoner roster。`partyTakeAll` 仅允许战后 Loot 模式并通过原生 PartyScreen handler 的 Done 提交；它不是通用俘虏交易、招募或释放动作。现有协议没有独立的普通俘虏转移/卖出/招募/英雄释放命令。俘虏Roster读写本身不显式推进 Campaign 时间；赎金评估、逃脱等是由后续日常/小时 Campaign 行为驱动，进入不同 Wait/Encounter/PartyScreen 时是否继续运行按其宿主 GameState 的时钟规则决定，F12没有把它们另行快进。
+Chronicle 主队观察输出俘虏总数，当前 PartyState 观察分别序列化左右双方成员与 Prisoner roster。`partyTakeAll` 仅允许战后 Loot 模式并通过原生 PartyScreen handler 的 Done 提交；它不是通用俘虏交易、招募或释放动作。现有协议已覆盖 Ransom 侧的 `sellPrisonerOne`（逐人暂存草稿）/`partyScreenDone`（提交整笔）/`partyScreenCancel`（原版取消），以及 Normal PartyScreen 的 `recruitPrisoner`；仍没有通用的任意俘虏转移与英雄释放命令。俘虏Roster读写本身不显式推进 Campaign 时间；赎金评估、逃脱等是由后续日常/小时 Campaign 行为驱动，进入不同 Wait/Encounter/PartyScreen 时是否继续运行按其宿主 GameState 的时钟规则决定，F12没有把它们另行快进。
 
 战后普通兵俘虏另有明确玩家处置点：`PlayerEncounter`先以`DoFreeOrCapturePrisonerHeroes`把仍被敌方关押的Hero移出待分配成员Roster，使用`FreeOrCapturePrisonerHero`对话处理；之后若存在普通成员或俘虏Roster，`DoLootMembersAndPrisonersOfParty`打开`PartyScreenHelper.OpenScreenAsLoot`的`Aftermath` PartyScreen。`DefaultDoneHandler`按本次Roster差异分别将玩家接收的俘虏交给`TakePrisonerAction.ApplyByTakenFromPartyScreen`，并将玩家放弃的俘虏交给`EndCaptivityAction.ApplyByReleasedByChoice`，Encounter随后清理临时战后Roster。此战后普通兵俘分配记为`ACT-F12-11`，不与日常普通兵俘招募`ACT-H04-02`或Hero俘虏对话合并。自然战斗中不同MapEvent/胜负条件是否始终到达该界面、容量反馈和取消后的完整迁移仍待运行核验。
 
@@ -355,7 +355,7 @@ Chronicle 主队观察输出俘虏总数，当前 PartyState 观察分别序列�
 
 `partyTakeAll`只在Loot模式走本体handler；这是战后接收Roster的现有Harness适配，不代表常规PartyScreen俘虏招募、日常容器转移或Hero处置已完整支持。
 
-普通主队俘虏出售是另一种原生Roster事务：Town Backstreet“选择要卖的俘虏”打开Ransom PartyScreen，逐人由`PartyCharacterVM.ExecuteTransferSingle`暂存到买方左侧，Done才通过`IPartyScreenPrisonHandler`提交`SellPrisonersAction`。用户确认玩家可按目标选择其中一部分；俘虏降低地图队伍速度，超出俘虏上限后会逃跑，因此不应把“卖出/接收全部”写成通用Agent策略。Chronicle的Ransom适配逐名呈现当前Native可转移行，并读取当前累计Gold草稿与Cancel可用性；Agent Host可按当前EYC金币目标和队伍需要继续增选、原版Done提交或通过原版PartyVM取消回滚。取消调用链经1.4.8 `PartyVM` IL及用户界面观察双重核对。2026-10-30 Host动作边界/离线合同测试、模块编译、Ransom逐人暂存/取消/部分提交游戏内验证均通过，详细Native回执见`TestResults/20261030-012146/RansomCancelRuntime.json`。取消回到`town_backstreet`且不改变金币、俘虏或时间；单人提交结算为1823→1873 Gold、7→6俘虏。临时存档未改写。具体移速变化、逃跑时间/数量、卖出Hero的关系及技能影响未在本次确认，不外推用户提供的规则。
+普通主队俘虏出售是另一种原生Roster事务：Town Backstreet“选择要卖的俘虏”打开Ransom PartyScreen，逐人由`PartyCharacterVM.ExecuteTransferSingle`暂存到买方左侧，Done才通过`IPartyScreenPrisonHandler`提交`SellPrisonersAction`。用户确认玩家可按目标选择其中一部分；俘虏降低地图队伍速度，超出俘虏上限后会逃跑，因此不应把“卖出/接收全部”写成通用Agent策略。Chronicle的Ransom适配逐名呈现当前Native可转移行，并读取当前累计Gold草稿与Cancel可用性；Agent Host可按当前EYC金币目标和队伍需要继续增选、原版Done提交或通过原版PartyVM取消回滚。取消调用链经1.4.8 `PartyVM` IL及用户界面观察双重核对。2026-10-30 Host动作边界/离线合同测试、模块编译、Ransom逐人暂存/取消/部分提交游戏内验证均通过，详细Native回执见`TestResults/20261030-012146/RansomCancelRuntime.json`。取消回到`town_backstreet`且不改变金币、俘虏或时间；单人提交结算为1823→1873 Gold、7→6俘虏。临时存档未改写。后续`TestResults/20261125-202821/PrisonerRansomSaleResult.json`（同一阶段已注册为`PrisonerRansomSale`）把这条链从单人扩到多人并固定为可复跑收据：夹具战役日91179.34、金币2277、俘虏2名`looter`、右侧接收上限22，两次`sellPrisonerOne`使草稿5→10，一次`partyScreenDone`后金币2277→2287、俘虏2→0、战役日与Stop档位不变、页面关闭回到`town_backstreet`。价格单位由兵种等级决定：`looter`5第纳尔/人，骑马掠夺者50第纳尔/人。具体移速变化、逃跑时间/数量、卖出Hero的关系及技能影响未在本次确认，不外推用户提供的规则。
 
 玩家补充：其所称“赎俘界面”有取消按钮，取消后回到酒馆区。这个玩家可见返回结果先作为补充观察记录；该回答未明确是从酒馆场景、聚落Backstreet菜单或其他入口打开，也尚无对应Native运行收据，因此不把它与上段已验证的`town_backstreet` PartyScreen取消路径视为同一入口或同一测试。
 
