@@ -43,13 +43,9 @@ internal static class AgentHostBattleSimulationLoop
 
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
-        var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
-        var routes = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
-        var decisions = priorDecisions;
+        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var actionsExecuted = 0;
         var rejected = 0;
-        var promptTokens = priorPromptTokens;
-        var completionTokens = priorCompletionTokens;
         var startDay = double.NaN;
         var renownBefore = double.NaN;
         JsonObject? initialNative = null;
@@ -91,7 +87,7 @@ internal static class AgentHostBattleSimulationLoop
             startDay = ReadDouble(currentNative, "campaignDay", double.NaN);
             renownBefore = ReadRenown(currentNative["state"] as JsonObject);
 
-            for (var localIndex = 1; decisions < maxDecisions; localIndex++)
+            for (var localIndex = 1; ledger.Decisions < maxDecisions; localIndex++)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
                 var iteration = priorDecisions + localIndex;
@@ -137,7 +133,7 @@ internal static class AgentHostBattleSimulationLoop
                         termination = "outcome-verification-incomplete";
                         break;
                     }
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "native-try-to-get-away-return-verified",
                         ["battleSimulationStarted"] = false,
@@ -146,9 +142,9 @@ internal static class AgentHostBattleSimulationLoop
                         ["renownBefore"] = renownBefore,
                         ["renownAfter"] = escapeRenownAfter
                     });
-                    trace.Add(BuildDeferredPartyTargetTraceStep(requestedTargetId, observedTargets, state));
-                    return BuildResult(runId, provider, "completed", decisions, actionsExecuted, promptTokens, completionTokens,
-                        "native-try-to-get-away-completed", null, null, startDay, initialNative, native, trace, routes,
+                    ledger.Trace.Add(BuildDeferredPartyTargetTraceStep(requestedTargetId, observedTargets, state));
+                    return BuildResult(runId, provider, "completed", ledger, actionsExecuted,
+                        "native-try-to-get-away-completed", null, null, startDay, initialNative, native,
                         renownBefore, escapeRenownAfter, "native-try-to-get-away", playerRetreated: true,
                         targetId: requestedTargetId, battleStarted: false, battleFinishReceipt: null,
                         captivityRecoveryRequested: recoverPlayerCaptivity, captivityObserved: captivityObserved,
@@ -166,7 +162,7 @@ internal static class AgentHostBattleSimulationLoop
                         termination = "outcome-verification-incomplete";
                         break;
                     }
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "native-captivity-recovered-without-battle",
                         ["battleSimulationStarted"] = false,
@@ -175,9 +171,9 @@ internal static class AgentHostBattleSimulationLoop
                         ["renownBefore"] = renownBefore,
                         ["renownAfter"] = recoveryRenownAfter
                     });
-                    trace.Add(BuildDeferredPartyTargetTraceStep(requestedTargetId, observedTargets, state));
-                    return BuildResult(runId, provider, "completed", decisions, actionsExecuted, promptTokens, completionTokens,
-                        "native-captivity-recovered-without-battle", null, null, startDay, initialNative, native, trace, routes,
+                    ledger.Trace.Add(BuildDeferredPartyTargetTraceStep(requestedTargetId, observedTargets, state));
+                    return BuildResult(runId, provider, "completed", ledger, actionsExecuted,
+                        "native-captivity-recovered-without-battle", null, null, startDay, initialNative, native,
                         renownBefore, recoveryRenownAfter, "native-captivity-recovery", playerRetreated: false,
                         targetId: requestedTargetId, battleStarted: false, battleFinishReceipt: null,
                         captivityRecoveryRequested: true, captivityObserved: true,
@@ -189,7 +185,7 @@ internal static class AgentHostBattleSimulationLoop
                     failure = "A Native Map Incident opened before the battle decision; the parent EYC loop must resolve its current visible choices before resuming.";
                     failureCode = "native-map-incident-interrupted-battle-planning";
                     termination = "native-map-incident-interrupted-battle-planning";
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "battle-planning-interrupted-by-native-map-incident",
                         ["iteration"] = iteration,
@@ -258,7 +254,7 @@ internal static class AgentHostBattleSimulationLoop
                         mapConversationContinuationCount = 0;
                     var continueCampaignDayBefore = ReadDouble(native, "campaignDay", double.NaN);
                     var continueCampaignDayAfter = ReadDouble(afterContinueNative, "campaignDay", double.NaN);
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "native-map-conversation-no-choice-continued",
                         ["iteration"] = iteration,
@@ -295,7 +291,7 @@ internal static class AgentHostBattleSimulationLoop
                     currentNative = ParseObject(stateAfterPause.RootElement);
                     var modeAfterPause = ReadString(currentNative, "timeControlMode");
                     var dayAfterPause = ReadDouble(currentNative, "campaignDay", double.NaN);
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "visible-hostile-decision-paused-before-model",
                         ["iteration"] = iteration,
@@ -347,14 +343,10 @@ internal static class AgentHostBattleSimulationLoop
                     }
                     var inquiry = await AgentHostNativeInquiryResolution.RunAsync(
                         client, activeInquiryClient, provider, elapsed.Token,
-                        runId + "-battle-inquiry-" + (decisions + 1).ToString(CultureInfo.InvariantCulture), inquiryGoal);
-                    decisions += ReadInt(inquiry, "decisions", 0);
+                        runId + "-battle-inquiry-" + ledger.NextDecisionNumber.ToString(CultureInfo.InvariantCulture), inquiryGoal);
+                    ledger.RecordDelegated(inquiry);
                     actionsExecuted += ReadInt(inquiry, "actionsExecuted", 0);
-                    promptTokens += ReadLong(inquiry, "promptTokens", 0);
-                    completionTokens += ReadLong(inquiry, "completionTokens", 0);
-                    if (inquiry["providerRouteHistory"] is JsonArray inquiryRoutes)
-                        foreach (var route in inquiryRoutes) routes.Add(route?.DeepClone());
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "postbattle-native-inquiry",
                         ["gameState"] = gameState,
@@ -422,10 +414,10 @@ internal static class AgentHostBattleSimulationLoop
                         leaveTraceStep["renownBefore"] = double.IsFinite(renownBefore) ? JsonValue.Create(renownBefore) : null;
                         leaveTraceStep["renownAfter"] = double.IsFinite(renownAfterLeave) ? JsonValue.Create(renownAfterLeave) : null;
                         leaveTraceStep["playerCaptiveAfter"] = IsPlayerCaptive(state);
-                        trace.Add(leaveTraceStep);
-                        return BuildResult(runId, provider, "interrupted", decisions, actionsExecuted, promptTokens, completionTokens,
+                        ledger.Trace.Add(leaveTraceStep);
+                        return BuildResult(runId, provider, "interrupted", ledger, actionsExecuted,
                             "native-encounter-left-no-battle", "Native Leave closed the encounter without BattleSimulation; no victory or Renown gain is claimed.",
-                            "native-encounter-left-no-battle", startDay, initialNative, native, trace, routes, renownBefore, renownAfterLeave,
+                            "native-encounter-left-no-battle", startDay, initialNative, native, renownBefore, renownAfterLeave,
                             battleResult, playerRetreated, requestedTargetId, battleWasStarted, battleFinishReceipt,
                             recoverPlayerCaptivity, captivityObserved, captivityChoiceOptionId, nativeEncounterLeft: true);
                     }
@@ -445,7 +437,7 @@ internal static class AgentHostBattleSimulationLoop
                     var afterWaitState = currentNative["state"] as JsonObject;
                     var afterWaitContext = afterWaitState?["context"] as JsonObject;
                     captivityObserved |= IsPlayerCaptive(afterWaitState);
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "captivity-passive-wait",
                         ["iteration"] = priorDecisions + localIndex,
@@ -479,25 +471,24 @@ internal static class AgentHostBattleSimulationLoop
                         ? await AgentHostDecisionCycle.DecideBattleAndCaptivityAsync(provider, modelRequest, elapsed.Token)
                         : await AgentHostDecisionCycle.DecideBattleSimulationAsync(provider, modelRequest, elapsed.Token);
                     var doneProviderCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                    decisions++;
-                    AddRoute(routes, provider, providerResult, decisions, ref promptTokens, ref completionTokens);
+                    ledger.RecordDecision(providerResult);
                     var doneDecision = providerResult.Decision;
                     if (ReadBoolean(doneDecision, "done"))
                     {
                         termination = recoverPlayerCaptivity ? "battle-and-captivity-resolved-and-verified" : "battle-resolved-and-verified";
-                        trace.Add(BuildTraceStep(iteration, decisionStart, modelRequest, doneDecision, null, previousReceipt, null, providerCompletedUtc: doneProviderCompletedUtc));
-                        return BuildResult(runId, provider, "completed", decisions, actionsExecuted, promptTokens, completionTokens,
-                            termination, null, null, startDay, initialNative, native, trace, routes, renownBefore, renownAfterFinal, battleResult, playerRetreated, requestedTargetId, battleWasStarted, battleFinishReceipt,
+                        ledger.Trace.Add(BuildTraceStep(iteration, decisionStart, modelRequest, doneDecision, null, previousReceipt, null, providerCompletedUtc: doneProviderCompletedUtc));
+                        return BuildResult(runId, provider, "completed", ledger, actionsExecuted,
+                            termination, null, null, startDay, initialNative, native, renownBefore, renownAfterFinal, battleResult, playerRetreated, requestedTargetId, battleWasStarted, battleFinishReceipt,
                             recoverPlayerCaptivity, captivityObserved, captivityChoiceOptionId);
                     }
                     failure = "The model did not accept the Native result verification even though only done was listed.";
                     failureCode = "battle-done-not-accepted";
                     termination = "outcome-verification-incomplete";
-                    trace.Add(BuildTraceStep(iteration, decisionStart, modelRequest, doneDecision, null, previousReceipt, null, providerCompletedUtc: doneProviderCompletedUtc));
+                    ledger.Trace.Add(BuildTraceStep(iteration, decisionStart, modelRequest, doneDecision, null, previousReceipt, null, providerCompletedUtc: doneProviderCompletedUtc));
                     break;
                 }
 
-                var deferredPartyTargetIds = BuildDeferredPartyTargetIds(trace, state, observedTargets);
+                var deferredPartyTargetIds = BuildDeferredPartyTargetIds(ledger.Trace, state, observedTargets);
                 var catalog = BuildActionCatalog(state, observedTargets, requestedTargetId, battleWasStarted, mapPartyTargetsQueried,
                     recoverPlayerCaptivity, deferredPartyTargetIds, rejectedEscapeOptionFingerprint);
                 var partyScreenDoneSuppressed = false;
@@ -537,7 +528,7 @@ internal static class AgentHostBattleSimulationLoop
                 if (decision is not null)
                 {
                     providerCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "preauthorized-native-recovery-choice",
                         ["iteration"] = priorDecisions + iteration,
@@ -565,17 +556,16 @@ internal static class AgentHostBattleSimulationLoop
                             ? await AgentHostDecisionCycle.DecideBattleAndCaptivityAsync(provider, requestNow, elapsed.Token)
                             : await AgentHostDecisionCycle.DecideBattleSimulationAsync(provider, requestNow, elapsed.Token);
                         providerCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                        decisions++;
-                        AddRoute(routes, provider, result, decisions, ref promptTokens, ref completionTokens);
+                        ledger.RecordDecision(result);
                     }
                     catch (AgentHostException exception) when (CanRecoverProviderError(exception.Code, rejected))
                     {
-                        decisions++;
+                        ledger.RecordUnsentDecision();
                         rejected++;
                         feedback = AgentHostProviderDecisionRecovery.BuildFeedback(exception.Code, catalog, controls);
                         feedback["message"] = exception.Message;
                         var providerErrorCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                        trace.Add(BuildTraceStep(iteration, providerStarted, requestNow, null, feedback, previousReceipt, null, providerCompletedUtc: providerErrorCompletedUtc));
+                        ledger.Trace.Add(BuildTraceStep(iteration, providerStarted, requestNow, null, feedback, previousReceipt, null, providerCompletedUtc: providerErrorCompletedUtc));
                         continue;
                     }
                     decision = result.Decision;
@@ -595,7 +585,7 @@ internal static class AgentHostBattleSimulationLoop
                         ["nativeActionSent"] = false,
                         ["requiredNextStep"] = rejection
                     };
-                    trace.Add(BuildTraceStep(iteration, providerStarted, requestNow, decision, feedback, previousReceipt, null, providerCompletedUtc: DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture)));
+                    ledger.Trace.Add(BuildTraceStep(iteration, providerStarted, requestNow, decision, feedback, previousReceipt, null, providerCompletedUtc: DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture)));
                     if (rejected > MaxRejectedDecisions)
                     {
                         failure = "The model exceeded the bounded Native precondition rejection allowance.";
@@ -621,7 +611,7 @@ internal static class AgentHostBattleSimulationLoop
                     currentNative = ParseObject(waited.RootElement);
                     feedback = null;
                     var observationCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                    trace.Add(BuildTraceStep(iteration, providerStarted, requestNow, decision, null, previousReceipt, currentNative,
+                    ledger.Trace.Add(BuildTraceStep(iteration, providerStarted, requestNow, decision, null, previousReceipt, currentNative,
                         BuildObserveControl(waitSeconds.Value), actionExecuted: false,
                         providerCompletedUtc: providerCompletedUtc, observationCompletedUtc: observationCompletedUtc,
                         schedulerWaitCompletedUtc: schedulerWaitCompletedUtc));
@@ -644,7 +634,7 @@ internal static class AgentHostBattleSimulationLoop
                     failureCode = exception.Code;
                     termination = "native-action-result-ambiguous";
                     var actionTimeoutUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-                    trace.Add(BuildTraceStep(iteration, providerStarted, requestNow, decision, null,
+                    ledger.Trace.Add(BuildTraceStep(iteration, providerStarted, requestNow, decision, null,
                         new JsonObject { ["action"] = action, ["status"] = "timeout-ambiguous" }, null,
                         providerCompletedUtc: providerCompletedUtc, actionStartedUtc: actionStartedUtc, actionCompletedUtc: actionTimeoutUtc));
                     break;
@@ -762,7 +752,7 @@ internal static class AgentHostBattleSimulationLoop
                         ["requiredNextStep"] = "The repeated leave_soldiers_behind option is temporarily omitted until the encounter target or either party size changes. Choose another currently listed Native encounter option; do not replay the rejected warning."
                     };
                 }
-                trace.Add(BuildTraceStep(iteration, providerStarted, requestNow, decision, feedback, receipt, currentNative,
+                ledger.Trace.Add(BuildTraceStep(iteration, providerStarted, requestNow, decision, feedback, receipt, currentNative,
             actionExecuted: completed, providerCompletedUtc: providerCompletedUtc, actionStartedUtc: actionStartedUtc,
                     actionCompletedUtc: actionCompletedUtc, observationCompletedUtc: observationCompleted));
                 if (action == "pursue" && (completed || accepted) && !string.IsNullOrWhiteSpace(requestedTargetId))
@@ -800,7 +790,7 @@ internal static class AgentHostBattleSimulationLoop
                         ["timeControlModeBefore"] = timeModeBeforeWatch,
                         ["timeControlModeAfter"] = timeModeAfterWatch
                     });
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "native-party-pursuit-passive-observation",
                         ["iteration"] = iteration,
@@ -841,7 +831,7 @@ internal static class AgentHostBattleSimulationLoop
                             ["status"] = ReadString(targetsReceipt, "status"),
                             ["observedTargetCount"] = observedTargets.Count
                         });
-                        trace.Add(new JsonObject
+                        ledger.Trace.Add(new JsonObject
                         {
                             ["stage"] = "native-party-pursuit-encounter-target-refresh",
                             ["iteration"] = iteration,
@@ -873,7 +863,7 @@ internal static class AgentHostBattleSimulationLoop
                         break;
                     }
                     var missionResult = await AgentHostBattleMissionLoop.RunAsync(client, missionClient, processId, elapsed.Token);
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "native-battle-mission-delegation",
                         ["iteration"] = iteration,
@@ -936,12 +926,12 @@ internal static class AgentHostBattleSimulationLoop
             failure = exception is AgentHostException host ? host.Message : exception.GetType().Name;
             failureCode = exception is AgentHostException typed ? typed.Code : null;
             termination = "battle-simulation-loop-failed";
-            trace.Add(new JsonObject { ["stage"] = "loop-failed", ["failure"] = failure, ["detail"] = Truncate(exception.Message, 500) });
+            ledger.Trace.Add(new JsonObject { ["stage"] = "loop-failed", ["failure"] = failure, ["detail"] = Truncate(exception.Message, 500) });
         }
 
         var renownAfter = currentNative is null ? double.NaN : ReadRenown(currentNative["state"] as JsonObject);
-        return BuildResult(runId, provider, "failed", decisions, actionsExecuted, promptTokens, completionTokens,
-            termination ?? "battle-simulation-loop-failed", failure, failureCode, startDay, initialNative, currentNative, trace, routes,
+        return BuildResult(runId, provider, "failed", ledger, actionsExecuted,
+            termination ?? "battle-simulation-loop-failed", failure, failureCode, startDay, initialNative, currentNative,
             renownBefore, renownAfter, battleResult, playerRetreated, requestedTargetId, battleWasStarted, battleFinishReceipt,
             recoverPlayerCaptivity, captivityObserved, captivityChoiceOptionId);
     }
@@ -1865,20 +1855,23 @@ internal static class AgentHostBattleSimulationLoop
         if (!IsVerifiedMapTerminalAfterNativeEncounterLeave(encounterLeftMap) ||
             IsVerifiedMapTerminalAfterNativeEncounterLeave(noSendTroopsState))
             throw new AgentHostException("battle-loop-self-test-native-leave-postcondition-not-verified", "Native Leave completion requires a fresh encounter-free Campaign Map; an active encounter is not a terminal state.");
-        var leaveOutcome = BuildResult("native-leave-self-test", new FakeBattleSimulationDecisionProvider(), "interrupted", 1, 1, 0, 0,
+        var leaveProvider = new FakeBattleSimulationDecisionProvider();
+        var leaveOutcome = BuildResult("native-leave-self-test", leaveProvider, "interrupted",
+            new DecisionRunLedger(leaveProvider, "native-leave-self-test", priorDecisions: 1), 1,
             "native-encounter-left-no-battle", "Native Leave ended the encounter without BattleSimulation.", "native-encounter-left-no-battle",
             5.0, null, new JsonObject { ["campaignDay"] = 5.1, ["timeControlMode"] = "Stop", ["state"] = encounterLeftMap },
-            new JsonArray(), new JsonArray(), 10, 10, "unknown", false, "bandit-1", false, null, false, false, null, nativeEncounterLeft: true);
+            10, 10, "unknown", false, "bandit-1", false, null, false, false, null, nativeEncounterLeft: true);
         var capturedAfterLeave = new JsonObject
         {
             ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = "prisoner_wait", ["escapeMenuOpen"] = false, ["inquiryOpen"] = false,
                 ["encounterActive"] = false, ["battleSimulation"] = null, ["captivity"] = new JsonObject { ["isCaptive"] = true, ["currentMenuId"] = "prisoner_wait", ["ransomOfferVisible"] = false } },
             ["availableMenuOptions"] = new JsonArray(), ["partyScreen"] = null, ["inventoryScreen"] = null
         };
-        var captiveLeaveOutcome = BuildResult("native-leave-capture-self-test", new FakeBattleSimulationDecisionProvider(), "interrupted", 1, 1, 0, 0,
+        var captiveLeaveOutcome = BuildResult("native-leave-capture-self-test", leaveProvider, "interrupted",
+            new DecisionRunLedger(leaveProvider, "native-leave-capture-self-test", priorDecisions: 1), 1,
             "native-encounter-left-no-battle", "Native Leave ended the encounter and Native reports captivity.", "native-encounter-left-no-battle",
             5.0, null, new JsonObject { ["campaignDay"] = 5.1, ["timeControlMode"] = "Stop", ["state"] = capturedAfterLeave },
-            new JsonArray(), new JsonArray(), 10, 10, "unknown", false, "bandit-1", false, null, false, false, null, nativeEncounterLeft: true);
+            10, 10, "unknown", false, "bandit-1", false, null, false, false, null, nativeEncounterLeft: true);
         if (ReadString(leaveOutcome, "status") != "interrupted" || ReadString(leaveOutcome, "playerOutcome") != "left-encounter-without-battle" ||
             !ReadBoolean(leaveOutcome, "nativeReturnToMapVerified") || ReadBoolean(leaveOutcome, "battleStarted") ||
             ReadDouble(leaveOutcome, "renownDelta", double.NaN) != 0 || ReadString(captiveLeaveOutcome, "playerOutcome") != "captured" ||
@@ -2417,9 +2410,9 @@ internal static class AgentHostBattleSimulationLoop
         }
     };
 
-    private static JsonObject BuildResult(string runId, IAgentHostDecisionProvider provider, string status, int decisions,
-        int actionsExecuted, long promptTokens, long completionTokens, string termination, string? failure, string? failureCode,
-        double startDay, JsonObject? initialNative, JsonObject? finalNative, JsonArray trace, JsonArray routes, double renownBefore, double renownAfter,
+    private static JsonObject BuildResult(string runId, IAgentHostDecisionProvider provider, string status, DecisionRunLedger ledger,
+        int actionsExecuted, string termination, string? failure, string? failureCode,
+        double startDay, JsonObject? initialNative, JsonObject? finalNative, double renownBefore, double renownAfter,
         string battleResult, bool playerRetreated, string? targetId, bool battleStarted, JsonObject? battleFinishReceipt,
         bool captivityRecoveryRequested, bool captivityObserved, string? captivityChoiceOptionId, bool nativeEncounterLeft = false,
         bool nativeEscapeCompleted = false, bool nativeCaptivityRecoveryWithoutBattle = false)
@@ -2450,10 +2443,10 @@ internal static class AgentHostBattleSimulationLoop
             ["status"] = status,
             ["modelId"] = provider.ModelId,
             ["providerConfigurationSource"] = provider.ConfigurationSource,
-            ["decisions"] = decisions,
+            ["decisions"] = ledger.Decisions,
             ["actionsExecuted"] = actionsExecuted,
-            ["promptTokens"] = promptTokens,
-            ["completionTokens"] = completionTokens,
+            ["promptTokens"] = ledger.PromptTokens,
+            ["completionTokens"] = ledger.CompletionTokens,
             ["termination"] = termination,
             ["failure"] = failure,
             ["failureCode"] = failureCode,
@@ -2461,7 +2454,7 @@ internal static class AgentHostBattleSimulationLoop
             ["campaignDayEnd"] = finalNative?["campaignDay"]?.DeepClone(),
             ["timeControlModeStart"] = ReadString(initialNative?["timeControlMode"] as JsonObject, "mode") ?? ReadString(initialNative, "timeControlMode"),
             ["timeControlModeEnd"] = ReadString(finalNative?["timeControlMode"] as JsonObject, "mode") ?? ReadString(finalNative, "timeControlMode"),
-            ["explicitClockActionCount"] = trace.OfType<JsonObject>().Count(step =>
+            ["explicitClockActionCount"] = ledger.Trace.OfType<JsonObject>().Count(step =>
                 ReadString(step, "stage") == "visible-hostile-decision-paused-before-model" &&
                 ReadString(step["nativeActionReceipt"] as JsonObject, "status") == "completed"),
             ["targetPartyId"] = targetId,
@@ -2487,8 +2480,8 @@ internal static class AgentHostBattleSimulationLoop
             ["outcomeBefore"] = BuildOutcomeSummary(initialNative),
             ["outcomeAfter"] = BuildOutcomeSummary(finalNative),
             ["finalNativeState"] = finalNative?.DeepClone(),
-            ["providerRouteHistory"] = routes.DeepClone(),
-            ["trace"] = trace.DeepClone()
+            ["providerRouteHistory"] = ledger.Routes.DeepClone(),
+            ["trace"] = ledger.Trace.DeepClone()
         };
     }
 
@@ -2662,23 +2655,6 @@ internal static class AgentHostBattleSimulationLoop
         if (kind == "native-action-rejected")
             return new JsonObject { ["kind"] = "native-action-rejected-before-state-change", ["message"] = ReadString(feedback, "action") };
         return null;
-    }
-
-    private static void AddRoute(JsonArray routes, IAgentHostDecisionProvider provider, ProviderDecisionResult result,
-        int decision, ref long promptTokens, ref long completionTokens)
-    {
-        if (result.PromptTokens.HasValue) promptTokens += result.PromptTokens.Value;
-        if (result.CompletionTokens.HasValue) completionTokens += result.CompletionTokens.Value;
-        routes.Add(new JsonObject
-        {
-            ["decision"] = decision,
-            ["requestedModelId"] = provider.ModelId,
-            ["responseModelId"] = result.ModelId,
-            ["routedVia"] = result.RoutedVia,
-            ["responseFormatMode"] = result.ResponseFormatMode,
-            ["promptTokens"] = result.PromptTokens,
-            ["completionTokens"] = result.CompletionTokens
-        });
     }
 
     private static JsonObject SafeReceipt(string action, JsonElement response) => new()
