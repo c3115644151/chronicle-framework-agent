@@ -469,8 +469,7 @@ internal static class AgentHostCampaignLoop
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
 
-        var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
-        var providerRouteHistory = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
+        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var safeSettlementArrivalOnly = string.Equals(ReadString(request, "scopeRestriction"), "safe-settlement-arrival", StringComparison.Ordinal);
         var excludedSettlementIds = new HashSet<string>(StringComparer.Ordinal);
         if (safeSettlementArrivalOnly && request.TryGetProperty("excludedSettlementIds", out var excludedSettlementArray) && excludedSettlementArray.ValueKind == JsonValueKind.Array)
@@ -481,12 +480,9 @@ internal static class AgentHostCampaignLoop
                     excludedSettlementIds.Add(excludedSettlement.GetString()!);
             }
         }
-        var decisionCount = priorDecisions;
         var rejectedDecisionCount = 0;
         var prematureCompletionCount = 0;
         var actionsExecuted = 0;
-        long promptTokens = priorPromptTokens;
-        long completionTokens = priorCompletionTokens;
         JsonObject? currentNative = null;
         JsonObject? previousReceipt = null;
         JsonObject? feedback = null;
@@ -518,7 +514,7 @@ internal static class AgentHostCampaignLoop
                 throw new AgentHostException("native-parent-process-mismatch", "The Native mailbox answered from a different Bannerlord process than the Host owner.");
             onReady?.Invoke(nativeProcessId);
 
-            for (var iteration = decisionCount + 1; iteration <= maxDecisions; iteration++)
+            for (var iteration = priorDecisions + 1; iteration <= maxDecisions; iteration++)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
                 var before = currentNative ?? throw new AgentHostException("native-observation-missing", "The Host lost its current Native observation.");
@@ -584,26 +580,14 @@ internal static class AgentHostCampaignLoop
                 try
                 {
                     providerResult = await AgentHostDecisionCycle.DecideCampaignAsync(provider, modelRequest, elapsed.Token);
-                    decisionCount++;
+                    ledger.RecordDecision(providerResult);
                     rejectedDecisionCount = 0;
-                    if (providerResult.PromptTokens.HasValue) promptTokens += providerResult.PromptTokens.Value;
-                    if (providerResult.CompletionTokens.HasValue) completionTokens += providerResult.CompletionTokens.Value;
-                    providerRouteHistory.Add(new JsonObject
-                    {
-                        ["decision"] = decisionCount,
-                        ["requestedModelId"] = provider.ModelId,
-                        ["responseModelId"] = providerResult.ModelId,
-                        ["routedVia"] = providerResult.RoutedVia,
-                        ["responseFormatMode"] = providerResult.ResponseFormatMode,
-                        ["promptTokens"] = providerResult.PromptTokens,
-                        ["completionTokens"] = providerResult.CompletionTokens
-                    });
                 }
                 catch (AgentHostException exception) when (
                     AgentHostProviderDecisionRecovery.CanRetry(exception.Code, rejectedDecisionCount) ||
                     (IsRecoverableProviderDecisionError(exception.Code) && rejectedDecisionCount < MaxRejectedDecisions))
                 {
-                    decisionCount++;
+                    ledger.RecordUnsentDecision();
                     rejectedDecisionCount++;
                     var providerCompletedUtc = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture);
                     feedback = AgentHostProviderDecisionRecovery.BuildFeedback(exception.Code, actionCatalog, controls);
@@ -612,7 +596,7 @@ internal static class AgentHostCampaignLoop
                         feedback["requiredNextStep"] = "Goal scope was already classified. Do not classify again; choose the currently listed mapSettlementTargets action.";
                     else if (exception.Code == "provider-action-unavailable" && movingToTarget)
                         feedback["requiredNextStep"] = "Native move is already active. Do not repeat move; choose the listed observeAgain control to obtain fresh state without changing the game clock.";
-                    trace.Add(BuildRejectedDecisionStep(iteration, observation, previousReceipt, actionCatalog, controls, feedback, providerStartedUtc, providerCompletedUtc, providerStartedTicks));
+                    ledger.Trace.Add(BuildRejectedDecisionStep(iteration, observation, previousReceipt, actionCatalog, controls, feedback, providerStartedUtc, providerCompletedUtc, providerStartedTicks));
                     continue;
                 }
 
@@ -629,14 +613,14 @@ internal static class AgentHostCampaignLoop
                             ["kind"] = "supported-establish-clan-scope-reconsideration",
                             ["requiredNextStep"] = "The exact active original Establish Your Clan quest is explicitly listed as a supported high-level scope. It is one goal with multi-step Native subgoals; reconsider that supported scope before declaring unrelated unsupported work."
                         };
-                        trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                        ledger.Trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
                             providerStartedUtc, providerDoneUtc, providerStartedTicks, feedback.DeepClone() as JsonObject));
                         continue;
                     }
                     failure = "The configured goal is outside the implemented Native Campaign scopes; no game action was issued.";
                     failureCode = "campaign-goal-unsupported";
                     terminationReason = "campaign-goal-unsupported";
-                    trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                    ledger.Trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
                         providerStartedUtc, providerDoneUtc, providerStartedTicks, new JsonObject { ["kind"] = "goal-out-of-scope" }));
                     break;
                 }
@@ -656,27 +640,27 @@ internal static class AgentHostCampaignLoop
                         ["contractId"] = "native-map-arrival-v1",
                         ["message"] = "This goal is handled only as arrival at any one currently visible safe settlement. The Native arrival verifier checks that limited outcome."
                     };
-                    trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                    ledger.Trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
                         providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
                     continue;
                 }
                 if (goalClassification == "supported-village-tools-quest")
                 {
-                    trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                    ledger.Trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
                         providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
                     if (client is not IAgentHostVillageToolsQuestNativeClient questClient)
                         throw new AgentHostException("village-tools-native-client-unavailable", "The Native transport does not implement the bounded VillageNeedsTools quest protocol.");
                     return await AgentHostVillageToolsQuestLoop.RunAsync(
                         request, questClient, provider, elapsed.Token,
-                        priorDecisions: decisionCount,
-                        priorPromptTokens: promptTokens,
-                        priorCompletionTokens: completionTokens,
-                        priorTrace: trace,
-                        priorProviderRouteHistory: providerRouteHistory);
+                        priorDecisions: ledger.Decisions,
+                    priorPromptTokens: ledger.PromptTokens,
+                    priorCompletionTokens: ledger.CompletionTokens,
+                    priorTrace: ledger.Trace,
+                    priorProviderRouteHistory: ledger.Routes);
                 }
                 if (goalClassification == "supported-battle-simulation")
                 {
-                    trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                    ledger.Trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
                         providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
                     if (!requestedActions.SetEquals(BattleSimulationActions) && !requestedActions.SetEquals(AllSupportedActions))
                         throw new AgentHostException("battle-simulation-action-set-unavailable", "The Campaign request does not include the exact bounded Native BattleSimulation action set.");
@@ -684,15 +668,15 @@ internal static class AgentHostCampaignLoop
                         throw new AgentHostException("battle-simulation-native-client-unavailable", "The Native transport does not implement the bounded Campaign BattleSimulation protocol.");
                     return await AgentHostBattleSimulationLoop.RunAsync(
                         request, battleClient, provider, elapsed.Token,
-                        priorDecisions: decisionCount,
-                        priorPromptTokens: promptTokens,
-                        priorCompletionTokens: completionTokens,
-                        priorTrace: trace,
-                        priorProviderRouteHistory: providerRouteHistory);
+                        priorDecisions: ledger.Decisions,
+                    priorPromptTokens: ledger.PromptTokens,
+                    priorCompletionTokens: ledger.CompletionTokens,
+                    priorTrace: ledger.Trace,
+                    priorProviderRouteHistory: ledger.Routes);
                 }
                 if (goalClassification == "supported-battle-and-captivity")
                 {
-                    trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                    ledger.Trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
                         providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
                     if (!requestedActions.SetEquals(BattleSimulationActions) && !requestedActions.SetEquals(AllSupportedActions))
                         throw new AgentHostException("battle-captivity-action-set-unavailable", "The Campaign request does not include the exact bounded Native BattleSimulation action set.");
@@ -700,16 +684,16 @@ internal static class AgentHostCampaignLoop
                         throw new AgentHostException("battle-captivity-native-client-unavailable", "The Native transport does not implement the bounded Campaign BattleSimulation/captivity protocol.");
                     return await AgentHostBattleSimulationLoop.RunAsync(
                         request, battleClient, provider, elapsed.Token,
-                        priorDecisions: decisionCount,
-                        priorPromptTokens: promptTokens,
-                        priorCompletionTokens: completionTokens,
-                        priorTrace: trace,
-                        priorProviderRouteHistory: providerRouteHistory,
+                        priorDecisions: ledger.Decisions,
+                    priorPromptTokens: ledger.PromptTokens,
+                    priorCompletionTokens: ledger.CompletionTokens,
+                    priorTrace: ledger.Trace,
+                    priorProviderRouteHistory: ledger.Routes,
                         recoverPlayerCaptivity: true);
                 }
                 if (goalClassification == "supported-establish-your-clan")
                 {
-                    trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                    ledger.Trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
                         providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
                     if (ReadBoolean(request, "establishClanPlannerOnly"))
                     {
@@ -719,11 +703,11 @@ internal static class AgentHostCampaignLoop
                             throw new AgentHostException("establish-clan-quest-details-client-unavailable", "The Native transport does not implement the read-only Quest Journal query required by the StoryMode planner.");
                         return await AgentHostEstablishYourClanGoalLoop.RunAsync(
                             request, client, plannerDetailsClient, provider, elapsed.Token,
-                            priorDecisions: decisionCount,
-                            priorPromptTokens: promptTokens,
-                            priorCompletionTokens: completionTokens,
-                            priorTrace: trace,
-                            priorProviderRouteHistory: providerRouteHistory);
+                            priorDecisions: ledger.Decisions,
+                    priorPromptTokens: ledger.PromptTokens,
+                    priorCompletionTokens: ledger.CompletionTokens,
+                    priorTrace: ledger.Trace,
+                    priorProviderRouteHistory: ledger.Routes);
                     }
                     if (!requestedActions.SetEquals(AllSupportedActions))
                         throw new AgentHostException("establish-clan-autonomy-action-set-unavailable", "The StoryMode autonomy loop requires the exact reviewed Native superset for its currently integrated Gold, PartySize, Renown and Companion subgoals.");
@@ -864,15 +848,15 @@ internal static class AgentHostCampaignLoop
 
                     return await AgentHostEstablishYourClanAutonomyLoop.RunAsync(
                         request, client, questDetailsClient, provider, ExecuteObjectiveAsync, elapsed.Token,
-                        priorDecisions: decisionCount,
-                        priorPromptTokens: promptTokens,
-                        priorCompletionTokens: completionTokens,
-                        priorTrace: trace,
-                        priorProviderRouteHistory: providerRouteHistory);
+                        priorDecisions: ledger.Decisions,
+                    priorPromptTokens: ledger.PromptTokens,
+                    priorCompletionTokens: ledger.CompletionTokens,
+                    priorTrace: ledger.Trace,
+                    priorProviderRouteHistory: ledger.Routes);
                 }
                 if (goalClassification == "supported-captivity-recovery")
                 {
-                    trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                    ledger.Trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
                         providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
                     if (!requestedActions.SetEquals(CaptivityRecoveryActions) && !requestedActions.SetEquals(AllSupportedActions))
                         throw new AgentHostException("captivity-recovery-action-set-unavailable", "The Campaign request does not include the exact approved Native captivity recovery action set.");
@@ -881,15 +865,15 @@ internal static class AgentHostCampaignLoop
                         throw new AgentHostException("captivity-recovery-native-client-unavailable", "The Native transport does not implement read-only Quest details and explicit Captivity recovery actions.");
                     return await AgentHostCaptivityRecoveryLoop.RunAsync(
                         request, client, captivityClient, questDetailsClient, provider, elapsed.Token,
-                        priorDecisions: decisionCount,
-                        priorPromptTokens: promptTokens,
-                        priorCompletionTokens: completionTokens,
-                        priorTrace: trace,
-                        priorProviderRouteHistory: providerRouteHistory);
+                        priorDecisions: ledger.Decisions,
+                    priorPromptTokens: ledger.PromptTokens,
+                    priorCompletionTokens: ledger.CompletionTokens,
+                    priorTrace: ledger.Trace,
+                    priorProviderRouteHistory: ledger.Routes);
                 }
                 if (goalClassification == "supported-establish-clan-gold-sale")
                 {
-                    trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                    ledger.Trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
                         providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
                     if (!requestedActions.SetEquals(GoldSaleActions) && !requestedActions.SetEquals(AllSupportedActions))
                         throw new AgentHostException("establish-clan-gold-sale-action-set-unavailable", "The Campaign request does not include the exact bounded Gold sale action set.");
@@ -897,11 +881,11 @@ internal static class AgentHostCampaignLoop
                         throw new AgentHostException("establish-clan-gold-sale-native-client-unavailable", "The Native transport does not implement the original Trade sale and active StoryMode Journal protocol.");
                     return await AgentHostEstablishClanGoldSaleLoop.RunAsync(
                         request, client, goldSaleClient, provider, elapsed.Token,
-                        priorDecisions: decisionCount,
-                        priorPromptTokens: promptTokens,
-                        priorCompletionTokens: completionTokens,
-                        priorTrace: trace,
-                        priorProviderRouteHistory: providerRouteHistory);
+                        priorDecisions: ledger.Decisions,
+                    priorPromptTokens: ledger.PromptTokens,
+                    priorCompletionTokens: ledger.CompletionTokens,
+                    priorTrace: ledger.Trace,
+                    priorProviderRouteHistory: ledger.Routes);
                 }
                 if (!goalScopeClassified)
                 {
@@ -926,7 +910,7 @@ internal static class AgentHostCampaignLoop
                             ["requiredNextStep"] = movingToTarget ? "Use the currently listed observeAgain control while Native movement is active." : "Query fresh visible settlements and select a current safe destination; do not claim completion."
                         };
                         prematureCompletionCount++;
-                        trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision, providerStartedUtc, providerDoneUtc, providerStartedTicks, feedback));
+                        ledger.Trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision, providerStartedUtc, providerDoneUtc, providerStartedTicks, feedback));
                         if (prematureCompletionCount >= MaxRejectedDecisions)
                         {
                             failure = "The model proposed completion before fresh Native state verified arrival after the bounded correction opportunity.";
@@ -937,7 +921,7 @@ internal static class AgentHostCampaignLoop
                     }
                     completedByProvider = true;
                     terminationReason = "native-settlement-arrival-verified";
-                    trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision, providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
+                    ledger.Trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision, providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
                     break;
                 }
 
@@ -947,7 +931,7 @@ internal static class AgentHostCampaignLoop
                     if (!movingToTarget || waitSeconds is < 1 or > 10)
                     {
                         feedback = new JsonObject { ["kind"] = "control-rejected-before-wait", ["message"] = "observeAgain is available only while the Native move order to the selected target remains active." };
-                        trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision, providerStartedUtc, providerDoneUtc, providerStartedTicks, feedback));
+                        ledger.Trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision, providerStartedUtc, providerDoneUtc, providerStartedTicks, feedback));
                         continue;
                     }
                     var movementMonitor = await AgentHostNativeMapMovementMonitor.WaitAsync(
@@ -972,7 +956,7 @@ internal static class AgentHostCampaignLoop
                         ["visibleHostileBanditTargets"] = movementMonitor.VisibleHostileBanditTargets.DeepClone(),
                         ["nativePauseReceipt"] = movementMonitor.PauseReceipt?.DeepClone()
                     };
-                    trace.Add(waitStep);
+                    ledger.Trace.Add(waitStep);
                     feedback = null;
                     if (movementMonitor.InterruptedByVisibleHostileBandit)
                     {
@@ -994,7 +978,7 @@ internal static class AgentHostCampaignLoop
                         ["message"] = rejection,
                         ["requiredNextStep"] = "Use the latest mapSettlementTargets receipt and select only one of its safe visible settlement IDs."
                     };
-                    trace.Add(BuildRejectedDecisionStep(iteration, observation, previousReceipt, actionCatalog, controls, feedback, providerStartedUtc, providerDoneUtc, providerStartedTicks, decision));
+                    ledger.Trace.Add(BuildRejectedDecisionStep(iteration, observation, previousReceipt, actionCatalog, controls, feedback, providerStartedUtc, providerDoneUtc, providerStartedTicks, decision));
                     continue;
                 }
 
@@ -1023,7 +1007,7 @@ internal static class AgentHostCampaignLoop
                     failure = "The Native action result timed out and may be ambiguous; Host stopped without resubmitting it.";
                     terminationReason = "native-action-result-ambiguous";
                     nativeReceipt = new JsonObject { ["action"] = nativeAction, ["status"] = "timeout-ambiguous", ["error"] = exception.Code };
-                    trace.Add(BuildNativeActionStep(iteration, observation, priorReceiptForStep, actionCatalog, controls, decision, nativeReceipt, observation, providerStartedUtc, providerDoneUtc, actionStartedUtc, DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture), providerStartedTicks, actionExecuted: false));
+                    ledger.Trace.Add(BuildNativeActionStep(iteration, observation, priorReceiptForStep, actionCatalog, controls, decision, nativeReceipt, observation, providerStartedUtc, providerDoneUtc, actionStartedUtc, DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture), providerStartedTicks, actionExecuted: false));
                     break;
                 }
 
@@ -1044,13 +1028,13 @@ internal static class AgentHostCampaignLoop
                 using (var refreshedState = await client.ReadStateAsync(elapsed.Token)) currentNative = CloneObject(refreshedState.RootElement);
                 var arrivedAfterAction = moveTargetId != null && string.Equals(ReadStateString(currentNative, "location", "currentSettlementId"), moveTargetId, StringComparison.Ordinal);
                 var observationAfterAction = BuildObservation(currentNative, visibleTargets, moveTargetId, moveTargetName, arrivedAfterAction);
-                trace.Add(BuildNativeActionStep(iteration, observation, priorReceiptForStep, actionCatalog, controls, decision, nativeReceipt, observationAfterAction, providerStartedUtc, providerDoneUtc, actionStartedUtc, actionDoneUtc, providerStartedTicks, actionCompleted));
+                ledger.Trace.Add(BuildNativeActionStep(iteration, observation, priorReceiptForStep, actionCatalog, controls, decision, nativeReceipt, observationAfterAction, providerStartedUtc, providerDoneUtc, actionStartedUtc, actionDoneUtc, providerStartedTicks, actionCompleted));
                 feedback = actionCompleted ? null : new JsonObject { ["kind"] = "native-action-rejected", ["message"] = "The Native action was rejected; use the new state and current action catalog without repeating stale inputs." };
             }
 
             if (!completedByProvider && terminationReason is null)
             {
-                terminationReason = decisionCount >= maxDecisions ? "decision-limit-reached" : "host-stopped-before-goal";
+                terminationReason = ledger.Decisions >= maxDecisions ? "decision-limit-reached" : "host-stopped-before-goal";
                 failure = "The Host stopped before Native arrival was verified.";
             }
         }
@@ -1081,25 +1065,25 @@ internal static class AgentHostCampaignLoop
             ["contractId"] = "native-map-arrival-v1",
             ["providerModelId"] = provider.ModelId,
             ["providerConfigurationSource"] = provider.ConfigurationSource,
-            ["decisions"] = decisionCount,
-            ["decisionCount"] = decisionCount,
+            ["decisions"] = ledger.Decisions,
+            ["decisionCount"] = ledger.Decisions,
             ["actionsExecuted"] = actionsExecuted,
             ["firstDecisionRequiresGoalClassification"] = firstDecisionRequiresGoalClassification,
             ["firstDecisionListsSupportedGoalClassification"] = firstDecisionListsSupportedGoalClassification,
             ["firstDecisionListsUnsupportedGoalClassification"] = firstDecisionListsUnsupportedGoalClassification,
-            ["promptTokens"] = promptTokens,
-            ["completionTokens"] = completionTokens,
+            ["promptTokens"] = ledger.PromptTokens,
+            ["completionTokens"] = ledger.CompletionTokens,
             ["providerPromptCacheHitTokens"] = provider is OllamaNativeProvider cacheMeter ? cacheMeter.PromptCacheHitTokens : null,
             ["providerPromptCacheMissTokens"] = provider is OllamaNativeProvider missMeter ? missMeter.PromptCacheMissTokens : null,
             ["providerActualCostEstimateCny"] = provider is OllamaNativeProvider actualCostMeter ? actualCostMeter.ActualCostEstimateCny : null,
             ["providerReservedCostUpperCny"] = provider is OllamaNativeProvider costMeter ? costMeter.ReservedCostUpperBoundCny : null,
-            ["providerRouteHistory"] = providerRouteHistory,
+            ["providerRouteHistory"] = ledger.Routes,
             ["termination"] = new JsonObject { ["reason"] = terminationReason, ["completedByProvider"] = completedByProvider, ["goalVerified"] = goalVerified },
             ["failure"] = failure,
             ["failureCode"] = failureCode,
             ["failureExceptionType"] = failureExceptionType,
             ["hostFailureStack"] = hostFailureStack,
-            ["trace"] = trace
+            ["trace"] = ledger.Trace
         };
         }
     }
