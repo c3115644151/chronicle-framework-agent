@@ -252,6 +252,12 @@ EYC 产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanGoldSal
 
 战俘出售有两条真机收据（均零模型请求）。`TestResults/20261030-012146/RansomCancelRuntime.json`：Ransom 界面暂存一名骑马掠夺者，草稿 +50，原版 Done 后金币 1823→1873、俘虏 7→6。`TestResults/20261125-202821/PrisonerRansomSaleResult.json`（现注册为 `PrisonerRansomSale` 阶段）：夹具战役日 91179.34、金币 2277、俘虏 2 名 `looter`，右侧接收上限 22，两次 `sellPrisonerOne` 把草稿从 5 累到 10，一次 `partyScreenDone` 使金币 2277→2287、俘虏 2→0，`campaignDayBefore/After` 相同、时钟档位 Stop 不变、PartyScreen 关闭回到 `town_backstreet` 地图菜单。两条合起来给出的价格事实是：**looter 5 第纳尔/人、骑马掠夺者 50 第纳尔/人**，同一批 7 名混合俘虏的菜单报价为 374——单价由兵种等级决定，不是由人数决定。逐人转移只改草稿，整笔由一次 Done 提交，因此观察窗口与提交时机都由模型决定。
 
+城镇之间的价差现在有实测，而且它把「买低卖高」从直觉改成了算术。`harness/Test-AgentMarketProbe.ps1`（零模型请求、不写存档，现注册为 `MarketProbe` 阶段）在夹具 `ChronicleW7P-manual-20261101-eyc-complete` 上读 `tradeOptions` 原文：最近两座非敌对城镇 `town_ES3` 与 `town_EW2` 对同一件 `flax` 分别报买 9（库存 71，非食物候选 183 种）与收 15（同城买 18）。买 2 件付 18，金币 2277→2259、商人金 53,636→53,654，`campaignDay` 与 `timeControlMode` 前后不变、`postconditionPassed=true`；背 0.807 战役日到 B 城，期间日工资扣 78；卖 1 件原生回执 `nativeTransactionAmount=-15`，金币 2181→2196、商人金 69,253→69,238。收据 `TestResults/20261126-market-probe-3/Temp/MarketProbeResult.json`。
+
+把价差与日烧放在一起：每件毛利 6，25 人队伍日工资 78，单程一天要背 17 件才够本（收据字段 `arbitrage.breakEvenUnitsPerTravelDay`）。也就是说价差是真的，但它是一门体积生意——决定盈亏的是货运量与路程，不是眼力。这一条对「城镇经济」场景的直接影响是：判据要能算出「一趟背多少件」，而不是奖励一次捡便宜。
+
+探针本身也留下两条工具事实。`tradeOptions` 的 `buyOffers` 是 OtherInventory 侧（A 城 257 行），`sellOffers` 是 PlayerInventory 侧（A 城 30 行），同一 `itemId` 的装备条目会有元素级 `viewModelItemId` 多行；单价字段是 `nativeItemCost`，买入与卖出的价格不是同一个数。另外结算回执里 `nativeTransactionAmount` 的符号随方向变（卖为负、买为正），拿它和 `playerGold` 的差值对账必须分开读。
+
 ### 货物、负重、动物与战后物资
 
 Party `ItemRoster` 同时承载食品、贸易物、动物与战利品；缓存的 `TotalFoodAtInventory`、`TotalWeightCarried`、`InventoryCapacity`、动物数量会分别影响食物、载重、速度或交易判断。战后 ItemRoster 可能先进入 Encounter 的待领取 Loot Roster，再经原生 InventoryState 领取到 Party；那不是“战斗奖励已到账”的同义词，处理链见 G/H 域及 MAINLINE 的 partyLoot 契约。队伍内囚犯、受伤/健康成员、战利品/库存的转移则由对应 PartyScreen、InventoryLogic 和结算动作分别提交。
