@@ -343,7 +343,11 @@ Party troop progression由 `TroopRoster` 的成员计数/伤员数/XP与 `Charac
 
 两次独立闲置（`harness/Test-AgentIdlePressure.ps1 -ChunkDays 1 -MaxChunks 12`，收据 `TestResults/20261125-idle-freshB/` 与 `TestResults/20261125-idle-freshB-2/`）给出同一个形状：起跑后 0.82–0.87 天出现一次敌军遭遇（山贼或劫匪），同时 `healthy` 1→0、`wounded` 0→1，`cargoCapacity` 30→10、`speed` 5.189→4.988，而 `itemCount` 仍是 1。停因为 `menu-opened`。
 
-伤兵归因仍未分开：F11 上面的 25 人对照跑（补粮 12 天零伤兵、断粮第 10 天首发 3 名伤兵）说明饥饿本身足以在粮见底那天造出伤兵，而本检查点从存档那一刻就在挨饿，所以这里的伤兵既可能是饥饿、也可能是这次遭遇。要分开需要让主角先躲进城镇再等一天；本条只是把「两个原因都在场」记下来，不据此下结论。`cargoCapacity` 与 `speed` 的下降同样未归因（随队动物损失？伤兵？本例分不出来）。
+伤兵归因已经量出来了，而且它比这次遭遇早：`party.heroHitPoints` 进入观察面之后（`mod/AgentObserver.cs` 的 party 块，字段 `heroHitPoints`/`heroMaxHitPoints`），原地不动、零移动、零遭遇地 `advance -Days 0.01` 四十步（`Dev/ChronicleFramework/TestResults/_probe-hp2.ps1`）记录到：加载时 **23/100**，之后每天掉 10–18 点，到第 0.16 个战役日跌到 20/100 时 `healthy` 1→0、`wounded` 0→1。劫匪（`mountain_bandits_2145`）到第 0.75–0.87 天才出现。所以此前记录的「伤兵与遭遇同时出现」只是采样粒度造成的错觉；伤兵是饥饿把 HP 打过 20% 门槛的名单效应，与遭遇无关。
+
+这条机制的对照实验在 25 人夹具上做成了 2×2（`harness/Test-AgentIdlePressure.ps1`，1 天/块、零模型请求）：断粮跑 `TestResults/20261125-idle-hp-starved/IdlePressureResult.json` 里前 9 天粮为正、主角 HP 一直 100/100、伤兵 0；粮变负的第 10 天起 HP 100→87→68→49、伤兵 0→3→9→14。补粮跑 `TestResults/20261125-idle-hp-fed/IdlePressureResult.json`（起点 24.5 单位粮）12 天里 HP 始终 100/100、伤兵始终 0。两跑金币曲线逐日相同（每天 −78）。结论：**饥饿是唯一在场的原因；伤兵数 = 当前 HP 低于 20% 门槛的人数**，不是战伤计数，因此可以在零战斗的等待里增长。
+
+`cargoCapacity` 30 → 10 与 `speed` 5.189 → 4.988 仍未归因（随队动物损失？伤兵？本例分不出来）。
 
 遭遇对话的观察面：`context.conversation` 给出 `characterId`（`mountain_bandits_chief` / `looter`）、`characterName`（拦路强盗 / 劫匪）、`sentenceText` 与 `options[]`（每项 `id`/`text`/`textId`/`clickable`）。在这个 1 人且已受伤的场合，原版只给出两条 `bandit_start_defender_3`「我们已无力再战，全凭你的处置。」与 `bandit_start_defender_2`「也许我们可以找个两全其美的办法。」——同一个 1 人队伍面对山贼和劫匪拿到的是同一组 option id，说明选项集合由玩家方的处境决定，不由对话文本决定。没有出现「迎战」类选项；这一点在源码层未核实，只记为两次实测的观察。
 

@@ -8,6 +8,8 @@ param(
     [ValidateRange(120,1800)][int]$TotalWallClockSeconds = 900,
     [ValidateRange(0,400)][int]$TopUpFoodUnits = 0,
     [ValidateRange(30,900)][int]$MarketArrivalTimeoutSeconds = 240,
+    [switch]$ShelterInTown,
+    [ValidateRange(30,900)][int]$ShelterArrivalTimeoutSeconds = 240,
     [int]$TimeoutSeconds = 180
 )
 
@@ -18,6 +20,11 @@ param(
 # -TopUpFoodUnits buys that many units of the cheapest native market food before the idle window opens,
 # so the same fixture can run with and without a stocked larder; that comparison is what separates
 # "starvation wounds the party" from "idling wounds the party".
+#
+# -ShelterInTown makes the idle window happen inside a settlement: the party walks to the nearest
+# non-hostile town, then waits there through the native town_wait screen instead of advancing on the
+# map. Nothing can intercept a party that is inside a town, so a party that still grows wounded while
+# sheltered was starved, not ambushed.
 $ErrorActionPreference = 'Stop'
 $HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
@@ -63,6 +70,8 @@ function Get-Snapshot($Observation, [string]$Label) {
         foodInventory = [int]$state.party.foodInventory
         foodChange = [double]$state.party.foodChange
         dailyWage = [int]$state.party.dailyWage
+        heroHitPoints = [int]$state.party.heroHitPoints
+        heroMaxHitPoints = [int]$state.party.heroMaxHitPoints
     }
 }
 
@@ -163,6 +172,95 @@ function Invoke-FoodTopUp([int]$TargetFoodUnits, $Observation) {
     return [pscustomobject]@{ Record = $record; Observation = $closed }
 }
 
+function Invoke-SeekTownShelter($Observation) {
+    $record = [ordered]@{
+        townId = ''
+        travelled = $false
+        candidateCount = 0
+    }
+    if ($Observation.state.context.menuId -eq 'town' -and -not [string]::IsNullOrWhiteSpace([string]$Observation.state.location.currentSettlementId)) {
+        $record.townId = [string]$Observation.state.location.currentSettlementId
+        return [pscustomobject]@{ Record = $record; Observation = $Observation }
+    }
+
+    $targets = Invoke-AgentCli 'mapSettlementTargets'
+    $allTowns = @($targets.data.mapSettlementTargets | Where-Object { $_.type -eq 'town' -and -not $_.hostile })
+    # A town under siege is not shelter: waiting there puts the party into the siege encounter, which
+    # is a real map event and would invalidate the comparison this switch exists to make.
+    $towns = @($allTowns | Where-Object { -not $_.underSiege } | Sort-Object { [double]$_.distance })
+    $record.candidateCount = $towns.Count
+    $record.skippedBesieged = @($allTowns | Where-Object { $_.underSiege } | ForEach-Object { [string]$_.id })
+    if ($towns.Count -lt 1) { throw 'The native map exposes no non-hostile town that is not under siege.' }
+    $townId = [string]$towns[0].id
+    $record.townId = $townId
+
+    $move = Invoke-AgentCli 'move' @('-SettlementId', $townId, '-CommandId', "$commandPrefix-shelter-move")
+    if ($move.status -ne 'completed' -or [string]$move.state.location.targetSettlementId -ne $townId) { throw 'Native campaign map movement did not accept the shelter town target.' }
+    $record.travelled = $true
+    $arrivalDeadline = [DateTime]::UtcNow.AddSeconds($ShelterArrivalTimeoutSeconds)
+    $arrived = $null
+    while ([DateTime]::UtcNow -lt $arrivalDeadline) {
+        $arrived = Get-State 'shelter-arrival' 30
+        if ([string]$arrived.state.location.currentSettlementId -eq $townId -and $arrived.state.context.menuId -eq 'town') { break }
+        if ($arrived.state.context.encounterActive -and [string]$arrived.state.context.encounteredPartyId -ne $townId) {
+            throw "Unexpected encounter '$($arrived.state.context.encounteredPartyId)' interrupted travel to the shelter town."
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    if (-not $arrived -or [string]$arrived.state.location.currentSettlementId -ne $townId -or $arrived.state.context.menuId -ne 'town') {
+        throw "Natural campaign travel did not enter the shelter town within $ShelterArrivalTimeoutSeconds seconds."
+    }
+    # Entering a settlement opens the native settlement encounter, so encounterActive is true at the
+    # town gate with encounteredPartyId set to the town itself. Only a different party there means the
+    # arrival was interrupted by something hostile.
+    if ($arrived.state.context.encounterActive -and [string]$arrived.state.context.encounteredPartyId -ne $townId) {
+        throw "The shelter town '$townId' was entered through an unexpected encounter with '$($arrived.state.context.encounteredPartyId)'."
+    }
+    $record.campaignDayOnArrival = [double]$arrived.state.campaignDay
+    return [pscustomobject]@{ Record = $record; Observation = $arrived }
+}
+
+function Get-TownMenu([string]$Tag, [int]$Seconds = 90) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
+    $current = $null
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $current = Get-State $Tag 30
+        $menuId = [string]$current.state.context.menuId
+        if ($menuId -eq 'town') { return $current }
+        if ($menuId -ne 'town_wait_menus') { return $current }
+        $leave = Invoke-AgentCli 'menuSelect' @('-MenuId', 'town_wait_menus', '-OptionId', 'wait_leave', '-CommandId', "$commandPrefix-$Tag-leave") 30
+        if ($leave.status -notin @('completed', 'accepted')) { return $current }
+        Start-Sleep -Milliseconds 700
+    }
+    return $current
+}
+
+function Invoke-ShelteredWait([int]$Chunk, [double]$Days) {
+    $record = [ordered]@{
+        restStatus = ''
+        targetCampaignDay = 0.0
+        reachedTargetDay = $false
+        menuIdAfter = ''
+    }
+    $menu = Get-TownMenu "shelter-before-$Chunk" 90
+    if ([string]$menu.state.context.menuId -ne 'town') { throw "Sheltered wait #$Chunk needs the native Town menu; got '$([string]$menu.state.context.menuId)'." }
+    $rest = Invoke-AgentCli 'rest' @('-Days', [string]$Days, '-CommandId', "$commandPrefix-rest-$Chunk", '-ReturnWhenAccepted') 90
+    $record.restStatus = [string]$rest.status
+    if ($rest.status -ne 'accepted') { throw "Native town wait did not start for chunk #$Chunk`: status=$($rest.status) error=$($rest.error)" }
+    $record.targetCampaignDay = [double]$rest.data.targetCampaignDay
+    $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(60, $Days * 70))
+    $reached = $false
+    while ([DateTime]::UtcNow -lt $deadline) {
+        $current = Get-State "shelter-during-$Chunk" 30
+        if ([double]$current.state.campaignDay -ge $record.targetCampaignDay) { $reached = $true; break }
+        Start-Sleep -Milliseconds 700
+    }
+    $record.reachedTargetDay = $reached
+    $after = Get-TownMenu "shelter-after-$Chunk" 90
+    $record.menuIdAfter = [string]$after.state.context.menuId
+    return [pscustomobject]@{ Record = $record; Observation = $after }
+}
+
 $samples = [System.Collections.Generic.List[object]]::new()
 $chunks = [System.Collections.Generic.List[object]]::new()
 $assertions = [ordered]@{}
@@ -177,6 +275,7 @@ try {
     $baseline = Get-Snapshot $initial 'start'
     $samples.Add($baseline)
     $topUp = $null
+    $shelter = $null
     if ($TopUpFoodUnits -gt 0) {
         $topUpResult = Invoke-FoodTopUp $TopUpFoodUnits $initial
         $topUp = $topUpResult.Record
@@ -186,17 +285,34 @@ try {
         $samples.Add($baseline)
     }
 
+    if ($ShelterInTown) {
+        $shelterSource = if ($topUp) { $topUpResult.Observation } else { $initial }
+        $shelterResult = Invoke-SeekTownShelter $shelterSource
+        $shelter = $shelterResult.Record
+        $samples.Clear()
+        $baseline = Get-Snapshot $shelterResult.Observation 'start-in-town'
+        $samples.Add($baseline)
+    }
+
     $globalDeadline = [DateTime]::UtcNow.AddSeconds($TotalWallClockSeconds)
     for ($chunk = 1; $chunk -le $MaxChunks; $chunk++) {
         if ([DateTime]::UtcNow -gt $globalDeadline) { $stopReason = 'total-wall-clock'; break }
         $before = $samples[$samples.Count - 1]
-        $advanceTimeout = [Math]::Max(60, $ChunkDays * 70)
         $chunkStop = 'target-day'
+        $stepName = if ($shelter) { 'wait' } else { 'advance' }
+        $waitRecord = $null
         try {
-            $advance = Invoke-AgentCli 'advance' @('-Days', [string]$ChunkDays, '-CommandId', "$commandPrefix-advance-$chunk") $advanceTimeout
-            if ($advance.status -ne 'completed') { throw "Native map advance did not complete for chunk ${chunk}: status=$($advance.status) error=$($advance.error)" }
+            if ($shelter) {
+                $waitResult = Invoke-ShelteredWait $chunk $ChunkDays
+                $waitRecord = $waitResult.Record
+                if (-not $waitRecord.reachedTargetDay) { $chunkStop = 'wait-timed-out' }
+            } else {
+                $advanceTimeout = [Math]::Max(60, $ChunkDays * 70)
+                $advance = Invoke-AgentCli 'advance' @('-Days', [string]$ChunkDays, '-CommandId', "$commandPrefix-advance-$chunk") $advanceTimeout
+                if ($advance.status -ne 'completed') { throw "Native map advance did not complete for chunk ${chunk}: status=$($advance.status) error=$($advance.error)" }
+            }
         } catch {
-            $chunkStop = 'advance-failed'
+            $chunkStop = "$stepName-failed"
             $advanceError = $_.Exception.Message
         }
         if (-not (Get-Process -Id $start.session.processId -ErrorAction SilentlyContinue)) { throw 'Game process exited during the idle pressure window.' }
@@ -207,6 +323,8 @@ try {
         $chunkRecord = [ordered]@{
             chunk = $chunk
             requestedDays = $ChunkDays
+            step = $stepName
+            menuId = [string]$after.menuId
             stop = $chunkStop
             daysElapsed = [Math]::Round([double]$after.campaignDay - [double]$before.campaignDay, 4)
             goldDelta = [int]$after.gold - [int]$before.gold
@@ -216,12 +334,15 @@ try {
             woundedDelta = [int]$after.wounded - [int]$before.wounded
             foodInventory = [int]$after.foodInventory
         }
-        if ($advanceError) { $chunkRecord['advanceError'] = $advanceError; $advanceError = $null }
+        if ($advanceError) { $chunkRecord['stepError'] = $advanceError; $advanceError = $null }
+        if ($waitRecord) { $chunkRecord['wait'] = $waitRecord }
         $chunks.Add($chunkRecord)
         if ($chunkStop -ne 'target-day') { $stopReason = $chunkStop; break }
         if ([double]$after.campaignDay -le [double]$before.campaignDay) { $stopReason = 'clock-did-not-advance'; break }
         if ([int]$after.members -lt [int]$baseline.members) { $stopReason = 'party-shrunk'; break }
-        if (-not [string]::IsNullOrWhiteSpace([string]$after.menuId)) { $stopReason = 'menu-opened'; break }
+        if (-not $shelter -and -not [string]::IsNullOrWhiteSpace([string]$after.menuId)) { $stopReason = 'menu-opened'; break }
+        if ($shelter -and $after.menuId -like 'encounter_interrupted_siege*') { $stopReason = 'shelter-besieged'; break }
+        if ($shelter -and [string]$after.gameState -ne 'MapState') { $stopReason = 'left-map-state'; break }
     }
     if ([string]::IsNullOrWhiteSpace($stopReason)) { $stopReason = 'chunk-budget-exhausted' }
 } catch {
@@ -239,6 +360,12 @@ if ($first -and $last) {
     $assertions['GoldNeverRose'] = [int]$last.gold -le [int]$first.gold
     $assertions['TimeModeReturnedToStop'] = ([string]$last.timeControlMode -eq 'Stop') -or ([string]$last.gameState -ne 'MapState')
 }
+$assertions['ShelteredPartyNotEncountered'] = if ($shelter) { @($samples | Where-Object { [bool]$_['encounterActive'] }).Count -eq 0 } else { $true }
+# A siege that starts while the party waits inside the walls replaces the town menu with a siege
+# encounter. That is the world acting on the shelter, not a defect in the window, so it is recorded
+# as its own verdict instead of hiding behind a generic failed wait.
+$assertions['ShelteredPartyNotBesieged'] = ($stopReason -ne 'shelter-besieged')
+$assertions['ShelteredPartyStayedInTown'] = if ($shelter) { @($samples | Where-Object { [string]$_['menuId'] -notin @('town', 'town_wait_menus') }).Count -eq 0 } else { $true }
 $assertions['FixtureUnchanged'] = ((Get-FileHash -LiteralPath $savePath -Algorithm SHA256).Hash -eq $fixtureHashBefore)
 $assertions['ProcessStopped'] = if ($start) { -not (Get-Process -Id $start.session.processId -ErrorAction SilentlyContinue) } else { $true }
 $assertions['ReceiptHasSample'] = ($samples.Count -ge 2)
@@ -248,7 +375,7 @@ $receipt = [ordered]@{
     TimestampUtc = [DateTime]::UtcNow.ToString('o')
     Fixture = $LoadSaveName
     FixtureSha256 = $fixtureHashBefore
-    Parameters = [ordered]@{ ChunkDays = $ChunkDays; MaxChunks = $MaxChunks; ChunkWallClockSeconds = $ChunkWallClockSeconds; TopUpFoodUnits = $TopUpFoodUnits }
+    Parameters = [ordered]@{ ChunkDays = $ChunkDays; MaxChunks = $MaxChunks; ChunkWallClockSeconds = $ChunkWallClockSeconds; TopUpFoodUnits = $TopUpFoodUnits; ShelterInTown = [bool]$ShelterInTown }
     StopReason = $stopReason
     Samples = $samples
     Chunks = $chunks
@@ -258,6 +385,7 @@ $receipt = [ordered]@{
     ModelRequests = 0
 }
 if ($topUp) { $receipt['TopUp'] = $topUp }
+if ($shelter) { $receipt['Shelter'] = $shelter }
 if ($failure) { $receipt['Error'] = $failure.Exception.Message }
 if ($stop) { $receipt['Stop'] = [ordered]@{ status = $stop.status; processStopped = $stop.processStopped; engineConfigRestored = $stop.engineConfigRestored } }
 Set-Content -LiteralPath $resultPath -Value (ConvertTo-Json -InputObject $receipt -Depth 8) -Encoding UTF8

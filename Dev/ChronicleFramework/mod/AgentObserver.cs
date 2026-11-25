@@ -92,6 +92,10 @@ internal static class ChronicleAgentObserver
         json.Append(",\"members\":").Append(party.MemberRoster.TotalManCount);
         json.Append(",\"healthy\":").Append(party.MemberRoster.TotalHealthyCount);
         json.Append(",\"wounded\":").Append(party.MemberRoster.TotalWounded);
+        // A wound that shows up with no encounter behind it cannot be explained by the roster counts
+        // alone, so the hero's own hit points travel with the party observation.
+        json.Append(",\"heroHitPoints\":").Append(hero.HitPoints);
+        json.Append(",\"heroMaxHitPoints\":").Append(hero.MaxHitPoints);
         json.Append(",\"prisoners\":").Append(party.PrisonRoster.TotalManCount);
         json.Append(",\"itemCount\":").Append(TotalItemCount(party.ItemRoster));
         json.Append(",\"sizeLimit\":").Append(party.Party.PartySizeLimit);
