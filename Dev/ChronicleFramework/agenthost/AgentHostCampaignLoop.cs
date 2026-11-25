@@ -30,6 +30,17 @@ internal static class AgentHostCampaignLoop
     internal static readonly HashSet<string> TrainingIssueActions = new(StringComparer.Ordinal) { "partyUpgradeOptions", "upgradeTroop" };
     internal static readonly HashSet<string> AllSupportedActions = new(ApprovedActions.Concat(BattleSimulationActions).Concat(GoldSaleActions).Concat(RecruitmentActions).Concat(CompanionHiringActions).Concat(TrainingIssueActions), StringComparer.Ordinal);
 
+    internal readonly record struct ActionProfile(string Name, IReadOnlyCollection<string> Actions);
+
+    internal static readonly IReadOnlyList<ActionProfile> SupportedActionProfiles = new ActionProfile[]
+    {
+        new("approved", ApprovedActions),
+        new("battle", BattleSimulationActions),
+        new("captivity", CaptivityRecoveryActions),
+        new("gold-sale", GoldSaleActions),
+        new("all-supported", AllSupportedActions)
+    };
+
     internal static IReadOnlyList<object> RunContractSelfTests()
     {
         var results = new List<object>();
@@ -466,14 +477,7 @@ internal static class AgentHostCampaignLoop
         {
             var missingApprovedActions = AllSupportedActions.Except(requestedActions).OrderBy(action => action, StringComparer.Ordinal);
             var unexpectedActions = requestedActions.Except(AllSupportedActions).OrderBy(action => action, StringComparer.Ordinal);
-            var requestedProfiles = new[]
-            {
-                (Name: "approved", Actions: ApprovedActions),
-                (Name: "battle", Actions: BattleSimulationActions),
-                (Name: "gold-sale", Actions: GoldSaleActions),
-                (Name: "captivity", Actions: CaptivityRecoveryActions),
-                (Name: "all-supported", Actions: AllSupportedActions)
-            }.Where(profile => requestedActions.SetEquals(profile.Actions)).Select(profile => profile.Name);
+            var requestedProfiles = SupportedActionProfiles.Where(profile => requestedActions.SetEquals(profile.Actions)).Select(profile => profile.Name);
             var diagnostics = $"goalValid={goalValid}; goalLength={goal?.Length ?? 0}; maxDecisions={maxDecisions}; maxElapsedSeconds={maxElapsedSeconds}; actionCount={requestedActions.Count}; exactProfile={string.Join(",", requestedProfiles)}; missingApproved=[{string.Join(",", missingApprovedActions)}]; unexpected=[{string.Join(",", unexpectedActions)}]";
             throw new AgentHostException("campaign-loop-request-invalid", "The Host requires a bounded goal and one exact approved Campaign action set. " + diagnostics);
         }
@@ -1150,9 +1154,7 @@ internal static class AgentHostCampaignLoop
         ReadBoolean(((state?["context"] as JsonObject)?["captivity"] as JsonObject), "isCaptive");
 
     internal static bool IsSupportedRequestedActionSet(HashSet<string> requestedActions) =>
-        requestedActions.SetEquals(ApprovedActions) || requestedActions.SetEquals(BattleSimulationActions) ||
-        requestedActions.SetEquals(CaptivityRecoveryActions) || requestedActions.SetEquals(GoldSaleActions) ||
-        requestedActions.SetEquals(AllSupportedActions);
+        SupportedActionProfiles.Any(profile => requestedActions.SetEquals(profile.Actions));
 
     private static JsonObject BuildObservation(JsonObject native, JsonArray? targets, string? targetId, string? targetName, bool goalVerified)
     {

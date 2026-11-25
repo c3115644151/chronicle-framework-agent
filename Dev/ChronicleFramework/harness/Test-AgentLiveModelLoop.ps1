@@ -119,6 +119,20 @@ if ($VillageToolsQuestLoop -and -not $AgentHostRuntime) { throw 'VillageToolsQue
 if ($EstablishYourClanGoalPlanner -and -not $AgentHostRuntime) { throw 'EstablishYourClanGoalPlanner requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
 if ($EstablishYourClanAutonomyLoop -and -not $AgentHostRuntime) { throw 'EstablishYourClanAutonomyLoop requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
 if ($EstablishClanGoldSaleLoop -and -not $AgentHostRuntime) { throw 'EstablishClanGoldSaleLoop requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
+# The Local Agent Host accepts one exact approved Campaign action set per run and
+# rejects anything else before the first Native command. Read the Host's own
+# catalog and profile table once here so a slice that cannot possibly be accepted
+# fails in seconds instead of after a full game launch.
+$catalog = $null
+if ($AgentHostRuntime) {
+    $agentHostDllForCatalog = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'agenthost') 'bin\Release\net8.0\ChronicleAgentHost.dll'
+    if (-not (Test-Path -LiteralPath $agentHostDllForCatalog -PathType Leaf)) { throw 'The current Agent Host action catalog is missing; no game was launched.' }
+    $catalogOutput = & dotnet $agentHostDllForCatalog --campaign-action-catalog 2>&1 | Out-String
+    $catalogExitCode = $LASTEXITCODE
+    if ($catalogExitCode -ne 0) { throw "The current Agent Host action catalog could not be read (exit=$catalogExitCode); no game was launched." }
+    try { $catalog = $catalogOutput | ConvertFrom-Json }
+    catch { throw 'The current Agent Host action catalog returned invalid JSON; no game was launched.' }
+}
 if ($RoadsideBanditNegotiationLoop -and -not $RecruitmentLoop) { throw 'RoadsideBanditNegotiationLoop requires RecruitmentLoop so the encounter resolves into the existing growth goal.' }
 foreach ($setting in @('CHRONICLE_LLM_BASE_URL','CHRONICLE_LLM_MODEL','CHRONICLE_LLM_OUTPUT_MODE','CHRONICLE_LLM_MAX_RUN_COST_CNY','CHRONICLE_LLM_TIMEOUT_SECONDS','CHRONICLE_LLM_MAX_TOKENS','CHRONICLE_LLM_MAX_TOKEN_PARAMETER','CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION','CHRONICLE_LLM_REASONING_EFFORT','CHRONICLE_LLM_THINKING_MODE','CHRONICLE_LLM_TEMPERATURE','CHRONICLE_LLM_PROTOCOL')) {
     $configuredValue = [string][Environment]::GetEnvironmentVariable($setting, 'Process')
@@ -562,13 +576,6 @@ try {
         $goal = 'Autonomously complete the exact currently active original StoryMode Establish Your Clan quest. Use its current Journal values to choose among Gold, dynamic PartySize, Renown and Companion targets; execute only the current Native routes, re-read Journal after each subgoal, and stop only after Native original quest history confirms completion. Do not inject progress, use preplanned action sequences, or hide time changes inside actions.'
         $maxDecisions = $MaxProviderDecisions
         $maxElapsedSeconds = $HostMaxElapsedSeconds
-        $agentHostDllForCatalog = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'agenthost') 'bin\Release\net8.0\ChronicleAgentHost.dll'
-        if (-not (Test-Path -LiteralPath $agentHostDllForCatalog -PathType Leaf)) { throw 'The current Agent Host action catalog is missing; no game was launched.' }
-        $catalogOutput = & dotnet $agentHostDllForCatalog --campaign-action-catalog 2>&1 | Out-String
-        $catalogExitCode = $LASTEXITCODE
-        if ($catalogExitCode -ne 0) { throw "The current Agent Host action catalog could not be read (exit=$catalogExitCode); no game was launched." }
-        try { $catalog = $catalogOutput | ConvertFrom-Json }
-        catch { throw 'The current Agent Host action catalog returned invalid JSON; no game was launched.' }
         $catalogActions = @($catalog.actions | ForEach-Object { [string]$_ })
         if ($catalogActions.Count -eq 0 -or @($catalogActions | Sort-Object -Unique).Count -ne $catalogActions.Count) {
             throw 'The current Agent Host action catalog is empty or contains duplicate names; no game was launched.'
@@ -651,6 +658,15 @@ try {
     }
     $loopExitCode = 0
     if ($AgentHostRuntime) {
+        $requestedActionNames = @($allowedActions.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $requestedActionKey = @($requestedActionNames | Sort-Object -Unique) -join ','
+        $hostProfiles = @($catalog.profiles)
+        if ($hostProfiles.Count -eq 0) { throw 'The current Agent Host action catalog published no approved action profiles; no game was launched.' }
+        $matchingProfiles = @($hostProfiles | Where-Object { ((@($_.actions) | Sort-Object -Unique) -join ',') -ceq $requestedActionKey })
+        if ($matchingProfiles.Count -eq 0) {
+            $hostProfileNames = @($hostProfiles | ForEach-Object { [string]$_.name }) -join ', '
+            throw ("The Local Agent Host accepts only one exact approved Campaign action set; this slice requests {0} actions that match none of [{1}], so the Host would reject the request before the first Native command. This slice can only run on the FreeLLMAPI PowerShell provider." -f $requestedActionNames.Count, $hostProfileNames)
+        }
         $agentHostDll = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'agenthost') 'bin\Release\net8.0\ChronicleAgentHost.dll'
         if ($SupplyManagementLoop) {
             $hostRunMode = 'supply-loop'

@@ -70,7 +70,10 @@ internal static class Program
             {
                 Console.Out.WriteLine(JsonSerializer.Serialize(new
                 {
-                    actions = AgentHostCampaignLoop.AllSupportedActions.OrderBy(action => action, StringComparer.Ordinal).ToArray()
+                    actions = AgentHostCampaignLoop.AllSupportedActions.OrderBy(action => action, StringComparer.Ordinal).ToArray(),
+                    profiles = AgentHostCampaignLoop.SupportedActionProfiles
+                        .Select(profile => new { name = profile.Name, actions = profile.Actions.OrderBy(action => action, StringComparer.Ordinal).ToArray() })
+                        .ToArray()
                 }, OutputJsonOptions));
                 return 0;
             }

@@ -676,6 +676,18 @@ Native模块隔离编译通过，尚未部署到运行中的Bannerlord。
 
 非Map启动保护由`TestResults/20261012-193445`核验：通过已有Native库存导航进入InventoryState，在库存未关闭时调用已注册MCM Start，控制器Starting→Failed，零Host进程/Ready事件；随后原版Inventory Cancel回Map，Gold/位置与源档不变，进程/session清理通过。这验证非Map的一个实际代表状态，不是全部Mission/Menu上下文矩阵，也不代表在库存画面实际点击MCM按钮的视觉验收。
 
+2026-11-26 本机 Ollama loopback 路线已跑通真实模型决策，不触碰任何上游凭据：`CHRONICLE_LLM_BASE_URL=http://127.0.0.1:11434/v1`、`CHRONICLE_LLM_PROTOCOL=openai-compatible`、`CHRONICLE_LLM_OUTPUT_MODE=json_schema`、`CHRONICLE_LLM_MODEL=llama3.2:3b`，经`harness/Test-AgentLiveModelLoop.ps1 -AgentHostRuntime`由C# Host发起推理。三条门禁决定这条路：
+
+- `harness/Agent-OpenAICompatibleProvider.ps1`只放行loopback:31415的FreeLLMAPI网关（拒绝语逐字为`Live PowerShell model calls are FreeLLMAPI-only; local inference and other endpoints are refused.`）；`harness/Test-AgentHostProvider.ps1`只放行31415/8326/8328。因此旧PowerShell决策循环与provider smoke都打不到本机模型。
+- `harness/Test-AgentLiveModelLoop.ps1`只要求openai-compatible、http loopback、无UserInfo/Query/Fragment并`GET <base>/models`预检，是唯一放行口。
+- `agenthost/OllamaNativeProvider.cs`对loopback非FreeLLMAPI端点不要求API key；`OutputMode=json_schema`在loopback上不会被降级，真的发`response_format`。
+
+结构化输出是能否决策的分水岭：`json_object`下llama3.2:3b自造`classification`键（`provider-decision-ambiguous`，进度日志`providerDecisionFieldShape="classification:String_reason:String"`）；qwen3.5:4b、qwen3:8b、qwen3.5:9b三档思考模型把预算烧在reasoning上（空`content` + `finish_reason=length`）；`json_schema`下llama3.2:3b用890ms给出合法`{"control":"supportedEstablishYourClanGoal"}`，真机首轮把目标分类成`supported-establish-your-clan`。
+
+Host只接受一组精确动作集，`AgentHostCampaignLoop.SupportedActionProfiles`是单一事实来源：approved 20、battle 12、captivity 2、gold-sale 11、all-supported 42；`--campaign-action-catalog`现在同时发布`actions`与`profiles`，`IsSupportedRequestedActionSet`与`campaign-loop-request-invalid`的诊断都读这张表。`harness/Test-AgentLiveModelLoop.ps1`在载入游戏前比对slice请求集与profile表，匹配不上即报`match none of [...]`。实测声明支持Host的九个切片里只有`-EstablishYourClanAutonomyLoop`（all-supported）与`-CaptivityRecoveryLoop`（captivity=resume,menuSelect）能过这道门；arrival（`mapSettlementTargets,move`）、recruitment（4项）、roadside（10项）、supply（`menuSelect,foodOptions,provision,tradeConfirm,rest`）、village-tools（19项，缺`incidentSelect`）、battle与battle-and-captivity（11项，缺`partyLootTransferOne`）、gold-sale（8项，缺`sellPrisonerOne`/`partyScreenDone`/`partyScreenCancel`）都不在表里，在Host侧必然被拒绝。
+
+第一批真实模型收据`TestResults/20261126-live-host-autonomy5`（llama3.2:3b、json_schema、24决策/1800秒预算、夹具`ChronicleEycDev-freshB-20261123092350-d1a1805e`）：24次决策、28个Native动作、61,121输入token/658输出token、3.3个战役日。行为链为分类`establish-your-clan`→查settlement→向`castle_village_EW6_2`移动→匪徒打断后要求`stop`被拒、只能`observeAgain`→查party→`pursue`→对话选最后通牒→`encounter/attack`（1人队）→被俘→`menu_captivity_end_wilderness_escape/mno_continue`逃脱→选`gold`→移向`town_B1`→再被`mountain_bandits_2289`拦→`pursue`→对话后`leave`不接战→改选`partySize`→移向村庄→两次要求`stop`（一次`observeAgain`，一次`recruitment-model-stopped-with-safe-actions`）→再选`gold`→`gold-sale-budget-exhausted`。终局Gold 0、1人、站在村庄菜单，四个目标全未变。该收据同时证明模型确实在玩（有战斗、被俘、逃脱、拒战），以及3B模型24次决策内没有任何收益。
+
 ### Campaign存档内的Agent目标Checkpoint
 
 本机1.4.8的`CampaignBehaviorBase.SyncData(IDataStore)`会随Native Campaign存档序列化行为字段；

@@ -278,6 +278,35 @@ EYC/Autonomy 的 BattleSimulation 调用点都带 `recoverPlayerCaptivity: true`
 
 - 「开局求生」现在不能拿「它会怎么谈」当判据，因为它拿不到谈判动词；能判的只有「它认不认这个已经输掉的结局，以及认输之后怎么爬起来」。
 - 想让开局出现真正的分叉，得先把谈判/交钱这条路暴露进战斗 slice（先真机核对 barter 之后原版走向，再补动词），那是产品级动作面扩展，不是脚本任务。
+### 9.4 第一批真实模型收据：它真的会打，也不会自己变富
+
+场景要能判，先得有一个模型真的坐进驾驶位。2026-11-26 这条路线打通了：本机 Ollama（loopback `http://127.0.0.1:11434/v1`）经 C# Host 发起推理，不触碰任何上游凭据，也不修改游戏或存档里的任何进度。
+
+**为什么只有这条路通。** 仓库里三道门禁对本地推理的态度不一样：`harness/Agent-OpenAICompatibleProvider.ps1` 只放行 loopback:31415 的 FreeLLMAPI 网关（拒绝语逐字是 `Live PowerShell model calls are FreeLLMAPI-only; local inference and other endpoints are refused.`），`harness/Test-AgentHostProvider.ps1` 只放行 31415/8326/8328；`harness/Test-AgentLiveModelLoop.ps1` 只要求 openai-compatible + http loopback + `/models` 预检。Host 侧 `agenthost/OllamaNativeProvider.cs` 对 loopback 非 FreeLLMAPI 端点不要求 API key。所以「旧 PowerShell 决策循环」和「provider smoke」都打不到本机模型，只有 `-AgentHostRuntime` 这条路可以。
+
+**结构化输出是能否决策的分水岭。** `json_object` 模式下 llama3.2:3b 自己发明了 `classification` 键，Host 要的是 `control`，于是得到 `provider-decision-ambiguous`（进度日志写着 `providerDecisionFieldShape="classification:String_reason:String"`）；qwen3.5:4b、qwen3:8b、qwen3.5:9b 三档思考模型把 token 预算烧在 reasoning 上，回来的是空 `content` 加 `finish_reason=length`。换成 `json_schema` 之后，llama3.2:3b 用 890ms 给出合法的 `{"control":"supportedEstablishYourClanGoal"}`，真机首轮也把目标分类成 `supported-establish-your-clan`。结论是**不是模型不行，是没给约束**。
+
+**Host 只接受一组精确动作集。** `AgentHostCampaignLoop.SupportedActionProfiles` 现在是单一事实来源：approved 20、battle 12、captivity 2、gold-sale 11、all-supported 42；`--campaign-action-catalog` 同时发布 `actions` 与 `profiles`。`harness/Test-AgentLiveModelLoop.ps1` 在载入游戏前把 slice 请求集和这张表逐项比对，匹配不上就报 `match none of [...]`，不再让 Host 用 `campaign-loop-request-invalid` 在跑完一整轮之后才拒绝。实测声明支持 Host 的切片里，只有 `-EstablishYourClanAutonomyLoop`（all-supported）与 `-CaptivityRecoveryLoop`（captivity = resume,menuSelect）能过这道门；arrival、recruitment、supply、battle、battle-and-captivity、village-tools、gold-sale 的旧子集都不在表里。这不是能力被砍，是这些子集本来就只属于已退休的 FreeLLMAPI 路线。
+
+**这一轮它做了什么。** 夹具 `ChronicleEycDev-freshB-20261123092350-d1a1805e.sav`（1 人、0 金、Renown 20），llama3.2:3b，24 次决策预算、1800 秒墙钟预算，收据 `TestResults/20261126-live-host-autonomy5`：24 次决策、28 个 Native 动作、61,121 输入 token、658 输出 token、走了 3.3 个战役日。
+
+行为链逐条可查：先分类成 `establish-your-clan` → 查 `mapSettlementTargets` → 向 `castle_village_EW6_2` 移动 → 匪徒打断后要求 `stop`（被拒，只能 `observeAgain` 等 10 秒）→ 匪徒显形，查 `mapPartyTargets` → `pursue` `mountain_bandits_2289` → 对话选最后通牒 → `encounter/attack` 开打 → 一个人打输了，被俘 → `menu_captivity_end_wilderness_escape/mno_continue` 逃出来 → 改选 `gold` 目标 → 移向 `town_B1` → 又被同一伙匪徒拦住 → `pursue` → 这次对话后选 `leave`，不接战 → 改选 `partySize` → 移向村庄 → 连着两次要求 `stop`（一次被 `observeAgain` 顶回，一次触发 `recruitment-model-stopped-with-safe-actions`）→ 再选 `gold` → `gold-sale-budget-exhausted`。
+
+结果：终局 Gold 0、队伍 1 人、站在村庄菜单里，四个 EYC 目标一个没动；金币没长也没少，因为 1 人队伍不付工资，3.3 天的粮食消耗也没换出任何收益。
+
+![第一批真实模型运行](media/live-model-first-run.jpg)
+
+**这张收据说明什么。** 它同时证明了两件事。一是管路通了：一个 3B 的本地模型能在原版 Bannerlord 里自己走地图、追匪徒、打输、被俘、逃出来、拒绝第二次接战、再三要求停手——没有一条动作是脚本写好的顺序。二是它没有脾气之外的本事：24 次决策里没赚到一枚第纳尔、没招到一个人，还反复在 `gold` 与 `partySize` 之间改主意。
+
+对 §4 的判据这是一个干净的正例：**这次没有任何答案被预先给出**（没有为剧本收窄的动作白名单，没有打卡式课程，目标由模型自己分类、自己挑子目标），于是能看见模型的偏好——它第一次遇袭就开打，被俘之后两次拒绝接战，并且四次要求「停下来」。这类偏好正是要量化「这个 AI 有什么脾气」时必须先能看见的东西。
+
+对场景设计，后果有四条：
+
+- **起点选存档就是选剧本**：`freshB` 是「一兵零金」的求生开局，`opening`（1000 金、1 人）压力不足，`eyc-complete`（46 人 2277 金）已经通关。同一套动作面在这三个存档里是三个不同的游戏。
+- **预算按决策记，不按秒记**：这一轮 24 次决策里，等待（`observeAgain`）和被拒的 `stop` 各吃掉一次；想看它完整处理一场遭遇，得留 20 次以上。
+- **本地模型可以做场景仪器**：零成本、零凭据、可重复，适合先把「它会怎么选」看清楚，再决定要不要花上游配额去验语义能力。
+- **不要拿 3B 的语义判断当产品结论**：它在 0 金的队伍上选 `gold`，说明它读不懂「没有货就没有钱」；这类结论要用更大的模型复验，不能写进验收。
+
 ## 10. 明确不做
 
 - **不把动作广度当 KPI**：动作目录有多少条不是体验，四条判据才是。

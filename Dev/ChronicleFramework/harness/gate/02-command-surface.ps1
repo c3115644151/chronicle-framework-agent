@@ -102,6 +102,12 @@ if ($agentHostProgramSource -notmatch '--campaign-action-catalog' -or
     $agentLiveModelLoopSource -notmatch '\$allowedActions = \[string\]::Join\(') {
     throw 'The full EYC live-model Harness request must take its action allowlist from the compiled AgentHost catalog so product and campaign integration contracts cannot drift.'
 }
+if ($agentHostProgramSource -notmatch 'profiles = AgentHostCampaignLoop\.SupportedActionProfiles' -or
+    $agentHostCampaignLoopSource -notmatch 'SupportedActionProfiles\.Any\(profile => requestedActions\.SetEquals\(profile\.Actions\)\)' -or
+    $agentLiveModelLoopSource -notmatch '\$hostProfiles = @\(\$catalog\.profiles\)' -or
+    $agentLiveModelLoopSource -notmatch 'match none of') {
+    throw 'The accepted Campaign action sets must have one published profile table, and the live-model Harness must refuse a slice that matches none of them before the Host rejects it after a whole run.'
+}
 if ($agentHostRecruitmentLoopSource -notmatch 'AgentHostProviderDecisionRecovery\.DecideWithSingleRetryAsync' -or
     $agentHostRecruitmentLoopSource -notmatch 'decision-rejected-before-native' -or
     $agentHostDecisionCycleSource -notmatch 'The previous model response selected an unavailable action or control' -or

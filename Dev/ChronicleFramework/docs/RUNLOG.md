@@ -1076,3 +1076,14 @@ Contract 7.673为直接OpenRouter `:free`模型增加每请求至少3.1秒的间
 
 收据自算的盈亏线：每件毛利 6、日工资 78、单程 0.807 天，`breakEvenUnitsPerTravelDay=17.0`。前两次运行失败并留下两条工具教训：第一次 `trade` 被 CLI 拒绝（缺方向/物品/侧/数量），根因是函数返回单个 `[ordered]` 行时 PowerShell 不展开数组，而 OrderedDictionary 的 `[0]` 是按键取键 0，得到 null 却让 `Count` 等于键数；改成 `return , $matched` 并统一用 `[pscustomobject]`。第二次 `SaleCollectedGold=False`：卖货确实 +15，但断言拿「买入后余额」比较，中间被日工资扣掉 78；改为在卖出前单独读 `playerGold`。
 同日第二次运行 `TestResults/20261126-market-probe-4/Temp/MarketProbeResult.json`（九条断言全真）补上了负重一侧：一件 `flax` 重 10，买 2 件使 `cargoWeight` 223.53→243.53，`cargoCapacity` 1210、剩余 986，按负重可背 98 件；A 城该货库存 71、按 9 一件用 2277 金可买 253 件。三个上限次序 71 < 98 < 253，单程毛利上限 426、扣 78 工资净 348。B 城 `sellOffers` 里同一件货出现多行不同单价（7 与 15 并存），成交回执 `nativeTransactionAmount=-15` 与金币 2181→2196 对齐被提交那一行，说明成交价不能取库存行里的第一个。
+
+## 2026-11-26 第一批真实模型决策：本机 Ollama loopback（autonomy5）
+
+第一次让真实模型坐进驾驶位，全程不触碰任何上游凭据。命令由 `harness/Test-AgentLiveModelLoop.ps1 -LoadSaveName ChronicleEycDev-freshB-20261123092350-d1a1805e -AgentHostRuntime -EstablishYourClanAutonomyLoop -MaxProviderDecisions 24 -HostMaxElapsedSeconds 1800 -TimeoutSeconds 400` 发起，本机 Ollama 在 `http://127.0.0.1:11434` 提供 `llama3.2:3b`，host 侧 `OllamaNativeProvider` 以 `OutputMode=json_schema` 真正下发 `response_format`（loopback 上不会被降级）。收据 `TestResults/20261126-live-host-autonomy5`。
+
+结果：24 次决策、28 个 Native 动作、61,121 输入 / 658 输出 token、3.3 个战役日（day 91117.285 → 91120.598），终止于 `objective-subflow-failed` / `gold-sale-budget-exhausted`；终局 Gold 0、队伍 1 人、停在村庄菜单，四个 EYC 目标一个没动。
+
+行为链（`Temp/AgentHostProgress.jsonl` 逐条）：分类 `establish-your-clan`（387/15 token）→ `mapSettlementTargets` → `move castle_village_EW6_2` → 匪徒打断后要求 `stop`，被 `safe-stop-rejected-with-observe-again-control` 顶回，只能 `observeAgain` 等 10 秒 → `mapPartyTargets` → `pursue mountain_bandits_2289` → `dialogueSelect common_encounter_ultimatum` → `menuSelect encounter/attack`，一个人打输被俘 → `menuSelect menu_captivity_end_wilderness_escape/mno_continue` 逃脱 → 子目标改成 `gold` → `move town_B1` → 又被同一伙匪徒拦住 → `pursue` → 这次对话后 `menuSelect encounter/leave`，不接战 → 改成 `partySize` → `move castle_village_EW5_1` → 连续两次 `stop` → `recruitment-model-stopped-with-safe-actions` → 再选 `gold` → 子流程 0 动作即 `gold-sale-budget-exhausted`。
+
+路线本身也是本轮修出来的：`json_object` 模式下 llama3.2:3b 自造 `classification` 键（Host 判 `provider-decision-ambiguous`），qwen3.5:4b / qwen3:8b / qwen3.5:9b 把预算烧在 reasoning 上回来空 `content` + `finish_reason=length`；只有 `json_schema` 下 llama3.2:3b 给出合法的 `{"control":"supportedEstablishYourClanGoal"}`。同轮还发现 Host 只接受一组精确动作集，`harness/Test-AgentLiveModelLoop.ps1` 因此在载入游戏前用它比对 profile 表，避免 Host 跑完一整轮才用 `campaign-loop-request-invalid` 拒绝。画面取自本轮 `Temp/LiveModelWindow-contact.jpg`，已收入 `docs/media/live-model-first-run.jpg`。
+
