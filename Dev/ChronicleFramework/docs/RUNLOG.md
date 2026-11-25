@@ -1133,3 +1133,35 @@ Contract 7.673为直接OpenRouter `:free`模型增加每请求至少3.1秒的间
 同轮把 `harness/Test-AgentLiveModelLoop.ps1` 的金币切片从硬编码 8 动作改为读 `--campaign-action-catalog` 发布的 `gold-sale` profile（11 个动词）；`TestResults/20261126-031238` 因此真正跑到模型，失败点变成世界：7 决策 7 动作后 `native-visible-hostile-bandit-interrupted-settlement-move`。
 
 可复跑：`./harness/Run-Harness.ps1 -Phase VillageMarketProbe`；整堆用法：`./harness/Test-AgentVillageMarketProbe.ps1 -SellUnits 10`。
+
+## 2026-11-26 三次本机模型跑与动作目录里的整数参数（契约 7.711）
+
+本机 `llama3.2:3b`（ollama，`http://127.0.0.1:11434/v1`，`json_schema`，`CHRONICLE_LLM_MAX_TOKENS=1000`），零外部凭据，夹具 `ChronicleEycDev-opening-20261126`，`-AgentHostRuntime -EstablishYourClanAutonomyLoop`。
+
+| run | 决策 | Native 动作 | 输入/输出 token | 结果 |
+| --- | --- | --- | --- | --- |
+| `TestResults/20261126-live-host-opening2` | 24 | 52 | 41,187 / 521 | `training-issue-budget-exhausted`，Gold 1000→1022 |
+| `TestResults/20261126-live-host-opening3` | 12 | 27 | 14,528 / 200 | `gold-sale-budget-exhausted`（进到 `tradeOptions` 即用完预算） |
+| `TestResults/20261126-live-host-opening4` | 26 | 54 | 45,476 / 570 | `training-issue-budget-exhausted`，Gold 1000→1022 |
+
+三次都先由模型自己走完开局：跳过教程、回答 inquiry、提交家族名（`芬`）、`bannerEditorDone`，再选 `gold` 目标进城。opening2/opening4 里它真的卖出了 1 份 `grain`（子流程 `one-native-sale-and-journal-gold-increase-verified`）；随后同一个城镇的 `tradeOptions` 已经没有可卖盘，目录只剩 `tradeCancel`，它就离开城镇转训练委托线，最后由 `training-issue-budget-exhausted` 收场。
+
+本轮同时修了一个仪器缺陷：`AgentHostHarnessProgressTrace.SummarizeAllowedActionCatalog` 原先只保留字符串型参数值，整数被丢弃，金币切片的记录写成 `Amount: []`。opening4 第 14 条记录在修复后读作：
+
+```
+{"action":"trade","arguments":["Direction","ItemViewModelId","InventorySide","Amount"],"argumentValues":{"Direction":["sell"],"ItemViewModelId":["grain"],"InventorySide":["PlayerInventory"],"Amount":[1]}}
+```
+
+也就是说「主机有没有发布可选数量」现在能从收据看出来；之前那句 `[]` 是我自己的记录器丢的，不是主机没发。
+
+可复跑：
+
+```
+$env:CHRONICLE_HARNESS_TEMP='<run>/Temp'
+$env:CHRONICLE_LLM_PROTOCOL='openai-compatible'
+$env:CHRONICLE_LLM_BASE_URL='http://127.0.0.1:11434/v1'
+$env:CHRONICLE_LLM_MODEL='llama3.2:3b'
+$env:CHRONICLE_LLM_OUTPUT_MODE='json_schema'
+$env:CHRONICLE_LLM_MAX_TOKENS='1000'
+.\harness\Test-AgentLiveModelLoop.ps1 -LoadSaveName ChronicleEycDev-opening-20261126 -AgentHostRuntime -EstablishYourClanAutonomyLoop -MaxProviderDecisions 26 -HostMaxElapsedSeconds 1800 -TimeoutSeconds 400
+```

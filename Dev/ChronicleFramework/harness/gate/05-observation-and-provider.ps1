@@ -441,6 +441,7 @@ if ($agentHostDecisionCycleSource -notmatch 'AgentHostHarnessProgressTrace\.Reco
     $agentHostHarnessProgressTraceSource -notmatch 'harness-progress-trace-reports-only-aggregate-affordable-recruitment-offer-counts' -or
     $agentHostHarnessProgressTraceSource -notmatch 'BuildCompanionNavigationSummary' -or
     $agentHostHarnessProgressTraceSource -notmatch 'harness-progress-trace-reports-only-aggregate-companion-navigation-progress' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'value\.TryGetValue<int>\(out var number\)' -or
     $agentHostProviderContractSelfTestSource -notmatch 'AgentHostHarnessProgressTrace\.RunContractSelfTests') {
     throw 'Real Host decisions must be incrementally persisted only in bounded Harness visual-capture/lifecycle modes, including the selected Native argument and route but excluding rationale/raw prompt content.'
 }

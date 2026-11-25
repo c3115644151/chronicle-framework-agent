@@ -609,8 +609,19 @@ internal static class AgentHostHarnessProgressTrace
                     if (key is null || property.Value is not JsonArray values) continue;
                     var safeValues = new JsonArray();
                     foreach (var value in values.OfType<JsonValue>().Take(16))
-                        if (value.TryGetValue<string>(out var text) && SanitizeDiagnosticIdentifier(text) is { } safeValue)
-                            safeValues.Add(safeValue);
+                    {
+                        // Integer argument values carry real information: a Gold sale that offers only
+                        // one unit is a different action surface from one that offers a whole stack, and
+                        // dropping them here made every recorded catalog read as if Amount were free.
+                        if (value.TryGetValue<string>(out var text))
+                        {
+                            if (SanitizeDiagnosticIdentifier(text) is { } safeValue) safeValues.Add(safeValue);
+                        }
+                        else if (value.TryGetValue<int>(out var number))
+                        {
+                            safeValues.Add(number);
+                        }
+                    }
                     valuesSummary[key] = safeValues;
                 }
             }

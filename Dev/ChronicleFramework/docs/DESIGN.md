@@ -248,6 +248,8 @@ EYC 这条产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanG
 **一次原生交易能结算整堆，不是一件。** `TestResults/20261126-village-market-3/VillageMarketProbeResult.json`（零模型请求，`harness/Test-AgentVillageMarketProbe.ps1 -SellUnits 10`）在村庄对单价 8 的 `fish` 下单 10 件（库存只有 4）：原版回执 `amount=4`，金币 2199→2231（+32 = 4×8），库存 −4，`campaignDay` 与时钟档位前后不动。所以「一件一件卖」只是旧实现的选择，不是原版限制——上限是库存与该行报价，不是 1。
 这一侧的证据还顺带钉住一个读数细节：同一件 `flax` 在 B 城的 `sellOffers` 里会出现多行、单价不同（本轮亲眼看到 `unitPrice` 7 与 15 并存，按堆叠与修正分开），而原版成交按被选中那一行报价——探针因此用「成交前后的金币差 = 该行报价」来判定，而不是拿库存行里的第一个价格当答案。
 
+**整堆能力上线之后，约束换到了货这一侧。** `TestResults/20261126-live-host-opening2`（本机 `llama3.2:3b` + `json_schema`，零外部凭据，24 决策）在同一个开局存档上：模型进了 `town_ES3` → `tradeOptions` → 选 `grain` 卖 **1 份**（主机当时已把该报价行的库存值一并列出）→ 金币 1000→1022，子流程以 `one-native-sale-and-journal-gold-increase-verified` 收尾；紧接着再选一次金币目标，同一城镇的 `tradeOptions` 已经没有任何可卖出的货，目录只剩 `tradeCancel`，于是它离开城镇、转去训练委托线，19 个动作后以 `training-issue-budget-exhausted` 结束。也就是说这一局的金币瓶颈不是单位上限，而是**背包里只有一份粮**：整堆能卖的那天，货架上没货。
+
 ### 9.3 决策面：模型做决定的那一刻手里有哪些动词
 
 场景能不能成立，不只取决于世界会出什么事，还取决于**在那一刻模型被允许做什么**。这一层可以直接读代码确认，不需要猜。
