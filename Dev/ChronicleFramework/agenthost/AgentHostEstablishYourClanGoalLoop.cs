@@ -287,19 +287,15 @@ internal static class AgentHostEstablishYourClanGoalLoop
             ["allowedActions"] = actionCatalog,
             ["allowedControls"] = new JsonArray()
         };
-        var routeHistory = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
-        var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
+        var ledger = new DecisionRunLedger(provider, null, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         ProviderDecisionResult decision = null!;
         string? selectedObjective = null;
         JsonObject? selectedGoal = null;
-        var plannerDecisionCount = 0;
-        long plannerPromptTokens = 0;
-        long plannerCompletionTokens = 0;
         var validSelection = false;
         string? lastProviderFailureCode = null;
         for (var attempt = 0; attempt < 2; attempt++)
         {
-            modelRequest["iteration"] = priorDecisions + plannerDecisionCount + 1;
+            modelRequest["iteration"] = ledger.NextDecisionNumber;
             if (attempt == 1)
             {
                 if (lastProviderFailureCode is not null)
@@ -324,19 +320,11 @@ internal static class AgentHostEstablishYourClanGoalLoop
             }
             catch (AgentHostException exception) when (AgentHostProviderDecisionRecovery.CanRetry(exception.Code, attempt))
             {
-                plannerDecisionCount++;
+                ledger.RecordProviderFailure(exception.Code);
                 lastProviderFailureCode = exception.Code;
-                routeHistory.Add(new JsonObject
+                ledger.Trace.Add(new JsonObject
                 {
-                    ["decision"] = priorDecisions + plannerDecisionCount,
-                    ["requestedModelId"] = provider.ModelId,
-                    ["status"] = "provider-failure-before-decision",
-                    ["failureCode"] = exception.Code,
-                    ["nativeActionSent"] = false
-                });
-                trace.Add(new JsonObject
-                {
-                    ["iteration"] = priorDecisions + plannerDecisionCount,
+                    ["iteration"] = ledger.Decisions,
                     ["stage"] = "objective-planner-provider-retry",
                     ["failureCode"] = exception.Code,
                     ["nativeActionSent"] = false,
@@ -344,28 +332,16 @@ internal static class AgentHostEstablishYourClanGoalLoop
                 });
                 continue;
             }
-            plannerDecisionCount++;
-            plannerPromptTokens += decision.PromptTokens ?? 0;
-            plannerCompletionTokens += decision.CompletionTokens ?? 0;
-            routeHistory.Add(new JsonObject
-            {
-                ["decision"] = priorDecisions + plannerDecisionCount,
-                ["requestedModelId"] = provider.ModelId,
-                ["responseModelId"] = decision.ModelId,
-                ["routedVia"] = decision.RoutedVia,
-                ["responseFormatMode"] = decision.ResponseFormatMode,
-                ["promptTokens"] = decision.PromptTokens,
-                ["completionTokens"] = decision.CompletionTokens
-            });
+            ledger.RecordDecision(decision);
 
             selectedObjective = ReadString(decision.Decision["arguments"] as JsonObject, "ObjectiveId");
             selectedGoal = selectedObjective is null ? null : snapshot[selectedObjective] as JsonObject;
             validSelection = ReadString(decision.Decision, "action") == "selectEstablishYourClanObjective" &&
                 selectedGoal is not null && ReadBoolean(selectedGoal, "met") == false &&
                 actionCatalog[0]!["argumentValues"]!["ObjectiveId"]!.AsArray().Any(value => value?.GetValue<string>() == selectedObjective);
-            trace.Add(new JsonObject
+            ledger.Trace.Add(new JsonObject
             {
-                ["iteration"] = priorDecisions + plannerDecisionCount,
+                ["iteration"] = ledger.Decisions,
                 ["decision"] = decision.Decision.DeepClone(),
                 ["planningOnly"] = true,
                 ["nativeActionExecuted"] = false,
@@ -385,12 +361,12 @@ internal static class AgentHostEstablishYourClanGoalLoop
                 ["resultKind"] = "objective-selection-invalid",
                 ["providerModelId"] = provider.ModelId,
                 ["providerConfigurationSource"] = provider.ConfigurationSource,
-                ["decisions"] = priorDecisions + plannerDecisionCount,
+                ["decisions"] = ledger.Decisions,
                 ["actionsExecuted"] = 1,
-                ["promptTokens"] = priorPromptTokens + plannerPromptTokens,
-                ["completionTokens"] = priorCompletionTokens + plannerCompletionTokens,
-                ["providerRouteHistory"] = routeHistory,
-                ["trace"] = trace,
+                ["promptTokens"] = ledger.PromptTokens,
+                ["completionTokens"] = ledger.CompletionTokens,
+                ["providerRouteHistory"] = ledger.Routes,
+                ["trace"] = ledger.Trace,
                 ["questDetails"] = receipt.DeepClone(),
                 ["objectiveSnapshot"] = snapshot.DeepClone(),
                 ["journalObjectiveSnapshot"] = journalObjectives.DeepClone(),
@@ -410,12 +386,12 @@ internal static class AgentHostEstablishYourClanGoalLoop
             ["resultKind"] = "objective-plan",
             ["providerModelId"] = provider.ModelId,
             ["providerConfigurationSource"] = provider.ConfigurationSource,
-            ["decisions"] = priorDecisions + plannerDecisionCount,
+            ["decisions"] = ledger.Decisions,
             ["actionsExecuted"] = 1,
-            ["promptTokens"] = priorPromptTokens + plannerPromptTokens,
-            ["completionTokens"] = priorCompletionTokens + plannerCompletionTokens,
-            ["providerRouteHistory"] = routeHistory,
-            ["trace"] = trace,
+            ["promptTokens"] = ledger.PromptTokens,
+            ["completionTokens"] = ledger.CompletionTokens,
+            ["providerRouteHistory"] = ledger.Routes,
+            ["trace"] = ledger.Trace,
             ["questDetails"] = receipt.DeepClone(),
             ["objectiveSnapshot"] = snapshot.DeepClone(),
             ["journalObjectiveSnapshot"] = journalObjectives.DeepClone(),
