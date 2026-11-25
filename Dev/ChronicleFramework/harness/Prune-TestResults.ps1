@@ -42,6 +42,50 @@ function Test-IndexedCapture {
     }
 }
 
+function Test-Mp4WithoutDecodableStream {
+    param([Parameter(Mandatory)][string]$Path)
+
+    # Walks the top-level MP4 box chain. A file whose chain cannot be parsed, or
+    # that never declares the movie box carrying the stream table, has no
+    # decodable stream on any host, whether or not a media tool happens to be
+    # installed where this check runs.
+    $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+    $length = [long]$item.Length
+    if ($length -eq 0) { return $true }
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    try {
+        $header = [byte[]]::new(8)
+        $offset = [long]0
+        $hasMovieBox = $false
+        while ($offset -lt $length) {
+            if ($length - $offset -lt 8) { return $true }
+            $stream.Position = $offset
+            if ($stream.Read($header, 0, 8) -ne 8) { return $true }
+            $size = (([long]$header[0] -shl 24) -bor ([long]$header[1] -shl 16) -bor ([long]$header[2] -shl 8) -bor [long]$header[3])
+            $type = [Text.Encoding]::ASCII.GetString($header, 4, 4)
+            if ($type -notmatch '^[A-Za-z][A-Za-z0-9 ]{3}$') { return $true }
+            if ($size -eq 0) {
+                # Only a trailing media box may run to end of file.
+                return -not ($type -eq 'mdat' -and $hasMovieBox)
+            }
+            if ($size -eq 1) {
+                $largeSize = [byte[]]::new(8)
+                $stream.Position = $offset + 8
+                if ($stream.Read($largeSize, 0, 8) -ne 8) { return $true }
+                [Array]::Reverse($largeSize)
+                $size = [long][BitConverter]::ToUInt64($largeSize, 0)
+            }
+            if ($size -lt 8 -or $offset + $size -gt $length) { return $true }
+            if ($type -eq 'moov') { $hasMovieBox = $true }
+            if ($type -eq 'mdat' -and $hasMovieBox) { return $false }
+            $offset += $size
+        }
+        return -not $hasMovieBox
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
 function Invoke-TestResultsRetention {
     param(
         [Parameter(Mandatory)][string]$Root,
@@ -146,7 +190,8 @@ function Invoke-TestResultsRetention {
                         if (Test-Path -LiteralPath $probeErrorPath -PathType Leaf) { Remove-Item -LiteralPath $probeErrorPath -Force -ErrorAction SilentlyContinue }
                     }
                 }
-                $knownUndecodable = -not $hasVideoStream -and ($video.Length -eq 0 -or ($probeExitCode -ne 0 -and $probeError -match 'moov atom not found|Invalid data found when processing input'))
+                $probeSaysBroken = $probeExitCode -ne 0 -and $probeError -match 'moov atom not found|Invalid data found when processing input'
+                $knownUndecodable = -not $hasVideoStream -and ($video.Length -eq 0 -or $probeSaysBroken -or (Test-Mp4WithoutDecodableStream -Path $video.FullName))
                 if ($knownUndecodable) {
                     if ($Execute -and $protectedIds.Contains($directory.Name)) {
                         $receiptPath = Join-Path $directoryFull (([IO.Path]::GetFileNameWithoutExtension($video.Name)) + '-capture-cleanup.json')
@@ -156,6 +201,7 @@ function Invoke-TestResultsRetention {
                             sourceSha256 = if ($video.Length -gt 0) { (Get-FileHash -LiteralPath $video.FullName -Algorithm SHA256).Hash } else { $null }
                             ffprobeExitCode = $probeExitCode
                             ffprobeError = $probeError.Trim()
+                            structuralVerdict = 'no-movie-box'
                             reason = 'Source MP4 has no decodable video stream; retain per-run screenshots, events and Harness receipts instead.'
                             sourceRemoved = $false
                         }
