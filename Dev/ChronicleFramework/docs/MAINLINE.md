@@ -704,6 +704,13 @@ AgentHostRuntime 的切片动作集必须与 `AgentHostCampaignLoop.SupportedAct
 同一个开局夹具上的真实供给比单位上限更硬：`TestResults/20261126-live-host-opening2`（`llama3.2:3b` + `json_schema`、零外部凭据、24 决策、52 动作）只卖得出 1 份 `grain`（`town_ES3`，金币 1000→1022，子流程 `one-native-sale-and-journal-gold-increase-verified`）；第二次选金币目标时同一城镇的 `tradeOptions` 已无任何可卖盘，目录只剩 `tradeCancel`，模型于是离开城镇转训练委托线，19 个动作后以 `training-issue-budget-exhausted` 结束，整场 `goalVerified=false`。金币路线的吞吐由背包里的货量决定，不由单次交易的单位上限决定。
 主机侧曾把「卖多少」这件事自己卡死在一件：`agenthost/AgentHostEstablishClanGoldSaleLoop.cs` 已经把整堆库存发布成可选 `Amount`（`sellAmounts`），但同一个切片的邮箱校验 `NativeMailboxClient.ValidateGoldSaleAction` 仍要求 `amount == 1`，于是模型选了 2 件就会在发命令前被 `native-action-not-in-gold-sale-scope` 拒掉——「发布的选项」与「能发送的命令」不一致。现在校验只要求 `amount >= 1`，真正的上限由 mod 侧 `AgentTradeAdapter.DraftTradeItem`（`amount > item.ItemCount` 与金币不足都拒绝）把关；自测同时保留 1 件与 3 件两条合法用例、0 件与买入两条非法用例。
 同一条链上买的方向始终没有暴露：`gold-sale` 切片的 `trade` 只接受 `direction == "sell"` 且 `inventorySide == "PlayerInventory"`，而原版侧 `DraftTradeItem` 本身支持 `buy`（`item.ExecuteBuy(amount)`、金币不足即回滚并丢弃草稿）。因此「买低卖高」的算术在原版成立、在决策面缺失，落点是产品事项 #143。
+战后战利品进的是**玩家背包**：`mod/Actions/ChronicleAgentProtocol.Actions.Party.cs:164` 的 `inventoryTakeAll` 调 `inventoryHandler.ExecuteLootingScript()`，把 Loot 侧物品整体移到 `PlayerInventory`，这之后它们就是普通货物，可以在任何市场按报价卖出。真机收据 `TestResults/20261126-battle-loot-sale-4/BattleLootSaleProbeResult.json`（零模型，`BattleLootSale` 阶段）：9 件战利品全部入包（玩家可见物品 30→36），走到最近城镇 `town_ES3` 卖 3 件 `salt` 单价 30，金币 2277→2367，商人金 54361→54271，背包 76→73，战役日与时钟档位不动。
+
+交易报价的单价字段是 `inventoryLogicUnitPrice`（`mod/AgentTradeAdapter.cs:545` `logic.GetItemPrice(element, isBuying)`），城镇卖盘上它等于实际结算单价（3×30 = −90 的原版回执）。主机 `AgentHostEstablishClanGoldSaleLoop.GetSellableGoods`（`agenthost/AgentHostEstablishClanGoldSaleLoop.cs:1562-1568`）用「单价 > 0」筛候选因此成立；曾因探针读 `unitPrice` 读到 0 而怀疑此处漏货，实为读数口径错。同一格 `sellOffers` 可以出现多行同货不同价（堆叠与修正分开），成交按被选中那一行的报价结算。
+
+夹具存档 `ChronicleW7P-manual-20261101-eyc-complete` 周边没有敌意队伍（`mapPartyTargets` 只有 3 支商队，`nearbyParties` 无 hostile，gold 2277 / members 25 / day 91179.21），因此自然战斗要么靠地图上另找劫匪，要么用 harness fixture 模式生成 `chronicle_harness_looters`。`BattleLootSale` 用后者，并在收据 `lootOrigin` 里写明 `seeded-fixture-after-native-autoresolve(count=N,naturalDrop=False)`，不把播种来的战利品说成自然掉落。
+
+战役循环与金币切片是两个 slice：一场仗的战利品要变成金币，模型必须先结束战斗子流程回到规划器、再选金币目标，才能把背包里的货卖掉。`opening2`/`opening4` 里这条串法一次都没发生——那两局一场仗都没打，只卖了开局背包里的那一份粮。
 ### Campaign存档内的Agent目标Checkpoint
 
 本机1.4.8的`CampaignBehaviorBase.SyncData(IDataStore)`会随Native Campaign存档序列化行为字段；

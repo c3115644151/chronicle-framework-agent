@@ -249,6 +249,11 @@ EYC 这条产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanG
 这一侧的证据还顺带钉住一个读数细节：同一件 `flax` 在 B 城的 `sellOffers` 里会出现多行、单价不同（本轮亲眼看到 `unitPrice` 7 与 15 并存，按堆叠与修正分开），而原版成交按被选中那一行报价——探针因此用「成交前后的金币差 = 该行报价」来判定，而不是拿库存行里的第一个价格当答案。
 
 **整堆能力上线之后，约束换到了货这一侧。** `TestResults/20261126-live-host-opening2`（本机 `llama3.2:3b` + `json_schema`，零外部凭据，24 决策）在同一个开局存档上：模型进了 `town_ES3` → `tradeOptions` → 选 `grain` 卖 **1 份**（主机当时已把该报价行的库存值一并列出）→ 金币 1000→1022，子流程以 `one-native-sale-and-journal-gold-increase-verified` 收尾；紧接着再选一次金币目标，同一城镇的 `tradeOptions` 已经没有任何可卖出的货，目录只剩 `tradeCancel`，于是它离开城镇、转去训练委托线，19 个动作后以 `training-issue-budget-exhausted` 结束。也就是说这一局的金币瓶颈不是单位上限，而是**背包里只有一份粮**：整堆能卖的那天，货架上没货。
+**战利品换成金币这条链，现在有零模型的端到端收据了。** 此前它是两半各证一次：`PostBattle` 阶段证「战后把 Loot 全部取进背包」，`MarketProbe`/`VillageMarketProbe` 证「在市场上按报价结算」。`harness/Test-AgentBattleLootSaleProbe.ps1`（零模型请求，现注册为 `BattleLootSale` 阶段）把两半接起来：夹具战斗 → `partyTakeAll` 与一次 `partyScreenDone` → Loot 背包界面 `inventoryTakeAll`（9 件战利品全部入包，玩家可见物品 30→36）→ 走到最近的非敌意城镇 `town_ES3`「波罗斯」（9.408 距离）→ `trade` 卖 3 件 `salt`（单价 30）→ `tradeConfirm`。原版回执 `amount=3`、`nativeTransactionAmount=-90`、金币 2277→2367、商人金 54361→54271、背包物品 76→73、`campaignDay` 91179.353 前后不动、时钟 `Stop→Stop`；十七断言全真（`TestResults/20261126-battle-loot-sale-4/BattleLootSaleProbeResult.json`）。
+
+这条链顺带钉住两个读数细节，都写在 `docs/Research/E/EconomyAndTrade.md`：战后取物走的是 `inventoryHandler.ExecuteLootingScript()`（`mod/Actions/ChronicleAgentProtocol.Actions.Party.cs:164`），所以战利品进的是**玩家背包**而不是队伍的 Loot 侧，之后就能当普通货物卖；报价字段是 `inventoryLogicUnitPrice`，它在城镇卖盘上也等于实际结算单价（3 件盐 ×30 = 90），所以主机 `GetSellableGoods` 用「单价 > 0」筛候选是成立的。我自己在第一版探针里把字段写成 `unitPrice` 读成 0、差点据此判断主机漏掉可卖货——记录在这里，因为读数口径错一次就会把工具缺陷写进产品结论。
+
+场景层面的结论：「以战养战」这一族的链路是通的，缺的不是动词，是**一次运行里把它串起来**。战役循环与金币切片是两个 slice：打完一场仗拿到 6 件货之后，模型必须先结束战斗子流程回到规划器，再选金币目标，才能把背包里的东西换成一笔钱。这条串法在 `opening2`/`opening4` 都没发生过——那两局一场仗都没打，只卖了开局背包里那一份粮。
 
 ### 9.3 决策面：模型做决定的那一刻手里有哪些动词
 

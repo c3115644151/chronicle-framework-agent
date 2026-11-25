@@ -1175,3 +1175,15 @@ $env:CHRONICLE_LLM_MAX_TOKENS='1000'
 验证：`dotnet build` 0 warning 0 error；`--provider-self-test` 430/430 passed，与基线逐索引比较只有这一条场景不同（validCases 13→14），其余 identical。`harness/gate/05-observation-and-provider.ps1` 同时断言发布侧 `var sellAmounts = new JsonArray(1)` 与邮箱侧 `amount >= 1`。
 
 仍在的缺口：这条链只允许卖出，买的方向在决策面完全缺失 —— `AgentTradeAdapter.DraftTradeItem(direction: buy)` 在原版侧可用（`item.ExecuteBuy(amount)`），落点是产品事项 #143。
+
+## 2026-11-26 战利品→金币的端到端零模型收据（BattleLootSale，契约 7.713）
+
+新阶段 `BattleLootSale` 把「战斗」与「市场」两半接起来，全程零模型请求：`./harness/Run-Harness.ps1 -Phase BattleLootSale`。
+
+夹具：`ChronicleW7P-manual-20261101-eyc-complete`（SHA256 前后一致）。harness fixture 模式生成 `chronicle_harness_looters`，`visual-battle-fixture` 下战后用 `seedVisualLoot` 播 10 件确定性战利品（收据 `lootOrigin` 写明 `seeded-fixture-after-native-autoresolve`，不当自然掉落）。
+
+跑法要点：`pursue` → 对话推进到 `menuId=encounter` → `menuSelect encounter/str_order_attack` → `battleSkip` → `seedVisualLoot` → `battleFinish` → `partyTakeAll members|prisoners` → `partyScreenDone`（YesNoInquiry 用 `respondInquiry affirmative`）→ `inventoryTakeAll` → `inventoryDone` → `mapSettlementTargets` → `move town_ES3` → `menuSelect town/trade` → `tradeOptions` → `trade -Direction sell -InventorySide PlayerInventory` → `tradeConfirm` → `inventoryDone` 回地图 → `stop`。
+
+收据 `TestResults/20261126-battle-loot-sale-4/BattleLootSaleProbeResult.json`（17 条断言全真）：战利品 9 件全部入包（玩家可见物品 30→36），城镇 `town_ES3`「波罗斯」卖出 3 件 `salt` 单价 30，原版回执 `amount=3`、`nativeTransactionAmount=-90`，金币 2277→2367，商人金 54361→54271，背包 76→73，`campaignDay` 91179.353 前后不动，时钟 `Stop→Stop`。
+
+三次失败都出在探针自己身上，记下来省下一代：`$_.unitPrice` 写成 `unitPrice`（真实字段是 `inventoryLogicUnitPrice`）导致「市场不收战利品」的假结论；`[ordered]@{}` 里把逗号写在 `@()` 后面会报「',' 后缺少表达式」；`battleSimulation.playerWon` 在该夹具上不暴露（回执记 null，不参与断言）。

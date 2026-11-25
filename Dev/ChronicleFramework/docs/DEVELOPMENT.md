@@ -1,7 +1,16 @@
 ﻿# Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.712
+Contract version: 7.713
 
+## Contract 7.713 — the battle and the market are one chain, and a probe now proves it
+
+The battle fixture proved that Native postbattle looting fills the player inventory, and the market probes proved that a quote settles into Gold. Neither proved the chain, and no live-model run has ever crossed it: the campaign loop and the Gold slice are separate subflows, so the model must finish a fight, return to the planner, and pick the Gold objective before looted goods can become money.
+
+`harness/Test-AgentBattleLootSaleProbe.ps1` (stage `BattleLootSale`) joins the two halves with no model in the loop. On the `ChronicleW7P-manual-20261101-eyc-complete` fixture in `visual-battle-fixture` mode it pursues the harness looter party, sends troops, skips the simulation, seeds deterministic loot (the receipt names `lootOrigin` as seeded, never natural), finishes the battle, takes the whole Loot roster through `partyTakeAll` and one `partyScreenDone`, then `inventoryTakeAll` / `inventoryDone`, travels to `town_ES3`, opens Trade, sells 3 `salt` at 30 and confirms. Evidence `TestResults/20261126-battle-loot-sale-4/BattleLootSaleProbeResult.json`: 17 assertions true, loot 9 to 0 in the Loot screen with player items 30 to 36, gold 2277 to 2367, merchant gold 54361 to 54271, party items 76 to 73, campaign day and time-control mode unchanged across the sale.
+
+The receipt also pins two reading details that cost this round real time. Loot enters the player inventory through `inventoryHandler.ExecuteLootingScript()` (`mod/Actions/ChronicleAgentProtocol.Actions.Party.cs:164`), so it is ordinary cargo afterwards. The quote's price field is `inventoryLogicUnitPrice` (`mod/AgentTradeAdapter.cs:545`) and it equals the settled unit price on a town sell offer; a probe that reads `unitPrice` sees zero and reports 'the merchant buys none of this' about goods the game buys happily. `agenthost/AgentHostEstablishClanGoldSaleLoop.GetSellableGoods` filtering on a positive unit price is therefore sound, and the Host was not hiding sellable loot.
+
+`harness/gate/11-workspace-init.ps1` asserts the phase wiring and the probe's own verbs, so the chain cannot quietly regress to a script that only fights or only trades.
 ## Contract 7.712 — the Gold slice sends the quantities it publishes
 
 

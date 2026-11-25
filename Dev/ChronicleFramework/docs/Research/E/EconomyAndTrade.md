@@ -272,6 +272,23 @@ EYC 产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanGoldSal
 
 一次原生交易能结算整堆，不是一件。`TestResults/20261126-village-market-3/VillageMarketProbeResult.json`（零模型请求，`harness/Test-AgentVillageMarketProbe.ps1 -SellUnits 10`）在村庄对单价 8、库存 4 的 `fish` 下 10 件：原版 `tradeConfirm` 回执 `amount=4`、`playerGoldBefore/After` 2199/2231（+32 = 4×8）、库存 3→2 之外其余物品不变，`campaignDayBefore/After` 相同、时钟档位 Stop→Stop。所以 InventoryLogic 的成交数量就是请求数量与报价行库存的较小值，单件上限只存在于旧的调用约定里。主机侧据此把可卖数量从硬编码 1 改成「1 与该报价行库存」：`AgentHostEstablishClanGoldSaleLoop.BuildActionCatalog` 的 `sellAmounts`、`TryResolveAction` 用 `amount > offerStock` 拒单（不静默截断），自测覆盖整堆接受与超量拒绝。
 
+### 战利品换金币：一条现在有端到端收据的链
+
+`harness/Test-AgentBattleLootSaleProbe.ps1`（阶段 `BattleLootSale`，零模型请求）把「战后取物」与「市场结算」接在同一次运行里（`TestResults/20261126-battle-loot-sale-4/BattleLootSaleProbeResult.json`，17 条断言全真）：
+
+| 步骤 | 原版事实 | 数字 |
+| --- | --- | --- |
+| 战后取物 | `partyTakeAll`（`members`/`prisoners`）+ `partyScreenDone`；Loot 名册全取完才允许 Done | 9 件 Loot 物品 → Loot 侧 0、玩家背包可见物品 30 → 36 |
+| 进背包 | `inventoryTakeAll` 走 `inventoryHandler.ExecuteLootingScript()`（`mod/Actions/ChronicleAgentProtocol.Actions.Party.cs:164`） | 战利品成为普通货物，可按任何市场报价出售 |
+| 卖出 | `trade -Direction sell -InventorySide PlayerInventory` + `tradeConfirm` | 3 件 `salt` @30，`nativeTransactionAmount=-90`，金币 2277 → 2367，商人金 54361 → 54271，背包 76 → 73 |
+| 时间 | 交易全在市场界面内完成 | `campaignDay` 91179.353 前后不动，时钟 `Stop → Stop` |
+
+两个读数细节值得记住，它们各自都能造成错误结论：
+
+- **单价字段是 `inventoryLogicUnitPrice`**（`mod/AgentTradeAdapter.cs:545`），不是 `unitPrice`；它在城镇卖盘上等于实际结算单价。读到 0 时先怀疑字段名，再怀疑主机筛货逻辑——本轮的假警报就是这么来的。
+- **同一件货在 `sellOffers` 里可以有多行**，按堆叠与修正分开，价格不同；成交按被选中那一行的报价结算，所以判据要用「成交前后金币差 = 该行报价 × 件数」。
+
+夹具 `ChronicleW7P-manual-20261101-eyc-complete` 周边没有敌意队伍（只有 3 支商队），因此这条链的自然入口要靠地图上另找劫匪；`BattleLootSale` 用 harness fixture 模式生成的 `chronicle_harness_looters` 与 `seedVisualLoot` 播种，收据里 `lootOrigin` 明确写成 `seeded-fixture-after-native-autoresolve(count=N,naturalDrop=False)`，不冒充自然掉落。自然掉落的战利品量与兵种对应关系仍未量。
 ### 货物、负重、动物与战后物资
 
 Party `ItemRoster` 同时承载食品、贸易物、动物与战利品；缓存的 `TotalFoodAtInventory`、`TotalWeightCarried`、`InventoryCapacity`、动物数量会分别影响食物、载重、速度或交易判断。战后 ItemRoster 可能先进入 Encounter 的待领取 Loot Roster，再经原生 InventoryState 领取到 Party；那不是“战斗奖励已到账”的同义词，处理链见 G/H 域及 MAINLINE 的 partyLoot 契约。队伍内囚犯、受伤/健康成员、战利品/库存的转移则由对应 PartyScreen、InventoryLogic 和结算动作分别提交。
