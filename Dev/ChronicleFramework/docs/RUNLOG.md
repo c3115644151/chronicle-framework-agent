@@ -1099,3 +1099,15 @@ Contract 7.673为直接OpenRouter `:free`模型增加每请求至少3.1秒的间
 本轮同时落地 `harness/Get-ScenarioVerdict.ps1`：`-RunPath` 读 `Temp/AgentHostProgress.jsonl` 与 `Temp/LiveModelLoopResult.json`，写 `Temp/ScenarioVerdict.json`，五项检查全 pass 时退出码 0。两条判定口径由这两次 run 校出来——决策形状要归一化（`control` / `{stop:true}` / `{observeAgain:true}` / `{goalClassification}`），战役时间要按序列分别判（决策序列非递减 + 每个子流程窗口 `before ≤ after`）。修正前后对同一份 autonomy5 与 opening1 回执的读数：autonomy5 `stops` 0 → 3、opening1 时间倒退 3 → 0。
 
 脚本化可复跑：`harness/Get-ScenarioVerdict.ps1 -RunPath Dev\ChronicleFramework\TestResults\20261126-live-host-opening1`，输出 `decisions=34 actions=30/70 waits=3 stops=0(refused 0) days=0.633 gold=1000->1022 members=1->1 termination=objective-subflow-failed verdict=passed`。
+
+## 2026-11-26 村庄市场两次零模型探针（VillageMarketProbe）
+
+`harness/Test-AgentVillageMarketProbe.ps1` 新写并注册为 `VillageMarketProbe` 阶段，用来回答一个被 runs 顶出来的问题：开机走廊真机收据（`TestResults/20261126-live-host-opening1`）在村庄菜单里看到 `trade` 为 `available && enabled`，而主机金币路线在向模型发请求前就终止。夹具 `ChronicleW7P-manual-20261101-eyc-complete`，零模型请求，游戏由脚本启停，存档 SHA256 前后一致（`CB0F62D0…446402B1`）。
+
+第一次运行（`TestResults/20261126-village-market-1/VillageMarketProbeResult.json`，六条断言全真）只做买入腿：最近的非敌对非围城村庄是 `castle_village_EW3_1`（名「俄尼卡」、距离 19.348；候选里 village 273 个），`menuId=village` 共 12 个选项，`trade` 的文案是「购买给养」；`menuSelect village/trade` 打开 `InventoryState` 与 `inventoryScreen.mode=Trade`，`settlementType=village`、商人金 1000、玩家金 2199。买盘只有 4 行且全是食物（grain 7/13、grape 15/37、butter 35/1、cheese 46/1），卖盘 30 行（玩家可卖，价 5–36）。
+
+第二次运行（`TestResults/20261126-village-market-2/VillageMarketProbeResult.json`，八条断言全真、退出码 0）把买入腿换成卖出腿：卖 1 件 `meat`，报价 `inventoryLogicUnitPrice=20`，`trade` 草稿 → `tradeConfirm` 的原版回执 `nativeTransactionAmount=-20`、`committed=true`、`postconditionPassed=true`，玩家金 2199→2219、商人金 1000→980、玩家库存 3→2，`campaignDayBefore/After` 同为 91179.522156，时间控制模式 Stop→Stop。
+
+同一天把主机侧的市场路由从 `town` 扩到「任何打开 Trade 的聚落」：`AgentHostEstablishClanGoldSaleLoop` 新增 `IsMarketMenu(menuId)`/`IsMarketTargetType(type)`，`FilterSafeTowns` 改名 `FilterSafeMarkets`，村庄菜单目录发 `menuSelect village/trade`，空市场后退回该聚落自己的 `leave`；自测新增村庄菜单、外来 `menuId` 拒绝与空市场 `leave` 三条。可以引用的结论：**村庄是给养市场加战利品出口，商人金只有 1000（城镇 53,636/69,253），所以它是出口而不是第二个套利点。**
+
+可复跑：`./harness/Run-Harness.ps1 -Phase VillageMarketProbe`（含 `Preflight` 与 `Build`），或直接 `./harness/Test-AgentVillageMarketProbe.ps1 -LoadSaveName ChronicleW7P-manual-20261101-eyc-complete -TimeoutSeconds 300`。

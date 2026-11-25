@@ -262,9 +262,13 @@ EYC 产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanGoldSal
 
 探针本身也留下两条工具事实。`tradeOptions` 的 `buyOffers` 是 OtherInventory 侧（A 城 257 行），`sellOffers` 是 PlayerInventory 侧（A 城 30 行），同一 `itemId` 的装备条目会有元素级 `viewModelItemId` 多行；单价字段是 `nativeItemCost`，买入与卖出的价格不是同一个数。另外结算回执里 `nativeTransactionAmount` 的符号随方向变（卖为负、买为正），拿它和 `playerGold` 的差值对账必须分开读。
 
-村庄也是一个市场，但主机侧的金币路线不认它。开机走廊真机收据`TestResults/20261126-live-host-opening1`的最后一段：队伍站在`castle_village_EW3_2`、`menuId="village"`，原版`availableMenuOptions`里`trade`为`available=true, enabled=true`；`agenthost/AgentHostEstablishClanGoldSaleLoop.cs`的`FilterSafeTowns`（第1518行附近）只保留`type == town`的候选，`BuildActionCatalog`在村庄菜单下既不产出动作也不产出控件，循环在向模型发请求之前就抛`gold-sale-no-safe-native-action`，整场运行因此终止。适配层没有这个限制：`mod/AgentTradeAdapter.cs`第512-515行把`isTownMerchantTrade = settlement?.IsTown == true && settlement.SettlementComponent != null`与`Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId == "village"`分成两条路径，村庄菜单的交易走的是后者。
+村庄也是一个市场，而且它能按报价结算卖出。两次零模型真机收据（夹具 `ChronicleW7P-manual-20261101-eyc-complete`，游戏自动启停，存档 SHA256 前后一致）把这个格子量了出来：`TestResults/20261126-village-market-1/VillageMarketProbeResult.json` 证明 `menuSelect village/trade` 真的打开市场（`InventoryState` + `inventoryScreen.mode=Trade`，`settlementType=village`，商人金 1000、玩家金 2199）；`TestResults/20261126-village-market-2/VillageMarketProbeResult.json` 则卖出一件 `meat`：报价 `inventoryLogicUnitPrice=20`，`tradeConfirm` 原生回执 `nativeTransactionAmount=-20`、`committed=true`、玩家金 2199→2219、商人金 1000→980、玩家库存 3→2，`campaignDay` 与时间控制模式均未变。
 
-因此「村庄可交易」在Native侧是既有能力、在主机侧是缺失的路由；这一格的取值（村庄的货量、与城镇的价差、村庄商人的金币上限）目前没有实测，不能假设比城镇更划算，也不能假设更差。产品缺口记在 issue #144，验证顺序是先做零模型的村庄买卖真机收据，再改主机路由。
+村庄的购买侧与城镇不是同一种商品结构：两个村庄的买盘只有 4 行且全是食物（`grain` 7/13、`grape` 15/37、`butter` 35/1、`cheese` 46/1），卖出侧 30 行（玩家可卖的货，价 5–36，来源 `PlayerInventory`）。所以村庄是「给养市场 + 战利品出口」，不是第二个可以买低卖高的城镇；商人金 1000 对比城镇的 53,636/69,253，也说明它是小额出口。
+
+主机侧原先的金币路线只认城镇：`FilterSafeTowns` 只保留 `type == town` 的候选，`BuildActionCatalog` 在村庄菜单下既不产出动作也不产出控件，开机走廊真机收据 `TestResults/20261126-live-host-opening1` 因此在向模型发请求之前就抛 `gold-sale-no-safe-native-action`，整场运行终止。适配层没有这个限制：`mod/AgentTradeAdapter.cs` 把 `isTownMerchantTrade = settlement?.IsTown == true && settlement.SettlementComponent != null` 与 `Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId == "village"` 分成两条路径，村庄菜单走后者。
+
+现在主机把「市场」定义为任何打开 Trade 的聚落：`AgentHostEstablishClanGoldSaleLoop.IsMarketMenu(menuId)`（`town` 或 `village`）与 `IsMarketTargetType(type)`，候选筛选改名 `FilterSafeMarkets`，菜单目录按当前 `menuId` 发出 `trade` 或该聚落自己的 `leave`，自测覆盖村庄菜单、外来 `menuId` 拒绝与空市场后的村庄 `leave`。仍未量的是同等货物上村庄与城镇的价格差、以及村庄商人的补货节奏；在拿到收据之前，场景只应把村庄当成快速清仓的出口。
 
 ### 货物、负重、动物与战后物资
 
