@@ -15,12 +15,8 @@ internal static class AgentHostBattleSimulationLoop
         JsonElement request,
         IAgentHostBattleSimulationNativeClient client,
         IAgentHostDecisionProvider provider,
+        DecisionRunLedger ledger,
         CancellationToken cancellationToken,
-        int priorDecisions = 0,
-        long priorPromptTokens = 0,
-        long priorCompletionTokens = 0,
-        JsonArray? priorTrace = null,
-        JsonArray? priorProviderRouteHistory = null,
         bool recoverPlayerCaptivity = false,
         int passiveCaptivityPollSeconds = 15,
         IAgentHostNativeInquiryClient? inquiryClient = null)
@@ -29,6 +25,7 @@ internal static class AgentHostBattleSimulationLoop
         var goal = ReadString(request, "goal") ?? string.Empty;
         var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", AgentHostCampaignLoop.MaxCumulativeDecisions), 1, AgentHostCampaignLoop.MaxCumulativeDecisions);
         var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 86400), 1, 86400);
+        var priorDecisions = ledger.Decisions;
         var parentEycObjectives = request.TryGetProperty("parentEycObjectives", out var parentEycObjectivesElement) && parentEycObjectivesElement.ValueKind == JsonValueKind.Object
             ? JsonNode.Parse(parentEycObjectivesElement.GetRawText()) as JsonObject
             : null;
@@ -43,7 +40,6 @@ internal static class AgentHostBattleSimulationLoop
 
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
-        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var actionsExecuted = 0;
         var rejected = 0;
         var startDay = double.NaN;
@@ -342,7 +338,8 @@ internal static class AgentHostBattleSimulationLoop
                             inquiryGoal += " A Native partyScreenDone just opened this prompt. If you choose negative, the same PartyScreen draft returns. Do not create a negative/Done cycle: after declining, transfer a currently listed roster row that advances an unmet Journal objective before trying Done again. If no useful transfer is available, decide from the current objective whether to accept leaving the remaining troops or stop safely.";
                     }
                     var inquiry = await AgentHostNativeInquiryResolution.RunAsync(
-                        client, activeInquiryClient, provider, elapsed.Token,
+                        client, activeInquiryClient, provider,
+            elapsed.Token,
                         runId + "-battle-inquiry-" + ledger.NextDecisionNumber.ToString(CultureInfo.InvariantCulture), inquiryGoal);
                     ledger.RecordDelegated(inquiry);
                     actionsExecuted += ReadInt(inquiry, "actionsExecuted", 0);
@@ -2099,8 +2096,10 @@ internal static class AgentHostBattleSimulationLoop
         var provider = new FakeBattleSimulationDecisionProvider();
         var priorTrace = new JsonArray(new JsonObject { ["stage"] = "goal-classifier", ["decision"] = new JsonObject { ["goalClassification"] = "supported-battle-simulation" } });
         var priorRoutes = new JsonArray(new JsonObject { ["decision"] = 1, ["requestedModelId"] = provider.ModelId, ["routedVia"] = "fake-test" });
-        var result = await RunAsync(request.RootElement, client, provider, CancellationToken.None, priorDecisions: 1,
-            priorPromptTokens: 11, priorCompletionTokens: 3, priorTrace: priorTrace, priorProviderRouteHistory: priorRoutes);
+        var result = await RunAsync(request.RootElement, client, provider,
+            new DecisionRunLedger(provider, "selftest-battle", priorDecisions: 1, priorPromptTokens: 11, priorCompletionTokens: 3,
+                priorTrace: priorTrace, priorProviderRouteHistory: priorRoutes),
+            CancellationToken.None);
         if (ReadString(result, "status") != "completed" || ReadString(result, "termination") != "battle-resolved-and-verified" ||
             ReadInt(result, "decisions", 0) != 12 || ReadInt(result, "actionsExecuted", 0) != 12 || provider.CallCount != 11 ||
             ReadString(result, "targetPartyId") != "bandit-1" || ReadDouble(result, "renownBefore", double.NaN) != 10 ||
@@ -2119,7 +2118,7 @@ internal static class AgentHostBattleSimulationLoop
 
         var delegatedMissionClient = new FakeDelegatedAttackBattleNativeClient();
         var delegatedMissionProvider = new FakeDelegatedAttackDecisionProvider();
-        var delegatedMissionResult = await RunAsync(request.RootElement, delegatedMissionClient, delegatedMissionProvider, CancellationToken.None);
+        var delegatedMissionResult = await RunAsync(request.RootElement, delegatedMissionClient, delegatedMissionProvider, new DecisionRunLedger(delegatedMissionProvider, null), CancellationToken.None);
         var delegatedMissionTrace = delegatedMissionResult["trace"] as JsonArray;
         var delegatedMissionTraceStep = delegatedMissionTrace?.OfType<JsonObject>().SingleOrDefault(step => ReadString(step, "stage") == "native-battle-mission-delegation");
         if (ReadString(delegatedMissionResult, "status") != "completed" || ReadString(delegatedMissionResult, "termination") != "battle-resolved-and-verified" ||
@@ -2138,7 +2137,7 @@ internal static class AgentHostBattleSimulationLoop
 
         var soloMissionClient = new FakeDelegatedAttackBattleNativeClient(soloMainHero: true);
         var soloMissionProvider = new FakeDelegatedAttackDecisionProvider();
-        var soloMissionResult = await RunAsync(request.RootElement, soloMissionClient, soloMissionProvider, CancellationToken.None);
+        var soloMissionResult = await RunAsync(request.RootElement, soloMissionClient, soloMissionProvider, new DecisionRunLedger(soloMissionProvider, null), CancellationToken.None);
         var soloMissionTraceStep = (soloMissionResult["trace"] as JsonArray)?.OfType<JsonObject>()
             .FirstOrDefault(step => ReadString(step, "stage") == "native-battle-mission-delegation");
         if (ReadString(soloMissionResult, "status") != "completed" ||
@@ -2154,7 +2153,7 @@ internal static class AgentHostBattleSimulationLoop
 
         var escapeClient = new FakeBattleSimulationNativeClient(simulateNativeEscape: true);
         var escapeProvider = new FakeTryToGetAwayDecisionProvider();
-        var escapeResult = await RunAsync(request.RootElement, escapeClient, escapeProvider, CancellationToken.None);
+        var escapeResult = await RunAsync(request.RootElement, escapeClient, escapeProvider, new DecisionRunLedger(escapeProvider, null), CancellationToken.None);
         var escapeDeferredTraceStep = (escapeResult["trace"] as JsonArray)?.OfType<JsonObject>()
             .FirstOrDefault(step => ReadString(step, "stage") == "native-bandit-target-deferred-after-no-battle");
         if (ReadString(escapeResult, "status") != "completed" ||
@@ -2170,7 +2169,7 @@ internal static class AgentHostBattleSimulationLoop
             throw new AgentHostException("battle-loop-native-escape-not-integrated", $"The model must be able to inspect the original risk warning, choose Try-to-get-away, accept its observed cost, continue its debrief, and return without claiming BattleSimulation/Renown. status={ReadString(escapeResult, "status")}, termination={ReadString(escapeResult, "termination")}, outcome={ReadString(escapeResult, "playerOutcome")}, actions={string.Join(",", escapeClient.Actions)}.");
         var rejectedEscapeRetryClient = new FakeBattleSimulationNativeClient(simulateNativeEscape: true);
         var rejectedEscapeRetryProvider = new FakeEscapeRejectRetryDecisionProvider();
-        var rejectedEscapeRetryResult = await RunAsync(request.RootElement, rejectedEscapeRetryClient, rejectedEscapeRetryProvider, CancellationToken.None);
+        var rejectedEscapeRetryResult = await RunAsync(request.RootElement, rejectedEscapeRetryClient, rejectedEscapeRetryProvider, new DecisionRunLedger(rejectedEscapeRetryProvider, null), CancellationToken.None);
         var rejectedEscapeRetryTrace = rejectedEscapeRetryResult["trace"] as JsonArray;
         var retryGuardFeedback = rejectedEscapeRetryTrace?.OfType<JsonObject>().Any(step =>
             ReadString(step["decisionFeedback"] as JsonObject, "kind") == "native-escape-warning-rejected-no-progress") == true;
@@ -2185,8 +2184,7 @@ internal static class AgentHostBattleSimulationLoop
         var rejectedEscapeRetryEvidence = new { scenario = "battle-loop-suppresses-only-the-unchanged-native-escape-option-after-reject-and-leaves-next-choice-to-model", providerDecisions = rejectedEscapeRetryProvider.CallCount, postRejectEncounterOptions = rejectedEscapeRetryProvider.PostRejectEncounterOptionIds, recoveryPromptPassed = rejectedEscapeRetryProvider.RecoveryPromptPassed, nativeActions = rejectedEscapeRetryClient.Actions.ToArray(), modelSelectedFollowup = "str_order_attack", passed = true };
         var surrenderAfterRejectedEscapeClient = new FakeBattleSimulationNativeClient(simulateNativeEscape: true, surrenderAfterEscapeReject: true);
         var surrenderAfterRejectedEscapeProvider = new FakeEscapeRejectRetryDecisionProvider(surrenderFallback: true);
-        var surrenderAfterRejectedEscape = await RunAsync(request.RootElement, surrenderAfterRejectedEscapeClient, surrenderAfterRejectedEscapeProvider,
-            CancellationToken.None, recoverPlayerCaptivity: true, passiveCaptivityPollSeconds: 1);
+        var surrenderAfterRejectedEscape = await RunAsync(request.RootElement, surrenderAfterRejectedEscapeClient, surrenderAfterRejectedEscapeProvider, new DecisionRunLedger(surrenderAfterRejectedEscapeProvider, null), CancellationToken.None, recoverPlayerCaptivity: true, passiveCaptivityPollSeconds: 1);
         if (ReadString(surrenderAfterRejectedEscape, "status") != "completed" ||
             ReadString(surrenderAfterRejectedEscape, "termination") != "native-captivity-recovered-without-battle" ||
             ReadString(surrenderAfterRejectedEscape, "playerOutcome") != "captured-then-recovered" ||
@@ -2201,8 +2199,7 @@ internal static class AgentHostBattleSimulationLoop
         var surrenderAfterRejectedEscapeEvidence = new { scenario = "battle-loop-keeps-native-surrender-as-model-selected-recovery-fallback-after-rejected-escape-without-other-options", providerDecisions = surrenderAfterRejectedEscapeProvider.CallCount, nativeActions = surrenderAfterRejectedEscapeClient.Actions.ToArray(), captivityChoiceOptionId = ReadString(surrenderAfterRejectedEscape, "captivityChoiceOptionId"), nativeReturnToMapVerified = ReadBoolean(surrenderAfterRejectedEscape, "nativeReturnToMapVerified"), passed = true };
         var truncatedSurrenderClient = new FakeBattleSimulationNativeClient(simulateNativeEscape: true, surrenderAfterEscapeReject: true);
         var truncatedSurrenderProvider = new FakeEscapeRejectRetryDecisionProvider(surrenderFallback: true, truncateSurrenderOnce: true);
-        var truncatedSurrender = await RunAsync(request.RootElement, truncatedSurrenderClient, truncatedSurrenderProvider,
-            CancellationToken.None, recoverPlayerCaptivity: true, passiveCaptivityPollSeconds: 1);
+        var truncatedSurrender = await RunAsync(request.RootElement, truncatedSurrenderClient, truncatedSurrenderProvider, new DecisionRunLedger(truncatedSurrenderProvider, null), CancellationToken.None, recoverPlayerCaptivity: true, passiveCaptivityPollSeconds: 1);
         if (ReadString(truncatedSurrender, "status") != "completed" ||
             ReadString(truncatedSurrender, "termination") != "native-captivity-recovered-without-battle" ||
             ReadString(truncatedSurrender, "playerOutcome") != "captured-then-recovered" ||
@@ -2216,7 +2213,7 @@ internal static class AgentHostBattleSimulationLoop
         var truncatedSurrenderRecoveryEvidence = new { scenario = "battle-loop-retries-one-truncated-required-tool-at-surrender-only-native-encounter-before-captivity-recovery", providerRequests = truncatedSurrenderProvider.CallCount, retryPromptPassed = truncatedSurrenderProvider.TruncatedRecoveryPromptPassed, nativeActions = truncatedSurrenderClient.Actions.ToArray(), termination = ReadString(truncatedSurrender, "termination"), passed = true };
         var visibleThreatClient = new FakeBattleSimulationNativeClient(visibleHostileAtStart: true);
         var visibleThreatProvider = new FakeBattleSimulationDecisionProvider();
-        var visibleThreatResult = await RunAsync(request.RootElement, visibleThreatClient, visibleThreatProvider, CancellationToken.None);
+        var visibleThreatResult = await RunAsync(request.RootElement, visibleThreatClient, visibleThreatProvider, new DecisionRunLedger(visibleThreatProvider, null), CancellationToken.None);
         var visibleThreatTrace = visibleThreatResult["trace"] as JsonArray;
         if (ReadString(visibleThreatResult, "status") != "completed" ||
             !visibleThreatClient.ClockActions.SequenceEqual(["pause"]) ||
@@ -2231,7 +2228,7 @@ internal static class AgentHostBattleSimulationLoop
 
         var incidentClient = new FakeBattleSimulationNativeClient(mapIncidentAtStart: true);
         var incidentProvider = new FakeBattleSimulationDecisionProvider();
-        var incidentInterruptedBattle = await RunAsync(request.RootElement, incidentClient, incidentProvider, CancellationToken.None);
+        var incidentInterruptedBattle = await RunAsync(request.RootElement, incidentClient, incidentProvider, new DecisionRunLedger(incidentProvider, null), CancellationToken.None);
         if (ReadString(incidentInterruptedBattle, "status") != "failed" ||
             ReadString(incidentInterruptedBattle, "termination") != "native-map-incident-interrupted-battle-planning" ||
             incidentProvider.CallCount != 0 || incidentClient.Actions.Count != 0 || incidentClient.ClockActions.Count != 0 ||
@@ -2241,7 +2238,7 @@ internal static class AgentHostBattleSimulationLoop
             throw new AgentHostException("battle-loop-map-incident-was-not-left-to-parent", "A Native map incident must interrupt the battle child before any model or movement action so the parent can resolve the current incident and replan.");
         var mapConversationClient = new FakeBattleSimulationNativeClient(mapConversationAtStart: true);
         var mapConversationProvider = new FakeBattleSimulationDecisionProvider();
-        var mapConversationResult = await RunAsync(request.RootElement, mapConversationClient, mapConversationProvider, CancellationToken.None);
+        var mapConversationResult = await RunAsync(request.RootElement, mapConversationClient, mapConversationProvider, new DecisionRunLedger(mapConversationProvider, null), CancellationToken.None);
         if (ReadString(mapConversationResult, "status") != "completed" ||
             ReadInt(mapConversationResult, "actionsExecuted", 0) != 13 || mapConversationProvider.CallCount != 11 ||
             mapConversationClient.Actions.Count != 13 || mapConversationClient.Actions[0] != "dialogueContinue" ||
@@ -2253,7 +2250,7 @@ internal static class AgentHostBattleSimulationLoop
 
         var activeEncounterConversationClient = new FakeBattleSimulationNativeClient(mapConversationAtStart: true, mapConversationEncounterAtStart: true);
         var activeEncounterConversationProvider = new FakeEncounterConversationDecisionProvider();
-        var activeEncounterConversationResult = await RunAsync(request.RootElement, activeEncounterConversationClient, activeEncounterConversationProvider, CancellationToken.None);
+        var activeEncounterConversationResult = await RunAsync(request.RootElement, activeEncounterConversationClient, activeEncounterConversationProvider, new DecisionRunLedger(activeEncounterConversationProvider, null), CancellationToken.None);
         var activeEncounterActions = new[] { "dialogueContinue", "mapPartyTargets", "dialogueSelect", "dialogueContinue", "menuSelect", "battleSkip", "battleFinish", "partyTakeAll", "partyScreenDone", "inventoryTakeAll", "inventoryDone" };
         if (ReadString(activeEncounterConversationResult, "status") != "completed" ||
             !activeEncounterActions.SequenceEqual(activeEncounterConversationClient.Actions, StringComparer.Ordinal) ||
@@ -2277,7 +2274,7 @@ internal static class AgentHostBattleSimulationLoop
             ["renown"] = new JsonObject { ["current"] = 21.378, ["target"] = 50 }
         };
         using var inquiryRequest = JsonDocument.Parse(inquiryRequestNode.ToJsonString());
-        var partyInquiryResult = await RunAsync(inquiryRequest.RootElement, inquiryClient, inquiryProvider, CancellationToken.None,
+        var partyInquiryResult = await RunAsync(inquiryRequest.RootElement, inquiryClient, inquiryProvider, new DecisionRunLedger(inquiryProvider, null), CancellationToken.None,
             inquiryClient: inquiryClient);
         if (ReadString(partyInquiryResult, "status") != "completed" || ReadString(partyInquiryResult, "termination") != "battle-resolved-and-verified" ||
             ReadString(partyInquiryResult, "playerOutcome") != "resolved-native-battle" || inquiryClient.LastInquiryChoice != "negative" ||
@@ -2295,7 +2292,7 @@ internal static class AgentHostBattleSimulationLoop
 
         var repeatedDoneClient = new FakeBattleSimulationNativeClient(simulatePartyInquiry: true);
         var repeatedDoneProvider = new FakeBattleSimulationDecisionProvider(simulatePartyInquiry: true, repeatPartyScreenDoneAfterDecline: true);
-        var repeatedDoneResult = await RunAsync(inquiryRequest.RootElement, repeatedDoneClient, repeatedDoneProvider, CancellationToken.None,
+        var repeatedDoneResult = await RunAsync(inquiryRequest.RootElement, repeatedDoneClient, repeatedDoneProvider, new DecisionRunLedger(repeatedDoneProvider, null), CancellationToken.None,
             inquiryClient: repeatedDoneClient);
         var repeatedDoneTrace = repeatedDoneResult["trace"] as JsonArray;
         if (ReadString(repeatedDoneResult, "status") != "completed" || repeatedDoneProvider.CallCount != 15 ||
@@ -2315,8 +2312,10 @@ internal static class AgentHostBattleSimulationLoop
             priorCampaignTrace.Add(new JsonObject { ["iteration"] = prior + 1, ["stage"] = "prior-objective-decision" });
             priorCampaignRoutes.Add(new JsonObject { ["decision"] = prior + 1, ["requestedModelId"] = cumulativeProvider.ModelId, ["routedVia"] = "prior-objective" });
         }
-        var cumulativeBattle = await RunAsync(cumulativeRequest.RootElement, cumulativeClient, cumulativeProvider, CancellationToken.None,
-            priorDecisions: 201, priorTrace: priorCampaignTrace, priorProviderRouteHistory: priorCampaignRoutes);
+        var cumulativeBattle = await RunAsync(cumulativeRequest.RootElement, cumulativeClient, cumulativeProvider,
+            new DecisionRunLedger(cumulativeProvider, "selftest-battle-cumulative", priorDecisions: 201,
+                priorTrace: priorCampaignTrace, priorProviderRouteHistory: priorCampaignRoutes),
+            CancellationToken.None);
         if (ReadString(cumulativeBattle, "status") != "completed" || ReadInt(cumulativeBattle, "decisions", 0) != 212 ||
             cumulativeProvider.CallCount != 11 || ReadInt(cumulativeBattle, "actionsExecuted", 0) != 12 ||
             (cumulativeBattle["trace"] as JsonArray)?.Count != 215 ||
@@ -2324,9 +2323,10 @@ internal static class AgentHostBattleSimulationLoop
             throw new AgentHostException("battle-loop-self-test-cumulative-budget-interruption-failed", "A real-time incident BattleSimulation must retain enough shared decision budget after earlier objective planning/actions and preserve global trace numbering.");
         var recoveryClient = new FakeBattleSimulationNativeClient(simulateCaptivity: true);
         var recoveryProvider = new FakeBattleCaptivityDecisionProvider();
-        var recovery = await RunAsync(request.RootElement, recoveryClient, recoveryProvider, CancellationToken.None,
-            priorDecisions: 1, priorTrace: priorTrace, priorProviderRouteHistory: priorRoutes,
-            recoverPlayerCaptivity: true, passiveCaptivityPollSeconds: 1);
+        var recovery = await RunAsync(request.RootElement, recoveryClient, recoveryProvider,
+            new DecisionRunLedger(recoveryProvider, "selftest-battle-captivity", priorDecisions: 1,
+                priorTrace: priorTrace, priorProviderRouteHistory: priorRoutes),
+            CancellationToken.None, recoverPlayerCaptivity: true, passiveCaptivityPollSeconds: 1);
         if (ReadString(recovery, "status") != "completed" || ReadString(recovery, "playerOutcome") != "captured-then-recovered" ||
             !ReadBoolean(recovery, "captivityObserved") || !ReadBoolean(recovery, "captivityRecoveryVerified") ||
             ReadString(recovery, "captivityChoiceOptionId") != "mno_captivity_end_ransom_accept" ||
@@ -2336,7 +2336,7 @@ internal static class AgentHostBattleSimulationLoop
             throw new AgentHostException("battle-loop-self-test-captivity-recovery-failed", $"A fake Native battle-capture-ransom cycle failed: status={ReadString(recovery, "status")}, outcome={ReadString(recovery, "playerOutcome")}, captivity={ReadBoolean(recovery, "captivityObserved")}, recovery={ReadBoolean(recovery, "captivityRecoveryVerified")}, action={ReadString(recovery, "captivityChoiceOptionId")}, actions={string.Join(",", recoveryClient.Actions)}.");
         var surrenderRecoveryClient = new FakeBattleSimulationNativeClient(simulateSurrenderWithoutBattle: true);
         var surrenderRecoveryProvider = new FakeSurrenderRecoveryDecisionProvider();
-        var surrenderRecovery = await RunAsync(request.RootElement, surrenderRecoveryClient, surrenderRecoveryProvider, CancellationToken.None,
+        var surrenderRecovery = await RunAsync(request.RootElement, surrenderRecoveryClient, surrenderRecoveryProvider, new DecisionRunLedger(surrenderRecoveryProvider, null), CancellationToken.None,
             recoverPlayerCaptivity: true, passiveCaptivityPollSeconds: 1);
         var surrenderDeferredTraceStep = (surrenderRecovery["trace"] as JsonArray)?.OfType<JsonObject>()
             .FirstOrDefault(step => ReadString(step, "stage") == "native-bandit-target-deferred-after-no-battle");

@@ -13,7 +13,7 @@ internal static class AgentHostStoryModeSetupLoop
         var native = new FakeStoryModeSetupNativeClient(delayNotificationReady: true);
         var provider = new FakeStoryModeSetupDecisionProvider();
         using var request = JsonDocument.Parse("{\"runId\":\"storymode-post-tutorial-setup-selftest\",\"goal\":\"Complete original family name and banner setup.\"}");
-        var result = await RunAsync(request.RootElement, native, native, native, provider, CancellationToken.None);
+        var result = await RunAsync(request.RootElement, native, native, native, provider, new DecisionRunLedger(provider, null), CancellationToken.None);
         var expected = new[] { "respondInquiry", "continueSceneNotification", "submitStoryModeClanName", "bannerEditorDone", "respondInquiry" };
         if (ReadString(result, "status") != "completed" ||
             ReadString(result["termination"] as JsonObject, "reason") != "storymode-post-tutorial-setup-returned-to-map" ||
@@ -23,7 +23,7 @@ internal static class AgentHostStoryModeSetupLoop
             throw new AgentHostException("storymode-setup-loop-selftest-failed", "The Native startup chain must continue the verified banner notification, use TextQueryPopUpVM for a model-selected family name, commit the current BannerEditor through Done, answer the resulting tutorial inquiry, and return to Map. status=" + ReadString(result, "status") + "; actions=" + string.Join(",", native.Actions) + "; decisions=" + provider.CallCount);
         var recoveringNative = new FakeStoryModeSetupNativeClient();
         var recoveringProvider = new FakeStoryModeSetupDecisionProvider(failOnCall: 2);
-        var recoveredResult = await RunAsync(request.RootElement, recoveringNative, recoveringNative, recoveringNative, recoveringProvider, CancellationToken.None);
+        var recoveredResult = await RunAsync(request.RootElement, recoveringNative, recoveringNative, recoveringNative, recoveringProvider, new DecisionRunLedger(recoveringProvider, null), CancellationToken.None);
         if (ReadString(recoveredResult, "status") != "completed" ||
             ReadString(recoveredResult["termination"] as JsonObject, "reason") != "storymode-post-tutorial-setup-returned-to-map" ||
             ReadInt(recoveredResult, "decisions", 0) != expected.Length + 1 || recoveringProvider.CallCount != expected.Length + 1 ||
@@ -44,16 +44,10 @@ internal static class AgentHostStoryModeSetupLoop
         IAgentHostNativeInquiryClient inquiryClient,
         IAgentHostStoryModeBannerEditorNativeClient bannerEditorClient,
         IAgentHostDecisionProvider provider,
-        CancellationToken cancellationToken,
-        int priorDecisions = 0,
-        long priorPromptTokens = 0,
-        long priorCompletionTokens = 0,
-        JsonArray? priorTrace = null,
-        JsonArray? priorProviderRouteHistory = null)
+        DecisionRunLedger ledger,
+        CancellationToken cancellationToken)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
-        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens,
-            priorTrace, priorProviderRouteHistory);
         var actions = 0;
         var started = false;
 
@@ -128,7 +122,8 @@ internal static class AgentHostStoryModeSetupLoop
                     }
 
                     started = true;
-                    var resolution = await AgentHostNativeInquiryResolution.RunAsync(stateClient, inquiryClient, provider, cancellationToken,
+                    var resolution = await AgentHostNativeInquiryResolution.RunAsync(stateClient, inquiryClient, provider,
+            cancellationToken,
                         runId + "-setup-inquiry-" + ledger.NextDecisionNumber.ToString(CultureInfo.InvariantCulture));
                     ledger.RecordDelegated(resolution);
                     actions += ReadInt(resolution, "actionsExecuted", 0);

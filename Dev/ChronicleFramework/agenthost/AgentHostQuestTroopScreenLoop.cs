@@ -90,17 +90,9 @@ internal static class AgentHostQuestTroopScreenLoop
         IAgentHostCampaignNativeClient client,
         IAgentHostQuestTroopScreenNativeClient nativeClient,
         IAgentHostDecisionProvider provider,
-        CancellationToken cancellationToken,
-        int priorDecisions = 0,
-        long priorPromptTokens = 0,
-        long priorCompletionTokens = 0,
-        JsonArray? priorTrace = null,
-        JsonArray? priorProviderRouteHistory = null)
+        DecisionRunLedger ledger,
+        CancellationToken cancellationToken)
     {
-        var ledger = new DecisionRunLedger(
-            provider,
-            ReadString(runRequest, "runId") ?? "establish-your-clan",
-            priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var actionsExecuted = 0;
         JsonObject? previousReceipt = null;
 

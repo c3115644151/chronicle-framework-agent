@@ -151,7 +151,7 @@ internal static class AgentHostVillageToolsQuestLoop
 
         var alternativeOnlyClient = new FakeVillageQuestNativeClient(alternativeOnly: true);
         var alternativeOnlyProvider = new FakeVillageQuestDecisionProvider();
-        var alternativeOnlyResult = await RunAsync(request.RootElement, alternativeOnlyClient, alternativeOnlyProvider, CancellationToken.None);
+        var alternativeOnlyResult = await RunAsync(request.RootElement, alternativeOnlyClient, alternativeOnlyProvider, new DecisionRunLedger(alternativeOnlyProvider, null), CancellationToken.None);
         if (ReadString(alternativeOnlyResult, "status") != "failed" ||
             ReadString(alternativeOnlyResult, "failureCode") != "village-tools-direct-quest-option-unavailable" ||
             ReadString(alternativeOnlyResult["termination"] as JsonObject, "reason") != "out-of-scope-issue-resolution-only" ||
@@ -160,12 +160,10 @@ internal static class AgentHostVillageToolsQuestLoop
             ReadBoolean(alternativeOnlyResult, "questWasObservedActive"))
             throw new AgentHostException("village-tools-loop-self-test-alternative-only-stop-failed", "A visible Quest-giver dialogue exposing only the out-of-scope Alternative Solution must stop with a precise reason without selecting it or claiming the Quest was accepted.");
 
-        var result = await RunAsync(request.RootElement, client, provider, CancellationToken.None,
-            priorDecisions: 1,
-            priorPromptTokens: 11,
-            priorCompletionTokens: 7,
-            priorTrace: parentClassificationTrace,
-            priorProviderRouteHistory: parentClassificationRoute);
+        var result = await RunAsync(request.RootElement, client, provider,
+            new DecisionRunLedger(provider, "village-tools-quest-self-test", priorDecisions: 1, priorPromptTokens: 11,
+                priorCompletionTokens: 7, priorTrace: parentClassificationTrace, priorProviderRouteHistory: parentClassificationRoute),
+            CancellationToken.None);
         var fullTrace = result["trace"] as JsonArray ?? new JsonArray();
         var fullRouteHistory = result["providerRouteHistory"] as JsonArray ?? new JsonArray();
         var combinedPromptTokens = result["promptTokens"]?.GetValue<long>() ?? -1L;
@@ -201,7 +199,7 @@ internal static class AgentHostVillageToolsQuestLoop
             maxElapsedSeconds = 10,
             allowedActionNames = AgentHostCampaignLoop.ApprovedActions.ToArray()
         }));
-        var recoveryResult = await RunAsync(recoveryRequest.RootElement, recoveryClient, recoveryProvider, CancellationToken.None);
+        var recoveryResult = await RunAsync(recoveryRequest.RootElement, recoveryClient, recoveryProvider, new DecisionRunLedger(recoveryProvider, null), CancellationToken.None);
         var recoveryTrace = recoveryResult["trace"] as JsonArray ?? new JsonArray();
         var recoveryFeedback = recoveryProvider.FeedbackRequiredNextSteps;
         if (ReadString(recoveryResult, "status") != "failed" ||
@@ -223,7 +221,7 @@ internal static class AgentHostVillageToolsQuestLoop
             maxElapsedSeconds = 10,
             allowedActionNames = AgentHostCampaignLoop.ApprovedActions.ToArray()
         }));
-        var continueResult = await RunAsync(continueRequest.RootElement, continueClient, continueProvider, CancellationToken.None);
+        var continueResult = await RunAsync(continueRequest.RootElement, continueClient, continueProvider, new DecisionRunLedger(continueProvider, null), CancellationToken.None);
         if (ReadString(continueResult, "status") != "failed" ||
             ReadString(continueResult["termination"] as JsonObject, "reason") != "decision-budget-exhausted" ||
             !continueClient.Actions.SequenceEqual(new[] { "talkToSettlementHero", "dialogueSelect", "dialogueContinue", "dialogueSelect", "questDetails" }) ||
@@ -245,7 +243,7 @@ internal static class AgentHostVillageToolsQuestLoop
             maxElapsedSeconds = 10,
             allowedActionNames = AgentHostCampaignLoop.ApprovedActions.ToArray()
         }));
-        var passageResult = await RunAsync(passageRequest.RootElement, passageClient, passageProvider, CancellationToken.None);
+        var passageResult = await RunAsync(passageRequest.RootElement, passageClient, passageProvider, new DecisionRunLedger(passageProvider, null), CancellationToken.None);
         if (ReadString(passageResult, "status") != "failed" ||
             ReadString(passageResult["termination"] as JsonObject, "reason") != "decision-budget-exhausted" ||
             !passageClient.Actions.SequenceEqual(new[] { "dialogueSelect", "barterOptions", "barterAutoBalance", "barterOptions", "barterOffer", "dialogueContinue" }) ||
@@ -278,16 +276,13 @@ internal static class AgentHostVillageToolsQuestLoop
         JsonElement request,
         IAgentHostVillageToolsQuestNativeClient client,
         IAgentHostDecisionProvider provider,
-        CancellationToken cancellationToken,
-        int priorDecisions = 0,
-        long priorPromptTokens = 0,
-        long priorCompletionTokens = 0,
-        JsonArray? priorTrace = null,
-        JsonArray? priorProviderRouteHistory = null)
+        DecisionRunLedger ledger,
+        CancellationToken cancellationToken)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var goal = ReadString(request, "goal") ?? string.Empty;
         var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", 160), 1, 160);
+        var priorDecisions = ledger.Decisions;
         var maxAdditionalDecisions = Math.Max(0, maxDecisions - priorDecisions);
         var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 86400), 1, 86400);
         var actions = request.TryGetProperty("allowedActionNames", out var names) && names.ValueKind == JsonValueKind.Array
@@ -299,7 +294,6 @@ internal static class AgentHostVillageToolsQuestLoop
 
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
-        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var actionsExecuted = 0;
         var rejected = 0;
         var questId = string.Empty;
@@ -821,7 +815,7 @@ internal static class AgentHostVillageToolsQuestLoop
         ["termination"] = new JsonObject { ["reason"] = termination, ["goalVerified"] = status == "completed" },
         ["failure"] = failure,
         ["failureCode"] = failureCode,
-        ["trace"] = ledger.Trace,
+        ["trace"] = ledger.Trace.DeepClone(),
         ["lastObservation"] = native is null ? null : BuildObservation(native, questId, sawQuest, inventoryVerified)
     };
 

@@ -253,13 +253,15 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         var firstNoOfferClient = new FakeNoOfferCooldownNativeClient(startAtTown: true);
         var firstNoOfferProvider = new FakeNoOfferCooldownDecisionProvider(queryMapTargets: false);
         var firstNoOfferRun = await RunAsync(noOfferCooldownRequest.RootElement, firstNoOfferClient, firstNoOfferClient,
-            firstNoOfferClient, firstNoOfferProvider, CancellationToken.None);
+            firstNoOfferClient, firstNoOfferProvider, new DecisionRunLedger(firstNoOfferProvider, null), CancellationToken.None);
         var noOfferEvent = (firstNoOfferRun["trace"] as JsonArray)?.OfType<JsonObject>()
             .FirstOrDefault(step => ReadString(step, "stage") == "recruitment-settlement-no-affordable-volunteer-offers");
         var secondNoOfferClient = new FakeNoOfferCooldownNativeClient(startAtTown: false, targetCount: 32);
         var secondNoOfferProvider = new FakeNoOfferCooldownDecisionProvider(queryMapTargets: true, continueTargetPages: true);
         var secondNoOfferRun = await RunAsync(noOfferCooldownRequest.RootElement, secondNoOfferClient, secondNoOfferClient,
-            secondNoOfferClient, secondNoOfferProvider, CancellationToken.None, priorTrace: firstNoOfferRun["trace"] as JsonArray);
+            secondNoOfferClient, secondNoOfferProvider,
+            new DecisionRunLedger(secondNoOfferProvider, "same-day-no-offer-cooldown-selftest", priorTrace: firstNoOfferRun["trace"] as JsonArray),
+            CancellationToken.None);
         if (ReadString(firstNoOfferRun["termination"] as JsonObject, "reason") != "recruitment-model-stopped-with-safe-actions" ||
             noOfferEvent is null || ReadString(noOfferEvent, "settlementId") != "town-a" ||
             ReadString(secondNoOfferRun["termination"] as JsonObject, "reason") != "recruitment-model-stopped-with-safe-actions" ||
@@ -623,7 +625,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         var fakeClient = new FakeRecruitmentNativeClient();
         var fakeProvider = new FakeRecruitmentDecisionProvider();
         using var request = JsonDocument.Parse("{\"runId\":\"establish-clan-recruitment-selftest\",\"goal\":\"Raise the active Journal PartySize target.\",\"maxDecisions\":8,\"maxElapsedSeconds\":10}");
-        var runtime = await RunAsync(request.RootElement, fakeClient, fakeClient, fakeClient, fakeProvider, CancellationToken.None);
+        var runtime = await RunAsync(request.RootElement, fakeClient, fakeClient, fakeClient, fakeProvider, new DecisionRunLedger(fakeProvider, null), CancellationToken.None);
         if (ReadString(runtime, "status") != "completed" ||
             ReadString(runtime["termination"] as JsonObject, "reason") != "native-party-size-journal-target-met" ||
             ReadInt(runtime, "actionsExecuted", 0) != 2 || fakeProvider.CallCount != 2 ||
@@ -634,7 +636,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
 
         var bulkFakeClient = new FakeRecruitmentNativeClient(useRecruitAll: true);
         var bulkFakeProvider = new FakeRecruitmentDecisionProvider(useRecruitAll: true);
-        var bulkRuntime = await RunAsync(request.RootElement, bulkFakeClient, bulkFakeClient, bulkFakeClient, bulkFakeProvider, CancellationToken.None);
+        var bulkRuntime = await RunAsync(request.RootElement, bulkFakeClient, bulkFakeClient, bulkFakeClient, bulkFakeProvider, new DecisionRunLedger(bulkFakeProvider, null), CancellationToken.None);
         if (ReadString(bulkRuntime, "status") != "completed" ||
             ReadString(bulkRuntime["termination"] as JsonObject, "reason") != "native-party-size-journal-target-met" ||
             ReadInt(bulkRuntime, "actionsExecuted", 0) != 2 || bulkFakeProvider.CallCount != 2 ||
@@ -646,7 +648,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         var capacityBlockedClient = new FakeRecruitmentNativeClient(startAtNativeCapacity: true);
         var capacityBlockedProvider = new FakeRecruitmentDecisionProvider();
         var capacityBlockedRun = await RunAsync(request.RootElement, capacityBlockedClient, capacityBlockedClient, capacityBlockedClient,
-            capacityBlockedProvider, CancellationToken.None);
+            capacityBlockedProvider, new DecisionRunLedger(capacityBlockedProvider, null),
+            CancellationToken.None);
         if (ReadString(capacityBlockedRun, "status") != "interrupted" ||
             ReadString(capacityBlockedRun["termination"] as JsonObject, "reason") != "party-capacity-blocked-until-renown" ||
             ReadInt(capacityBlockedRun, "actionsExecuted", -1) != 0 || capacityBlockedProvider.CallCount != 0 || capacityBlockedClient.Actions.Count != 0)
@@ -655,7 +658,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
 
         var stopClient = new FakeRecruitmentNativeClient();
         var stopProvider = new FakeRecruitmentStopProvider();
-        var stopResult = await RunAsync(request.RootElement, stopClient, stopClient, stopClient, stopProvider, CancellationToken.None);
+        var stopResult = await RunAsync(request.RootElement, stopClient, stopClient, stopClient, stopProvider, new DecisionRunLedger(stopProvider, null), CancellationToken.None);
         if (ReadString(stopResult, "status") != "interrupted" ||
             ReadString(stopResult["termination"] as JsonObject, "reason") != "recruitment-model-stopped-with-safe-actions" ||
             ReadInt(stopResult, "actionsExecuted", 0) != 0 || stopProvider.CallCount != 2 || stopClient.Actions.Count != 0)
@@ -664,7 +667,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
 
         var unavailableClient = new FakeRecruitmentNativeClient(startOnMap: false);
         var unavailableProvider = new FakeRecruitmentDecisionProvider();
-        var unavailable = await RunAsync(request.RootElement, unavailableClient, unavailableClient, unavailableClient, unavailableProvider, CancellationToken.None);
+        var unavailable = await RunAsync(request.RootElement, unavailableClient, unavailableClient, unavailableClient, unavailableProvider, new DecisionRunLedger(unavailableProvider, null), CancellationToken.None);
         if (ReadString(unavailable, "status") != "failed" ||
             ReadString(unavailable["termination"] as JsonObject, "reason") != "campaign-map-unavailable" ||
             ReadString(unavailable, "failureCode") != "recruitment-map-unavailable" ||
@@ -677,7 +680,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
 
         var trainingFieldClient = new FakeRecruitmentNativeClient(startAtTrainingField: true);
         var trainingFieldProvider = new FakeObservedRecruitmentDecisionProvider();
-        var trainingFieldRun = await RunAsync(request.RootElement, trainingFieldClient, trainingFieldClient, trainingFieldClient, trainingFieldProvider, CancellationToken.None);
+        var trainingFieldRun = await RunAsync(request.RootElement, trainingFieldClient, trainingFieldClient, trainingFieldClient, trainingFieldProvider, new DecisionRunLedger(trainingFieldProvider, null), CancellationToken.None);
         if (ReadString(trainingFieldRun, "status") != "completed" ||
             ReadString(trainingFieldRun["termination"] as JsonObject, "reason") != "native-party-size-journal-target-met" ||
             ReadInt(trainingFieldRun, "actionsExecuted", 0) != 3 || trainingFieldProvider.CallCount != 3 ||
@@ -687,7 +690,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
 
         var stopRecoveryClient = new FakeRecruitmentNativeClient(startAtTrainingField: true);
         var stopRecoveryProvider = new FakeObservedRecruitmentDecisionProvider(returnStopCount: 1);
-        var stopRecoveryRun = await RunAsync(request.RootElement, stopRecoveryClient, stopRecoveryClient, stopRecoveryClient, stopRecoveryProvider, CancellationToken.None);
+        var stopRecoveryRun = await RunAsync(request.RootElement, stopRecoveryClient, stopRecoveryClient, stopRecoveryClient, stopRecoveryProvider, new DecisionRunLedger(stopRecoveryProvider, null), CancellationToken.None);
         var stopRecoveryTrace = stopRecoveryRun["trace"] as JsonArray ?? new JsonArray();
         if (ReadString(stopRecoveryRun, "status") != "completed" ||
             ReadInt(stopRecoveryRun, "actionsExecuted", 0) != 3 || stopRecoveryProvider.CallCount != 4 ||
@@ -698,7 +701,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
 
         var backstreetRecoveryClient = new FakeRecruitmentNativeClient(startAtBackstreet: true);
         var backstreetRecoveryProvider = new FakeObservedRecruitmentDecisionProvider(returnStopCount: 2);
-        var backstreetRecoveryRun = await RunAsync(request.RootElement, backstreetRecoveryClient, backstreetRecoveryClient, backstreetRecoveryClient, backstreetRecoveryProvider, CancellationToken.None);
+        var backstreetRecoveryRun = await RunAsync(request.RootElement, backstreetRecoveryClient, backstreetRecoveryClient, backstreetRecoveryClient, backstreetRecoveryProvider, new DecisionRunLedger(backstreetRecoveryProvider, null), CancellationToken.None);
         var backstreetRecoveryTrace = backstreetRecoveryRun["trace"] as JsonArray ?? new JsonArray();
         if (ReadString(backstreetRecoveryRun, "status") != "completed" ||
             ReadInt(backstreetRecoveryRun, "actionsExecuted", 0) != 3 || backstreetRecoveryProvider.CallCount != 4 ||
@@ -711,7 +714,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         var villagersInNeedProvider = new FakeVillagersInNeedDecisionProvider(stopWhileMovingOnce: true, returnInvalidWaitOnce: true, rejectUnavailableControlOnce: true);
         using var villagersInNeedRequest = JsonDocument.Parse("{\"runId\":\"establish-clan-villagers-in-need-selftest\",\"goal\":\"Raise the active Journal PartySize target.\",\"maxDecisions\":16,\"maxElapsedSeconds\":30}");
         var villagersInNeedRun = await RunAsync(villagersInNeedRequest.RootElement, villagersInNeedClient, villagersInNeedClient, villagersInNeedClient,
-            villagersInNeedProvider, CancellationToken.None);
+            villagersInNeedProvider, new DecisionRunLedger(villagersInNeedProvider, null),
+            CancellationToken.None);
         var automaticVillagerContinueCount = (villagersInNeedRun["trace"] as JsonArray)?.OfType<JsonObject>()
             .Count(step => ReadString(step["decisionFeedback"] as JsonObject, "kind") == "host-native-no-choice-dialogue-continue") ?? 0;
         if (ReadString(villagersInNeedRun, "status") != "completed" ||
@@ -735,7 +739,8 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         var prisonerRouteClient = new FakePrisonerRecruitmentNativeClient();
         var prisonerRouteProvider = new FakePrisonerRecruitmentDecisionProvider();
         var prisonerRoute = await RunAsync(prisonerRouteRequest.RootElement, prisonerRouteClient, prisonerRouteClient, prisonerRouteClient,
-            prisonerRouteProvider, CancellationToken.None);
+            prisonerRouteProvider, new DecisionRunLedger(prisonerRouteProvider, null),
+            CancellationToken.None);
         if (ReadString(prisonerRoute, "status") != "completed" ||
             ReadString(prisonerRoute["termination"] as JsonObject, "reason") != "native-party-size-journal-target-met" ||
             ReadInt(prisonerRoute, "actionsExecuted", 0) != 2 || prisonerRouteProvider.CallCount != 2 ||
@@ -771,15 +776,10 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         IAgentHostRecruitmentNativeClient recruitmentClient,
         IAgentHostQuestDetailsNativeClient questDetailsClient,
         IAgentHostDecisionProvider provider,
-        CancellationToken cancellationToken,
-        int priorDecisions = 0,
-        long priorPromptTokens = 0,
-        long priorCompletionTokens = 0,
-        JsonArray? priorTrace = null,
-        JsonArray? priorProviderRouteHistory = null)
+        DecisionRunLedger ledger,
+        CancellationToken cancellationToken)
     {
-        return await RunCoreAsync(request, campaignClient, recruitmentClient, questDetailsClient, provider, cancellationToken,
-            priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
+        return await RunCoreAsync(request, campaignClient, recruitmentClient, questDetailsClient, provider, ledger, cancellationToken);
     }
 
     private static async Task<JsonObject> RunCoreAsync(
@@ -788,17 +788,12 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         IAgentHostRecruitmentNativeClient recruitmentClient,
         IAgentHostQuestDetailsNativeClient questDetailsClient,
         IAgentHostDecisionProvider provider,
-        CancellationToken cancellationToken,
-        int priorDecisions,
-        long priorPromptTokens,
-        long priorCompletionTokens,
-        JsonArray? priorTrace,
-        JsonArray? priorProviderRouteHistory)
+        DecisionRunLedger ledger,
+        CancellationToken cancellationToken)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", MaxDecisions), 1, MaxDecisions);
         var maxSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", (int)MaxElapsed.TotalSeconds), 10, (int)MaxElapsed.TotalSeconds);
-        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var actionsExecuted = 0;
         var visitedSettlements = new HashSet<string>(StringComparer.Ordinal);
         var lastMapTargets = (JsonArray?)null;
@@ -816,7 +811,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
         var rejectedDecisions = 0;
         var rejectedPrematureStops = 0;
         var villagersInNeedConversationStartupWaits = 0;
-        var noOfferSettlementEventKeys = BuildNoAffordableVolunteerSettlementEventKeys(priorTrace);
+        var noOfferSettlementEventKeys = BuildNoAffordableVolunteerSettlementEventKeys(ledger.Trace);
         var contactedGangLeaderIssueGivers = new HashSet<string>(StringComparer.Ordinal);
         var priorNoProgressRest = ledger.Trace.OfType<JsonObject>().LastOrDefault(step =>
             ReadString(step, "stage") == "eyc-native-wounded-party-rest-recovery" && !ReadBoolean(step, "healthImproved"));

@@ -480,7 +480,7 @@ if ($agentLiveModelLoopSource -notmatch 'elseif \(\$VillageToolsQuestLoop\)[\s\S
     $agentHostVillageToolsQuestLoopSource -notmatch 'Math\.Clamp\(ReadInt\(request, "maxDecisions", 160\), 1, 160\)') {
     throw 'The EYC Host request and all nested objective loops must share the 86400-second/2048-decision cumulative ceiling; separate loops must not restart the full decision allowance when prior decisions are carried forward.'
 }
-if ($agentHostEstablishClanAutonomySource -notmatch 'priorProviderRouteHistory: ledger\.Routes,[\s\S]{0,100}recoverPlayerCaptivity: true' -or
+if ($agentHostEstablishClanAutonomySource -notmatch 'AgentHostBattleSimulationLoop\.RunAsync\([\s\S]{0,200}provider, ledger,[\s\S]{0,120}recoverPlayerCaptivity: true' -or
     $agentHostBattleSimulationLoopSource -notmatch 'allowedSurrenderFallback = recoverPlayerCaptivity && !sendTroopsEnabled' -or
     $agentHostBattleSimulationLoopSource -notmatch 'surrender only as a survival fallback' -or
     $agentHostDecisionCycleSource -notmatch 'Never choose surrender in the ordinary Renown BattleSimulation route') {

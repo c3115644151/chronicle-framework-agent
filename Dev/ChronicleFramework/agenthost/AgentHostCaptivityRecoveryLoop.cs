@@ -188,7 +188,7 @@ internal static class AgentHostCaptivityRecoveryLoop
         using var request = JsonDocument.Parse("""
             {"runId":"captivity-recovery-selftest","goal":"Recover the currently captive MainHero, then plan one unmet Establish Your Clan objective.","maxDecisions":12,"maxElapsedSeconds":20}
             """);
-        var result = await RunAsync(request.RootElement, native, native, native, provider, CancellationToken.None);
+        var result = await RunAsync(request.RootElement, native, native, native, provider, new DecisionRunLedger(provider, null), CancellationToken.None);
         var selected = result["objectiveSelection"] as JsonObject;
         var verification = result["captivityRecoveryVerified"]?.GetValue<bool>() == true;
         var explicitTimeActions = result["explicitTimeActions"] as JsonArray;
@@ -212,8 +212,7 @@ internal static class AgentHostCaptivityRecoveryLoop
             throw new AgentHostException("captivity-recovery-runtime-self-test-failed", "The Host failed to recover one rejected model control before any Native action, then use explicit resume, current Native ransom/release choices and verified free MapState without a battle.");
         var parentNative = new FakeNativeClient();
         var parentProvider = new FakeProvider();
-        var recoveredToParent = await RunAsync(request.RootElement, parentNative, parentNative, parentNative, parentProvider,
-            CancellationToken.None, planObjectiveAfterRecovery: false);
+        var recoveredToParent = await RunAsync(request.RootElement, parentNative, parentNative, parentNative, parentProvider, new DecisionRunLedger(parentProvider, null), CancellationToken.None, planObjectiveAfterRecovery: false);
         if (ReadString(recoveredToParent, "status") != "completed" ||
             ReadString(recoveredToParent, "resultKind") != "captivity-recovered-return-to-parent" ||
             ReadBoolean(recoveredToParent, "captivityRecoveryVerified") != true ||
@@ -235,12 +234,8 @@ internal static class AgentHostCaptivityRecoveryLoop
         IAgentHostCaptivityRecoveryNativeClient actionClient,
         IAgentHostQuestDetailsNativeClient questDetailsClient,
         IAgentHostDecisionProvider provider,
+        DecisionRunLedger ledger,
         CancellationToken cancellationToken,
-        int priorDecisions = 0,
-        long priorPromptTokens = 0,
-        long priorCompletionTokens = 0,
-        JsonArray? priorTrace = null,
-        JsonArray? priorProviderRouteHistory = null,
         bool planObjectiveAfterRecovery = true)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
@@ -249,7 +244,6 @@ internal static class AgentHostCaptivityRecoveryLoop
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
 
-        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var actionCount = 0;
         var passiveWaitCount = 0;
         var rejectedProviderDecisions = 0;
@@ -322,12 +316,7 @@ internal static class AgentHostCaptivityRecoveryLoop
                 ledger.Trace.Add(BuildTrace(ledger.Decisions, terminalObservation, terminalDecision.Decision, null, new JsonArray("done")));
 
                 var objectivePlan = await AgentHostEstablishYourClanGoalLoop.RunAsync(
-                    request, stateClient, questDetailsClient, provider, elapsed.Token,
-                    priorDecisions: ledger.Decisions,
-                    priorPromptTokens: ledger.PromptTokens,
-                    priorCompletionTokens: ledger.CompletionTokens,
-                    priorTrace: ledger.Trace,
-                    priorProviderRouteHistory: ledger.Routes);
+                    request, stateClient, questDetailsClient, provider, ledger, elapsed.Token);
                 using var postPlanDocument = await stateClient.ReadStateAsync(elapsed.Token);
                 var postPlanNative = ParseObject(postPlanDocument.RootElement);
                 var postPlanState = postPlanNative["state"] as JsonObject ?? new JsonObject();

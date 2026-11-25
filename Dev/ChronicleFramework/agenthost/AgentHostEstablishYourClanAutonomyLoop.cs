@@ -12,11 +12,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
     internal delegate Task<JsonObject> ObjectiveExecutor(
         string objectiveId,
-        int priorDecisions,
-        long priorPromptTokens,
-        long priorCompletionTokens,
-        JsonArray priorTrace,
-        JsonArray priorProviderRouteHistory,
+        DecisionRunLedger ledger,
         CancellationToken cancellationToken);
 
     internal static IReadOnlyList<object> RunContractSelfTests()
@@ -365,8 +361,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             {"runId":"establish-clan-autonomy-selftest","goal":"Complete the active original Establish Your Clan quest.","parentProcessId":321,"maxDecisions":8,"maxElapsedSeconds":10,"allowedActionNames":[]}
             """;
         using var request = JsonDocument.Parse(requestJson);
-        async Task<JsonObject> ExecuteObjective(string objectiveId, int priorDecisions, long priorPromptTokens, long priorCompletionTokens,
-            JsonArray priorTrace, JsonArray priorRoutes, CancellationToken cancellationToken)
+        async Task<JsonObject> ExecuteObjective(string objectiveId, DecisionRunLedger runLedger, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             executorCalls++;
@@ -375,17 +370,18 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             return new JsonObject
             {
                 ["status"] = "completed",
-                ["decisions"] = priorDecisions,
+                ["decisions"] = runLedger.Decisions,
                 ["actionsExecuted"] = 1,
-                ["promptTokens"] = priorPromptTokens,
-                ["completionTokens"] = priorCompletionTokens,
-                ["trace"] = priorTrace.DeepClone(),
-                ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                ["promptTokens"] = runLedger.PromptTokens,
+                ["completionTokens"] = runLedger.CompletionTokens,
+                ["trace"] = runLedger.Trace.DeepClone(),
+                ["providerRouteHistory"] = runLedger.Routes.DeepClone(),
                 ["termination"] = new JsonObject { ["reason"] = "one-native-objective-subflow-completed" }
             };
         }
 
-        var completed = RunAsync(request.RootElement, native, native, provider, ExecuteObjective, CancellationToken.None).GetAwaiter().GetResult();
+        var completed = RunAsync(request.RootElement, native, native, provider,
+            new DecisionRunLedger(provider, null), ExecuteObjective, CancellationToken.None).GetAwaiter().GetResult();
         if (ReadString(completed, "status") != "completed" ||
             ReadBoolean(completed["termination"] as JsonObject, "goalVerified") != true ||
             ReadInt(completed, "actionsExecuted", -1) != 1 || provider.CallCount != 1 || executorCalls != 1 || native.QuestDetailsReads != 1)
@@ -395,8 +391,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         var longRunNative = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100);
         var longRunProvider = new FakeObjectiveProvider(Enumerable.Repeat("gold", 321).ToArray());
         var longRunChildCalls = 0;
-        Task<JsonObject> ExecuteAfterThreeHundredTwentyCycles(string objectiveId, int priorRunDecisions, long priorRunPromptTokens,
-            long priorRunCompletionTokens, JsonArray priorRunTrace, JsonArray priorRunRoutes, CancellationToken cancellationToken)
+        Task<JsonObject> ExecuteAfterThreeHundredTwentyCycles(string objectiveId, DecisionRunLedger runLedger, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (objectiveId != "gold") throw new AgentHostException("autonomy-long-run-selftest-unexpected-objective", "The long-run fixture selects only the current unmet Gold route.");
@@ -408,11 +403,11 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 {
                     ["status"] = "completed",
                     ["actionsExecuted"] = 1,
-                    ["decisions"] = priorRunDecisions,
-                    ["promptTokens"] = priorRunPromptTokens,
-                    ["completionTokens"] = priorRunCompletionTokens,
-                    ["trace"] = priorRunTrace.DeepClone(),
-                    ["providerRouteHistory"] = priorRunRoutes.DeepClone(),
+                    ["decisions"] = runLedger.Decisions,
+                    ["promptTokens"] = runLedger.PromptTokens,
+                    ["completionTokens"] = runLedger.CompletionTokens,
+                    ["trace"] = runLedger.Trace.DeepClone(),
+                    ["providerRouteHistory"] = runLedger.Routes.DeepClone(),
                     ["termination"] = new JsonObject { ["reason"] = "bounded-native-objective-fixture-progress" }
                 });
             }
@@ -429,11 +424,11 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             {
                 ["status"] = "failed",
                 ["actionsExecuted"] = 1,
-                ["decisions"] = priorRunDecisions,
-                ["promptTokens"] = priorRunPromptTokens,
-                ["completionTokens"] = priorRunCompletionTokens,
-                ["trace"] = priorRunTrace.DeepClone(),
-                ["providerRouteHistory"] = priorRunRoutes.DeepClone(),
+                ["decisions"] = runLedger.Decisions,
+                ["promptTokens"] = runLedger.PromptTokens,
+                ["completionTokens"] = runLedger.CompletionTokens,
+                ["trace"] = runLedger.Trace.DeepClone(),
+                ["providerRouteHistory"] = runLedger.Routes.DeepClone(),
                 ["objectiveSnapshot"] = partialSnapshot,
                 ["failureCode"] = "gold-sale-no-transferable-goods",
                 ["termination"] = new JsonObject { ["reason"] = "gold-sale-no-transferable-goods" }
@@ -441,6 +436,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         }
         using var longRunRequest = JsonDocument.Parse("{\"goal\":\"Complete the original StoryMode Establish Your Clan quest.\",\"parentProcessId\":321,\"maxDecisions\":321,\"maxElapsedSeconds\":30,\"allowedActionNames\":[]}");
         var longRun = RunAsync(longRunRequest.RootElement, longRunNative, longRunNative, longRunProvider,
+            new DecisionRunLedger(longRunProvider, null),
             ExecuteAfterThreeHundredTwentyCycles, CancellationToken.None).GetAwaiter().GetResult();
         if (ReadString(longRun, "status") != "completed" ||
             ReadBoolean(longRun["termination"] as JsonObject, "goalVerified") != true ||
@@ -451,8 +447,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         var captiveNative = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100, initialCaptive: true);
         var captiveProvider = new FakeObjectiveProvider("gold");
         var captiveObjectiveOrder = new List<string>();
-        async Task<JsonObject> RecoverBeforeObjective(string objectiveId, int priorDecisions, long priorPromptTokens, long priorCompletionTokens,
-            JsonArray priorTrace, JsonArray priorRoutes, CancellationToken cancellationToken)
+        async Task<JsonObject> RecoverBeforeObjective(string objectiveId, DecisionRunLedger runLedger, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             captiveObjectiveOrder.Add(objectiveId);
@@ -463,9 +458,9 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 return new JsonObject
                 {
                     ["status"] = "completed", ["captivityRecoveryVerified"] = true,
-                    ["decisions"] = priorDecisions, ["actionsExecuted"] = 1,
-                    ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
-                    ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                    ["decisions"] = runLedger.Decisions, ["actionsExecuted"] = 1,
+                    ["promptTokens"] = runLedger.PromptTokens, ["completionTokens"] = runLedger.CompletionTokens,
+                    ["trace"] = runLedger.Trace.DeepClone(), ["providerRouteHistory"] = runLedger.Routes.DeepClone(),
                     ["termination"] = new JsonObject { ["reason"] = "captivity-recovered-return-to-parent" }
                 };
             }
@@ -474,13 +469,14 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             captiveNative.CompleteSuccessfully();
             return new JsonObject
             {
-                ["status"] = "completed", ["decisions"] = priorDecisions, ["actionsExecuted"] = 1,
-                ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
-                ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                ["status"] = "completed", ["decisions"] = runLedger.Decisions, ["actionsExecuted"] = 1,
+                ["promptTokens"] = runLedger.PromptTokens, ["completionTokens"] = runLedger.CompletionTokens,
+                ["trace"] = runLedger.Trace.DeepClone(), ["providerRouteHistory"] = runLedger.Routes.DeepClone(),
                 ["termination"] = new JsonObject { ["reason"] = "one-native-objective-subflow-completed" }
             };
         }
-        var recovered = RunAsync(request.RootElement, captiveNative, captiveNative, captiveProvider, RecoverBeforeObjective, CancellationToken.None).GetAwaiter().GetResult();
+        var recovered = RunAsync(request.RootElement, captiveNative, captiveNative, captiveProvider,
+            new DecisionRunLedger(captiveProvider, null), RecoverBeforeObjective, CancellationToken.None).GetAwaiter().GetResult();
         if (ReadString(recovered, "status") != "completed" || ReadInt(recovered, "actionsExecuted", -1) != 2 ||
             captiveProvider.CallCount != 1 || !captiveObjectiveOrder.SequenceEqual(new[] { "captivityRecovery", "gold" }, StringComparer.Ordinal))
             throw new AgentHostException("establish-clan-autonomy-captivity-dispatch-selftest-failed", "An already-captive MainHero must recover through the current Native captivity subflow before the parent plans or executes an unmet objective.");
@@ -488,7 +484,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
         var unverifiedNative = new FakeNativeClient(activeQuest: false, lifecycle: "unknown", initialGold: 100);
         var unverifiedProvider = new FakeObjectiveProvider("gold");
-        var unverified = RunAsync(request.RootElement, unverifiedNative, unverifiedNative, unverifiedProvider, ExecuteObjective, CancellationToken.None).GetAwaiter().GetResult();
+        var unverified = RunAsync(request.RootElement, unverifiedNative, unverifiedNative, unverifiedProvider,
+            new DecisionRunLedger(unverifiedProvider, null), ExecuteObjective, CancellationToken.None).GetAwaiter().GetResult();
         if (ReadString(unverified, "status") != "failed" ||
             ReadString(unverified["termination"] as JsonObject, "reason") != "quest-no-longer-active-without-success-evidence" ||
             unverifiedProvider.CallCount != 0 || executorCalls != 1)
@@ -498,8 +495,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         var modalNative = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100);
         var modalProvider = new FakeInquiryRecoveryProvider();
         var interruptedObjectiveCalls = 0;
-        async Task<JsonObject> RecoverInterruptedObjective(string objectiveId, int priorDecisions, long priorPromptTokens, long priorCompletionTokens,
-            JsonArray priorTrace, JsonArray priorRoutes, CancellationToken cancellationToken)
+        async Task<JsonObject> RecoverInterruptedObjective(string objectiveId, DecisionRunLedger runLedger, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (objectiveId != "gold") throw new AgentHostException("autonomy-selftest-modal-objective-invalid", "The modal-recovery fixture must remain on the current Gold objective.");
@@ -509,9 +505,9 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 modalNative.OpenInquiry();
                 return new JsonObject
                 {
-                    ["status"] = "failed", ["actionsExecuted"] = 1, ["decisions"] = priorDecisions,
-                    ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
-                    ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                    ["status"] = "failed", ["actionsExecuted"] = 1, ["decisions"] = runLedger.Decisions,
+                    ["promptTokens"] = runLedger.PromptTokens, ["completionTokens"] = runLedger.CompletionTokens,
+                    ["trace"] = runLedger.Trace.DeepClone(), ["providerRouteHistory"] = runLedger.Routes.DeepClone(),
                     ["termination"] = new JsonObject { ["reason"] = "no-safe-action" },
                     ["failureCode"] = "gold-sale-free-map-required"
                 };
@@ -521,13 +517,14 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             modalNative.CompleteSuccessfully();
             return new JsonObject
             {
-                ["status"] = "completed", ["actionsExecuted"] = 1, ["decisions"] = priorDecisions,
-                ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
-                ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                ["status"] = "completed", ["actionsExecuted"] = 1, ["decisions"] = runLedger.Decisions,
+                ["promptTokens"] = runLedger.PromptTokens, ["completionTokens"] = runLedger.CompletionTokens,
+                ["trace"] = runLedger.Trace.DeepClone(), ["providerRouteHistory"] = runLedger.Routes.DeepClone(),
                 ["termination"] = new JsonObject { ["reason"] = "one-native-objective-subflow-completed" }
             };
         }
-        var modalRecovered = RunAsync(request.RootElement, modalNative, modalNative, modalProvider, RecoverInterruptedObjective, CancellationToken.None).GetAwaiter().GetResult();
+        var modalRecovered = RunAsync(request.RootElement, modalNative, modalNative, modalProvider,
+            new DecisionRunLedger(modalProvider, null), RecoverInterruptedObjective, CancellationToken.None).GetAwaiter().GetResult();
         if (ReadString(modalRecovered, "status") != "completed" || ReadInt(modalRecovered, "actionsExecuted", 0) != 3 ||
             modalProvider.CallCount != 3 || interruptedObjectiveCalls != 2 || modalNative.LastInquiryChoice != "affirmative" ||
             modalNative.LastInquiryToken != "inquiry-token" ||
@@ -541,8 +538,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         var companionProviderFailureNative = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100, initialCompanions: 0);
         var companionProviderFailurePlanner = new FakeObjectiveProvider("companions", "gold", "companions");
         var companionProviderFailureChildCalls = 0;
-        async Task<JsonObject> RecoverCompanionProviderFailure(string objectiveId, int priorDecisions, long priorPromptTokens, long priorCompletionTokens,
-            JsonArray priorTrace, JsonArray priorRoutes, CancellationToken cancellationToken)
+        async Task<JsonObject> RecoverCompanionProviderFailure(string objectiveId, DecisionRunLedger runLedger, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             companionProviderFailureChildCalls++;
@@ -553,9 +549,9 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     companionProviderFailureNative.EnterTavernMission();
                     return new JsonObject
                     {
-                        ["status"] = "failed", ["actionsExecuted"] = 4, ["decisions"] = priorDecisions,
-                        ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
-                        ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                        ["status"] = "failed", ["actionsExecuted"] = 4, ["decisions"] = runLedger.Decisions,
+                        ["promptTokens"] = runLedger.PromptTokens, ["completionTokens"] = runLedger.CompletionTokens,
+                        ["trace"] = runLedger.Trace.DeepClone(), ["providerRouteHistory"] = runLedger.Routes.DeepClone(),
                         ["termination"] = new JsonObject { ["reason"] = "companion-loop-failed" },
                         ["failureCode"] = "provider-http-error",
                         ["failure"] = "FreeLLMAPI returned HTTP 502. lastSuccessfulRoute=ovh; fallbackAttempts=2"
@@ -567,9 +563,9 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 companionProviderFailureNative.CompleteSuccessfully();
                 return new JsonObject
                 {
-                    ["status"] = "completed", ["actionsExecuted"] = 1, ["decisions"] = priorDecisions,
-                    ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
-                    ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                    ["status"] = "completed", ["actionsExecuted"] = 1, ["decisions"] = runLedger.Decisions,
+                    ["promptTokens"] = runLedger.PromptTokens, ["completionTokens"] = runLedger.CompletionTokens,
+                    ["trace"] = runLedger.Trace.DeepClone(), ["providerRouteHistory"] = runLedger.Routes.DeepClone(),
                     ["termination"] = new JsonObject { ["reason"] = "native-companion-journal-target-met" }
                 };
             }
@@ -579,14 +575,15 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             companionProviderFailureNative.CompleteGoldObjective();
             return new JsonObject
             {
-                ["status"] = "completed", ["actionsExecuted"] = 1, ["decisions"] = priorDecisions,
-                ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
-                ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                ["status"] = "completed", ["actionsExecuted"] = 1, ["decisions"] = runLedger.Decisions,
+                ["promptTokens"] = runLedger.PromptTokens, ["completionTokens"] = runLedger.CompletionTokens,
+                ["trace"] = runLedger.Trace.DeepClone(), ["providerRouteHistory"] = runLedger.Routes.DeepClone(),
                 ["termination"] = new JsonObject { ["reason"] = "one-native-objective-subflow-completed" }
             };
         }
         var companionProviderRecovered = RunAsync(request.RootElement, companionProviderFailureNative, companionProviderFailureNative,
-            companionProviderFailurePlanner, RecoverCompanionProviderFailure, CancellationToken.None).GetAwaiter().GetResult();
+            companionProviderFailurePlanner,
+            new DecisionRunLedger(companionProviderFailurePlanner, null), RecoverCompanionProviderFailure, CancellationToken.None).GetAwaiter().GetResult();
         var companionProviderAllowedObjectives = companionProviderFailurePlanner.AllowedObjectiveIds;
         if (ReadString(companionProviderRecovered, "status") != "completed" ||
             ReadBoolean(companionProviderRecovered["termination"] as JsonObject, "goalVerified") != true ||
@@ -605,19 +602,18 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         results.Add(new { scenario = "establish-clan-autonomy-leaves-tavern-replans-and-retries-companion-after-native-map-return", modelDecisions = companionProviderFailurePlanner.CallCount, nativeActions = companionProviderRecovered["actionsExecuted"]?.GetValue<int>(), passed = true });
 
         using var attemptRequest = JsonDocument.Parse("{\"goal\":\"Complete the original StoryMode Establish Your Clan quest.\",\"parentProcessId\":321,\"maxDecisions\":1,\"maxElapsedSeconds\":30,\"allowedActionNames\":[\"questDetails\"]}");
-        async Task<JsonObject> StopBeforeObjectiveProgress(string objectiveId, int priorDecisions, long priorPromptTokens, long priorCompletionTokens,
-            JsonArray priorTrace, JsonArray priorRoutes, CancellationToken cancellationToken)
+        async Task<JsonObject> StopBeforeObjectiveProgress(string objectiveId, DecisionRunLedger runLedger, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return new JsonObject
             {
                 ["status"] = "failed",
                 ["actionsExecuted"] = 0,
-                ["decisions"] = priorDecisions,
-                ["promptTokens"] = priorPromptTokens,
-                ["completionTokens"] = priorCompletionTokens,
-                ["trace"] = priorTrace.DeepClone(),
-                ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                ["decisions"] = runLedger.Decisions,
+                ["promptTokens"] = runLedger.PromptTokens,
+                ["completionTokens"] = runLedger.CompletionTokens,
+                ["trace"] = runLedger.Trace.DeepClone(),
+                ["providerRouteHistory"] = runLedger.Routes.DeepClone(),
                 ["termination"] = new JsonObject { ["reason"] = "decision-budget-exhausted" },
                 ["failureCode"] = "provider-budget-exhausted"
             };
@@ -626,13 +622,13 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         var pendingAttemptNative = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100, initialCompanions: 0);
         var pendingAttemptFirstProvider = new FakeObjectiveProvider("companions");
         var pendingAttemptChildCalls = 0;
-        async Task<JsonObject> StopPendingCompanion(string objectiveId, int priorDecisions, long priorPromptTokens, long priorCompletionTokens,
-            JsonArray priorTrace, JsonArray priorRoutes, CancellationToken cancellationToken)
+        async Task<JsonObject> StopPendingCompanion(string objectiveId, DecisionRunLedger runLedger, CancellationToken cancellationToken)
         {
             pendingAttemptChildCalls++;
-            return await StopBeforeObjectiveProgress(objectiveId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorRoutes, cancellationToken);
+            return await StopBeforeObjectiveProgress(objectiveId, runLedger, cancellationToken);
         }
         _ = RunAsync(attemptRequest.RootElement, pendingAttemptNative, pendingAttemptNative, pendingAttemptFirstProvider,
+            new DecisionRunLedger(pendingAttemptFirstProvider, null),
             StopPendingCompanion, CancellationToken.None).GetAwaiter().GetResult();
         var pendingCheckpointReceipt = JsonDocument.Parse(new JsonObject
         {
@@ -652,15 +648,15 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             initialCompanions: 0, startAtSafeTownBackstreet: true);
         pendingAttemptResumeNative.LoadCampaignCheckpoint(pendingAttemptNative.CampaignCheckpointBase64);
         var resumedAttemptChildCalls = 0;
-        async Task<JsonObject> StopResumedCompanion(string objectiveId, int priorDecisions, long priorPromptTokens, long priorCompletionTokens,
-            JsonArray priorTrace, JsonArray priorRoutes, CancellationToken cancellationToken)
+        async Task<JsonObject> StopResumedCompanion(string objectiveId, DecisionRunLedger runLedger, CancellationToken cancellationToken)
         {
             resumedAttemptChildCalls++;
             if (objectiveId != "companions")
                 throw new AgentHostException("establish-clan-attempt-memory-resumed-wrong-objective", "A pending EYC objective must resume the prior model-selected route after a same-Journal restart.");
-            return await StopBeforeObjectiveProgress(objectiveId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorRoutes, cancellationToken);
+            return await StopBeforeObjectiveProgress(objectiveId, runLedger, cancellationToken);
         }
         var pendingResume = RunAsync(attemptRequest.RootElement, pendingAttemptResumeNative, pendingAttemptResumeNative, pendingAttemptResumeProvider,
+            new DecisionRunLedger(pendingAttemptResumeProvider, null),
             StopResumedCompanion, CancellationToken.None).GetAwaiter().GetResult();
         if (pendingAttemptResumeProvider.CallCount != 0 || resumedAttemptChildCalls != 1 || pendingAttemptResumeNative.CampaignCheckpointReads != 1 ||
             !((pendingResume["trace"] as JsonArray)?.OfType<JsonObject>().Any(step =>
@@ -670,23 +666,24 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
         var blockedAttemptNative = new FakeNativeClient(activeQuest: true, lifecycle: "active", initialGold: 100, initialCompanions: 0);
         var blockedAttemptProvider = new FakeObjectiveProvider("companions");
-        async Task<JsonObject> CompanionUnavailable(string objectiveId, int priorDecisions, long priorPromptTokens, long priorCompletionTokens,
-            JsonArray priorTrace, JsonArray priorRoutes, CancellationToken cancellationToken)
+        async Task<JsonObject> CompanionUnavailable(string objectiveId, DecisionRunLedger runLedger, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             return new JsonObject
             {
-                ["status"] = "failed", ["actionsExecuted"] = 0, ["decisions"] = priorDecisions,
-                ["promptTokens"] = priorPromptTokens, ["completionTokens"] = priorCompletionTokens,
-                ["trace"] = priorTrace.DeepClone(), ["providerRouteHistory"] = priorRoutes.DeepClone(),
+                ["status"] = "failed", ["actionsExecuted"] = 0, ["decisions"] = runLedger.Decisions,
+                ["promptTokens"] = runLedger.PromptTokens, ["completionTokens"] = runLedger.CompletionTokens,
+                ["trace"] = runLedger.Trace.DeepClone(), ["providerRouteHistory"] = runLedger.Routes.DeepClone(),
                 ["termination"] = new JsonObject { ["reason"] = "companion-route-unavailable" },
                 ["failureCode"] = "companion-route-unavailable"
             };
         }
         _ = RunAsync(attemptRequest.RootElement, blockedAttemptNative, blockedAttemptNative, blockedAttemptProvider,
+            new DecisionRunLedger(blockedAttemptProvider, null),
             CompanionUnavailable, CancellationToken.None).GetAwaiter().GetResult();
         var blockedAttemptProviderAfterRestart = new FakeObjectiveProvider("gold");
         var blockedAttemptResume = RunAsync(attemptRequest.RootElement, blockedAttemptNative, blockedAttemptNative, blockedAttemptProviderAfterRestart,
+            new DecisionRunLedger(blockedAttemptProviderAfterRestart, null),
             StopBeforeObjectiveProgress, CancellationToken.None).GetAwaiter().GetResult();
         var resumedAllowedObjectives = blockedAttemptProviderAfterRestart.AllowedObjectiveIds.FirstOrDefault() ?? [];
         if (ReadString(blockedAttemptResume, "status") != "failed" || blockedAttemptProviderAfterRestart.CallCount != 1 ||
@@ -701,18 +698,13 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         IAgentHostCampaignNativeClient client,
         IAgentHostQuestDetailsNativeClient questDetailsClient,
         IAgentHostDecisionProvider provider,
+        DecisionRunLedger ledger,
         ObjectiveExecutor executeObjective,
-        CancellationToken cancellationToken,
-        int priorDecisions = 0,
-        long priorPromptTokens = 0,
-        long priorCompletionTokens = 0,
-        JsonArray? priorTrace = null,
-        JsonArray? priorProviderRouteHistory = null)
+        CancellationToken cancellationToken)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", AgentHostCampaignLoop.MaxCumulativeDecisions), 1, AgentHostCampaignLoop.MaxCumulativeDecisions);
         var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 86400), 1, 86400);
-        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var nativeActions = 0;
         var checkpointClient = client as IAgentHostCampaignCheckpointNativeClient;
         JsonObject? campaignCheckpoint = null;
@@ -821,9 +813,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         return BuildResult("failed", "storymode-bootstrap-native-client-unavailable", false,
                             "The Native transport cannot submit the visible original training-field menu option.", "storymode-bootstrap-native-client-unavailable");
 
-                    var bootstrap = await AgentHostStoryModeBootstrapLoop.RunAsync(request, client, bootstrapClient, provider, elapsed.Token,
-                        priorDecisions: ledger.Decisions, priorPromptTokens: ledger.PromptTokens, priorCompletionTokens: ledger.CompletionTokens,
-                        priorTrace: ledger.Trace, priorProviderRouteHistory: ledger.Routes);
+                    var bootstrap = await AgentHostStoryModeBootstrapLoop.RunAsync(request, client, bootstrapClient, provider, ledger, elapsed.Token);
                     ledger.AdoptDelegated(bootstrap);
                     nativeActions += ReadInt(bootstrap, "actionsExecuted", 0);
 
@@ -847,8 +837,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
             if (client is IAgentHostNativeInquiryClient startupInquiryClient && client is IAgentHostStoryModeBannerEditorNativeClient startupBannerEditorClient)
             {
-                var setup = await AgentHostStoryModeSetupLoop.RunAsync(request, client, startupInquiryClient, startupBannerEditorClient, provider, elapsed.Token,
-                    ledger.Decisions, ledger.PromptTokens, ledger.CompletionTokens, ledger.Trace, ledger.Routes);
+                var setup = await AgentHostStoryModeSetupLoop.RunAsync(request, client, startupInquiryClient, startupBannerEditorClient, provider, ledger, elapsed.Token);
                 ledger.AdoptDelegated(setup);
                 nativeActions += ReadInt(setup, "actionsExecuted", 0);
                 if (ReadString(setup, "status") == "failed")
@@ -877,12 +866,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     var questTroopRunRequest = JsonNode.Parse(request.GetRawText())?.AsObject()
                         ?? throw new AgentHostException("quest-troop-screen-request-invalid", "The current EYC run request could not be copied into the QuestTroopManage decision envelope.");
                     var questTroopScreen = await AgentHostQuestTroopScreenLoop.RunAsync(
-                        questTroopRunRequest, client, questTroopScreenClient, provider, elapsed.Token,
-                        priorDecisions: ledger.Decisions,
-                        priorPromptTokens: ledger.PromptTokens,
-                        priorCompletionTokens: ledger.CompletionTokens,
-                        priorTrace: ledger.Trace,
-                        priorProviderRouteHistory: ledger.Routes);
+                        questTroopRunRequest, client, questTroopScreenClient, provider, ledger, elapsed.Token);
                     ledger.AdoptDelegated(questTroopScreen);
                     nativeActions += ReadInt(questTroopScreen, "actionsExecuted", 0);
                     objectiveRuns.Add(new JsonObject
@@ -901,12 +885,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 if (AgentHostMapIncidentLoop.IsActive(current.RootElement))
                 {
                     var mapIncident = await AgentHostMapIncidentLoop.RunAsync(
-                        request, client, questDetailsClient, provider, elapsed.Token,
-                        priorDecisions: ledger.Decisions,
-                        priorPromptTokens: ledger.PromptTokens,
-                        priorCompletionTokens: ledger.CompletionTokens,
-                        priorTrace: ledger.Trace,
-                        priorProviderRouteHistory: ledger.Routes);
+                        request, client, questDetailsClient, provider, ledger, elapsed.Token);
                     ledger.AdoptDelegated(mapIncident);
                     nativeActions += ReadInt(mapIncident, "actionsExecuted", 0);
                     objectiveRuns.Add(new JsonObject
@@ -951,7 +930,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
                 if (IsPlayerCaptive(current.RootElement))
                 {
-                    var recovery = await executeObjective("captivityRecovery", ledger.Decisions, ledger.PromptTokens, ledger.CompletionTokens, ledger.Trace, ledger.Routes, elapsed.Token);
+                    var recovery = await executeObjective("captivityRecovery", ledger, elapsed.Token);
                     ledger.AdoptDelegated(recovery);
                     nativeActions += ReadInt(recovery, "actionsExecuted", 0);
                     objectiveRuns.Add(new JsonObject
@@ -1229,12 +1208,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 else
                 {
                     planner = await AgentHostEstablishYourClanGoalLoop.RunAsync(
-                        request, client, questDetailsClient, provider, elapsed.Token,
-                        priorDecisions: ledger.Decisions,
-                        priorPromptTokens: ledger.PromptTokens,
-                        priorCompletionTokens: ledger.CompletionTokens,
-                        priorTrace: ledger.Trace,
-                        priorProviderRouteHistory: ledger.Routes,
+                        request, client, questDetailsClient, provider, ledger, elapsed.Token,
                         supportedObjectives: selectableObjectives,
                         observedQuestDetails: detailsReceipt,
                         observedNativeState: JsonNode.Parse(current.RootElement.GetRawText())?.AsObject(),
@@ -1287,13 +1261,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             ["timeControlModeBefore"] = ReadString(beforeRefresh.RootElement, "timeControlMode")
                         });
                         var refresh = await AgentHostCampaignLoop.RunAsync(
-                            refreshRequest.RootElement, client, provider, elapsed.Token,
-                            disposeProvider: false,
-                            priorDecisions: ledger.Decisions,
-                            priorPromptTokens: ledger.PromptTokens,
-                            priorCompletionTokens: ledger.CompletionTokens,
-                            priorTrace: ledger.Trace,
-                            priorProviderRouteHistory: ledger.Routes);
+                            refreshRequest.RootElement, client, provider, ledger, elapsed.Token,
+                            disposeProvider: false);
                         AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("safeSettlementRefresh", refresh);
                         ledger.AdoptDelegated(refresh);
                         nativeActions += ReadInt(refresh, "actionsExecuted", 0);
@@ -1316,12 +1285,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         {
                             using var refreshBattleRequest = await BuildCurrentBattleInterruptionRequestAsync(request, questDetailsClient, "safeSettlementRefresh", elapsed.Token);
                             var interruptedBattle = await AgentHostBattleSimulationLoop.RunAsync(
-                                refreshBattleRequest.RootElement, refreshBattleClient, provider, elapsed.Token,
-                                priorDecisions: ledger.Decisions,
-                                priorPromptTokens: ledger.PromptTokens,
-                                priorCompletionTokens: ledger.CompletionTokens,
-                                priorTrace: ledger.Trace,
-                                priorProviderRouteHistory: ledger.Routes,
+                                refreshBattleRequest.RootElement, refreshBattleClient, provider, ledger, elapsed.Token,
                                 recoverPlayerCaptivity: true);
                             AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("safeSettlementRefreshBanditInterruption", interruptedBattle);
                             ledger.AdoptDelegated(interruptedBattle);
@@ -1387,7 +1351,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 }
 
                 JsonObject child;
-                child = await executeObjective(objectiveId, ledger.Decisions, ledger.PromptTokens, ledger.CompletionTokens, ledger.Trace, ledger.Routes, elapsed.Token);
+                child = await executeObjective(objectiveId, ledger, elapsed.Token);
                 AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult(objectiveId, child);
 
                 ledger.AdoptDelegated(child);
@@ -1426,12 +1390,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     if (AgentHostMapIncidentLoop.IsActive(failedState.RootElement))
                     {
                         var mapIncident = await AgentHostMapIncidentLoop.RunAsync(
-                            request, client, questDetailsClient, provider, elapsed.Token,
-                            priorDecisions: ledger.Decisions,
-                            priorPromptTokens: ledger.PromptTokens,
-                            priorCompletionTokens: ledger.CompletionTokens,
-                            priorTrace: ledger.Trace,
-                            priorProviderRouteHistory: ledger.Routes);
+                            request, client, questDetailsClient, provider, ledger, elapsed.Token);
                         ledger.AdoptDelegated(mapIncident);
                         nativeActions += ReadInt(mapIncident, "actionsExecuted", 0);
                         objectiveRuns.Add(new JsonObject
@@ -1480,12 +1439,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     {
                         using var incidentBattleRequest = await BuildCurrentBattleInterruptionRequestAsync(request, questDetailsClient, objectiveId, elapsed.Token);
                         var incidentBattle = await AgentHostBattleSimulationLoop.RunAsync(
-                            incidentBattleRequest.RootElement, incidentBattleClient, provider, elapsed.Token,
-                            priorDecisions: ledger.Decisions,
-                            priorPromptTokens: ledger.PromptTokens,
-                            priorCompletionTokens: ledger.CompletionTokens,
-                            priorTrace: ledger.Trace,
-                            priorProviderRouteHistory: ledger.Routes,
+                            incidentBattleRequest.RootElement, incidentBattleClient, provider, ledger, elapsed.Token,
                             recoverPlayerCaptivity: true);
                         AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("incidentBattleSimulation", incidentBattle);
                         ledger.AdoptDelegated(incidentBattle);
@@ -1686,8 +1640,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     if (storySetupVisible && client is IAgentHostNativeInquiryClient storySetupInquiryClient &&
                         client is IAgentHostStoryModeBannerEditorNativeClient storySetupBannerClient)
                     {
-                        var setup = await AgentHostStoryModeSetupLoop.RunAsync(request, client, storySetupInquiryClient, storySetupBannerClient, provider, elapsed.Token,
-                            ledger.Decisions, ledger.PromptTokens, ledger.CompletionTokens, ledger.Trace, ledger.Routes);
+                        var setup = await AgentHostStoryModeSetupLoop.RunAsync(request, client, storySetupInquiryClient, storySetupBannerClient, provider, ledger, elapsed.Token);
                         ledger.AdoptDelegated(setup);
                         nativeActions += ReadInt(setup, "actionsExecuted", 0);
                         if (ReadString(setup, "status") == "failed")
@@ -1724,7 +1677,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
                         var inquiryGoal = await BuildCurrentEycNativeInquiryGoalAsync(request, questDetailsClient, objectiveId, elapsed.Token);
                         var resolution = await AgentHostNativeInquiryResolution.RunAsync(
-                            client, inquiryClient, provider, elapsed.Token,
+                            client, inquiryClient, provider,
+            elapsed.Token,
                             runId + "-inquiry-" + ledger.NextDecisionNumber.ToString(CultureInfo.InvariantCulture), inquiryGoal);
                         ledger.RecordDelegated(resolution);
                         nativeActions += ReadInt(resolution, "actionsExecuted", 0);

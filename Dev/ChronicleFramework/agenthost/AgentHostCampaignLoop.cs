@@ -318,7 +318,7 @@ internal static class AgentHostCampaignLoop
 
         var arrivalClient = new FakeCampaignNativeClient(timeoutOnMove: false);
         var arrivalProvider = new FakeCampaignDecisionProvider(timeoutOnMove: false);
-        var arrival = await RunAsync(request.RootElement, arrivalClient, arrivalProvider, CancellationToken.None);
+        var arrival = await RunAsync(request.RootElement, arrivalClient, arrivalProvider, new DecisionRunLedger(arrivalProvider, null), CancellationToken.None);
         if (ReadString(arrival, "status") != "completed" ||
             ReadInt(arrival, "decisions", 0) != 5 ||
             ReadInt(arrival, "actionsExecuted", 0) != 2 ||
@@ -342,10 +342,12 @@ internal static class AgentHostCampaignLoop
         using var refreshRequest = JsonDocument.Parse(refreshRequestNode.ToJsonString());
         var sharedProvider = new FakeCampaignDecisionProvider(timeoutOnMove: false);
         var sharedArrivalClient = new FakeCampaignNativeClient(timeoutOnMove: false, includeActiveEycQuest: true);
-        var sharedArrival = await RunAsync(refreshRequest.RootElement, sharedArrivalClient, sharedProvider, CancellationToken.None,
-            disposeProvider: false, priorDecisions: 3, priorPromptTokens: 20, priorCompletionTokens: 2,
+        var sharedArrivalLedger = new DecisionRunLedger(sharedProvider, "campaign-arrival-self-test", priorDecisions: 3,
+            priorPromptTokens: 20, priorCompletionTokens: 2,
             priorTrace: new JsonArray(new JsonObject { ["stage"] = "prior-objective-trace" }),
             priorProviderRouteHistory: new JsonArray(new JsonObject { ["decision"] = 3, ["responseModelId"] = sharedProvider.ModelId }));
+        var sharedArrival = await RunAsync(refreshRequest.RootElement, sharedArrivalClient, sharedProvider, sharedArrivalLedger, CancellationToken.None,
+            disposeProvider: false);
         if (ReadString(sharedArrival, "status") != "completed" || ReadInt(sharedArrival, "decisions", 0) != 8 ||
             sharedArrival["promptTokens"]?.GetValue<long>() != 20 || sharedArrival["completionTokens"]?.GetValue<long>() != 2 ||
             ReadInt(sharedArrival, "actionsExecuted", 0) != 2 || sharedArrivalClient.MoveCount != 1 || sharedProvider.CallCount != 5 ||
@@ -359,7 +361,7 @@ internal static class AgentHostCampaignLoop
 
         var timeoutClient = new FakeCampaignNativeClient(timeoutOnMove: true);
         var timeoutProvider = new FakeCampaignDecisionProvider(timeoutOnMove: true);
-        var timeout = await RunAsync(request.RootElement, timeoutClient, timeoutProvider, CancellationToken.None);
+        var timeout = await RunAsync(request.RootElement, timeoutClient, timeoutProvider, new DecisionRunLedger(timeoutProvider, null), CancellationToken.None);
         if (ReadString(timeout, "status") != "failed" ||
             timeout["termination"] is not JsonObject timeoutTermination || ReadString(timeoutTermination, "reason") != "native-action-result-ambiguous" ||
             ReadInt(timeout, "actionsExecuted", 0) != 1 || timeoutClient.MapQueryCount != 1 || timeoutClient.MoveCount != 1 || timeoutProvider.CallCount != 3 ||
@@ -369,7 +371,7 @@ internal static class AgentHostCampaignLoop
 
         var unsupportedClient = new FakeCampaignNativeClient(timeoutOnMove: false);
         var unsupportedProvider = new FakeCampaignDecisionProvider(timeoutOnMove: false, unsupportedGoal: true);
-        var unsupported = await RunAsync(request.RootElement, unsupportedClient, unsupportedProvider, CancellationToken.None);
+        var unsupported = await RunAsync(request.RootElement, unsupportedClient, unsupportedProvider, new DecisionRunLedger(unsupportedProvider, null), CancellationToken.None);
         if (ReadString(unsupported, "status") != "failed" ||
             ReadString(unsupported, "failureCode") != "campaign-goal-unsupported" ||
             ReadInt(unsupported, "actionsExecuted", 0) != 0 || unsupportedClient.MapQueryCount != 0 ||
@@ -389,7 +391,7 @@ internal static class AgentHostCampaignLoop
         using var eycScopeDocument = JsonDocument.Parse(eycScopeRequest.ToJsonString());
         var eycScopeClient = new FakeCampaignNativeClient(timeoutOnMove: false, includeActiveEycQuest: true);
         var eycScopeProvider = new FakeCampaignDecisionProvider(timeoutOnMove: false, reconsiderEycScope: true);
-        var reconsideredEycScope = await RunAsync(eycScopeDocument.RootElement, eycScopeClient, eycScopeProvider, CancellationToken.None);
+        var reconsideredEycScope = await RunAsync(eycScopeDocument.RootElement, eycScopeClient, eycScopeProvider, new DecisionRunLedger(eycScopeProvider, null), CancellationToken.None);
         var reconsiderationTrace = reconsideredEycScope["trace"] as JsonArray;
         if (ReadString(reconsideredEycScope, "status") != "failed" ||
             ReadString(reconsideredEycScope, "failureCode") != "establish-clan-autonomy-native-client-unavailable" ||
@@ -420,21 +422,18 @@ internal static class AgentHostCampaignLoop
             throw new AgentHostException("campaign-native-session-missing", "The Campaign Host requires the launching game process and loaded Native session identity.");
         var client = new NativeMailboxClient(protocolRoot, TimeSpan.FromSeconds(nativeTimeoutSeconds), expectedProcessId, nativeSessionId);
         var provider = Program.CreateCampaignDecisionProvider(request);
-        return await RunAsync(request, client, provider, cancellationToken, onReady);
+        return await RunAsync(request, client, provider, new DecisionRunLedger(provider, ReadString(request, "runId")),
+            cancellationToken, onReady);
     }
 
     internal static async Task<JsonObject> RunAsync(
         JsonElement request,
         IAgentHostCampaignNativeClient client,
         IAgentHostDecisionProvider provider,
+        DecisionRunLedger ledger,
         CancellationToken cancellationToken,
         Action<int>? onReady = null,
-        bool disposeProvider = true,
-        int priorDecisions = 0,
-        long priorPromptTokens = 0,
-        long priorCompletionTokens = 0,
-        JsonArray? priorTrace = null,
-        JsonArray? priorProviderRouteHistory = null)
+        bool disposeProvider = true)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var expectedParentProcessId = ReadInt(request, "parentProcessId", 0);
@@ -469,7 +468,6 @@ internal static class AgentHostCampaignLoop
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
 
-        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var safeSettlementArrivalOnly = string.Equals(ReadString(request, "scopeRestriction"), "safe-settlement-arrival", StringComparison.Ordinal);
         var excludedSettlementIds = new HashSet<string>(StringComparer.Ordinal);
         if (safeSettlementArrivalOnly && request.TryGetProperty("excludedSettlementIds", out var excludedSettlementArray) && excludedSettlementArray.ValueKind == JsonValueKind.Array)
@@ -514,6 +512,7 @@ internal static class AgentHostCampaignLoop
                 throw new AgentHostException("native-parent-process-mismatch", "The Native mailbox answered from a different Bannerlord process than the Host owner.");
             onReady?.Invoke(nativeProcessId);
 
+            var priorDecisions = ledger.Decisions;
             for (var iteration = priorDecisions + 1; iteration <= maxDecisions; iteration++)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
@@ -651,12 +650,7 @@ internal static class AgentHostCampaignLoop
                     if (client is not IAgentHostVillageToolsQuestNativeClient questClient)
                         throw new AgentHostException("village-tools-native-client-unavailable", "The Native transport does not implement the bounded VillageNeedsTools quest protocol.");
                     return await AgentHostVillageToolsQuestLoop.RunAsync(
-                        request, questClient, provider, elapsed.Token,
-                        priorDecisions: ledger.Decisions,
-                    priorPromptTokens: ledger.PromptTokens,
-                    priorCompletionTokens: ledger.CompletionTokens,
-                    priorTrace: ledger.Trace,
-                    priorProviderRouteHistory: ledger.Routes);
+                        request, questClient, provider, ledger, elapsed.Token);
                 }
                 if (goalClassification == "supported-battle-simulation")
                 {
@@ -667,12 +661,7 @@ internal static class AgentHostCampaignLoop
                     if (client is not IAgentHostBattleSimulationNativeClient battleClient)
                         throw new AgentHostException("battle-simulation-native-client-unavailable", "The Native transport does not implement the bounded Campaign BattleSimulation protocol.");
                     return await AgentHostBattleSimulationLoop.RunAsync(
-                        request, battleClient, provider, elapsed.Token,
-                        priorDecisions: ledger.Decisions,
-                    priorPromptTokens: ledger.PromptTokens,
-                    priorCompletionTokens: ledger.CompletionTokens,
-                    priorTrace: ledger.Trace,
-                    priorProviderRouteHistory: ledger.Routes);
+                        request, battleClient, provider, ledger, elapsed.Token);
                 }
                 if (goalClassification == "supported-battle-and-captivity")
                 {
@@ -683,12 +672,7 @@ internal static class AgentHostCampaignLoop
                     if (client is not IAgentHostBattleSimulationNativeClient battleClient)
                         throw new AgentHostException("battle-captivity-native-client-unavailable", "The Native transport does not implement the bounded Campaign BattleSimulation/captivity protocol.");
                     return await AgentHostBattleSimulationLoop.RunAsync(
-                        request, battleClient, provider, elapsed.Token,
-                        priorDecisions: ledger.Decisions,
-                    priorPromptTokens: ledger.PromptTokens,
-                    priorCompletionTokens: ledger.CompletionTokens,
-                    priorTrace: ledger.Trace,
-                    priorProviderRouteHistory: ledger.Routes,
+                        request, battleClient, provider, ledger, elapsed.Token,
                         recoverPlayerCaptivity: true);
                 }
                 if (goalClassification == "supported-establish-your-clan")
@@ -702,12 +686,7 @@ internal static class AgentHostCampaignLoop
                         if (client is not IAgentHostQuestDetailsNativeClient plannerDetailsClient)
                             throw new AgentHostException("establish-clan-quest-details-client-unavailable", "The Native transport does not implement the read-only Quest Journal query required by the StoryMode planner.");
                         return await AgentHostEstablishYourClanGoalLoop.RunAsync(
-                            request, client, plannerDetailsClient, provider, elapsed.Token,
-                            priorDecisions: ledger.Decisions,
-                    priorPromptTokens: ledger.PromptTokens,
-                    priorCompletionTokens: ledger.CompletionTokens,
-                    priorTrace: ledger.Trace,
-                    priorProviderRouteHistory: ledger.Routes);
+                            request, client, plannerDetailsClient, provider, ledger, elapsed.Token);
                     }
                     if (!requestedActions.SetEquals(AllSupportedActions))
                         throw new AgentHostException("establish-clan-autonomy-action-set-unavailable", "The StoryMode autonomy loop requires the exact reviewed Native superset for its currently integrated Gold, PartySize, Renown and Companion subgoals.");
@@ -719,8 +698,7 @@ internal static class AgentHostCampaignLoop
                         client is not IAgentHostCompanionHiringNativeClient companionClient)
                         throw new AgentHostException("establish-clan-autonomy-native-client-unavailable", "The Native transport does not implement the reviewed Quest Journal, Trade-sale, recruitment, Tavern Mission and BattleSimulation subgoal contracts.");
 
-                    async Task<JsonObject> ExecuteObjectiveAsync(string objectiveId, int priorSubDecisions, long priorSubPromptTokens,
-                        long priorSubCompletionTokens, JsonArray priorSubTrace, JsonArray priorSubRoutes, CancellationToken subToken)
+                    async Task<JsonObject> ExecuteObjectiveAsync(string objectiveId, DecisionRunLedger runLedger, CancellationToken subToken)
                     {
                         var childRequestNode = JsonNode.Parse(request.GetRawText())?.AsObject()
                             ?? throw new AgentHostException("establish-clan-subgoal-request-invalid", "The active StoryMode request could not be cloned for a bounded objective subgoal.");
@@ -750,21 +728,14 @@ internal static class AgentHostCampaignLoop
                         using var childRequest = JsonDocument.Parse(childRequestNode.ToJsonString());
                         async Task<JsonObject> ExecuteGoldObjectiveAsync()
                         {
-                            var sale = await AgentHostEstablishClanGoldSaleLoop.RunAsync(childRequest.RootElement, client, goldSaleClient, provider, subToken,
-                                priorDecisions: priorSubDecisions, priorPromptTokens: priorSubPromptTokens, priorCompletionTokens: priorSubCompletionTokens,
-                                priorTrace: priorSubTrace, priorProviderRouteHistory: priorSubRoutes);
+                            var sale = await AgentHostEstablishClanGoldSaleLoop.RunAsync(childRequest.RootElement, client, goldSaleClient, provider, runLedger, subToken);
                             if (!AgentHostEstablishYourClanAutonomyLoop.ShouldUseBattleLootFallback(sale)) return sale;
 
                             var trainingRequestNode = JsonNode.Parse(childRequest.RootElement.GetRawText())?.AsObject()
                                 ?? throw new AgentHostException("establish-clan-training-issue-request-invalid", "The active Gold objective could not be cloned for a current visible Native training Issue.");
                             trainingRequestNode["goal"] = "Raise the current original Establish Your Clan Gold Journal by completing a currently visible direct Native Train Troops for Retainers Issue, upgrading its borrowed troops through PartyVM and returning them to the giver through the visible Native inquiry. Re-read the EYC Journal after the real payout.";
                             using var trainingRequest = JsonDocument.Parse(trainingRequestNode.ToJsonString());
-                            var training = await AgentHostEstablishClanTrainingIssueLoop.RunAsync(trainingRequest.RootElement, trainingIssueClient, battleClient, provider, subToken,
-                                priorDecisions: ReadInt(sale, "decisions", priorSubDecisions),
-                                priorPromptTokens: ReadLong(sale, "promptTokens", priorSubPromptTokens),
-                                priorCompletionTokens: ReadLong(sale, "completionTokens", priorSubCompletionTokens),
-                                priorTrace: sale["trace"] as JsonArray ?? priorSubTrace,
-                                priorProviderRouteHistory: sale["providerRouteHistory"] as JsonArray ?? priorSubRoutes);
+                            var training = await AgentHostEstablishClanTrainingIssueLoop.RunAsync(trainingRequest.RootElement, trainingIssueClient, battleClient, provider, runLedger, subToken);
                             AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("goldTrainingIssueIncome", training);
                             training["resultKind"] = "establish-clan-gold-sale-with-training-issue-route";
                             training["actionsExecuted"] = ReadInt(sale, "actionsExecuted", 0) + ReadInt(training, "actionsExecuted", 0);
@@ -788,12 +759,7 @@ internal static class AgentHostCampaignLoop
                                 ?? throw new AgentHostException("establish-clan-gold-loot-request-invalid", "The Native no-goods sale result could not be cloned for its bounded battle-loot fallback.");
                             battleRequestNode["goal"] = "The original Establish Your Clan Gold Journal objective is unmet and the current Native PlayerInventory has no transferable Goods. Resolve one currently visible hostile Bandit through the original Campaign BattleSimulation, take only currently offered Native loot, and return to the EYC planner. This may produce saleable goods but does not prove Gold progress; do not enter a real-time Mission or control the Campaign clock.";
                             using var battleRequest = JsonDocument.Parse(battleRequestNode.ToJsonString());
-                            var battle = await AgentHostBattleSimulationLoop.RunAsync(battleRequest.RootElement, battleClient, provider, subToken,
-                                priorDecisions: ReadInt(training, "decisions", priorSubDecisions),
-                                priorPromptTokens: ReadLong(training, "promptTokens", priorSubPromptTokens),
-                                priorCompletionTokens: ReadLong(training, "completionTokens", priorSubCompletionTokens),
-                                priorTrace: training["trace"] as JsonArray ?? priorSubTrace,
-                                priorProviderRouteHistory: training["providerRouteHistory"] as JsonArray ?? priorSubRoutes,
+                            var battle = await AgentHostBattleSimulationLoop.RunAsync(battleRequest.RootElement, battleClient, provider, runLedger, subToken,
                                 recoverPlayerCaptivity: true);
                             AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("goldLootBattleFallback", battle);
                             battle["resultKind"] = "establish-clan-gold-sale-with-battle-loot-fallback";
@@ -828,31 +794,20 @@ internal static class AgentHostCampaignLoop
                         return objectiveId switch
                         {
                             "gold" => await ExecuteGoldObjectiveAsync(),
-                            "partySize" => await AgentHostEstablishClanRecruitmentLoop.RunAsync(childRequest.RootElement, client, recruitmentClient, questDetailsClient, provider, subToken,
-                                priorDecisions: priorSubDecisions, priorPromptTokens: priorSubPromptTokens, priorCompletionTokens: priorSubCompletionTokens,
-                                priorTrace: priorSubTrace, priorProviderRouteHistory: priorSubRoutes),
-                            "companions" => await AgentHostEstablishClanCompanionLoop.RunAsync(childRequest.RootElement, client, companionClient, provider, subToken,
-                                priorDecisions: priorSubDecisions, priorPromptTokens: priorSubPromptTokens, priorCompletionTokens: priorSubCompletionTokens,
-                                priorTrace: priorSubTrace, priorProviderRouteHistory: priorSubRoutes),
-                            "renown" => await AgentHostBattleSimulationLoop.RunAsync(childRequest.RootElement, battleClient, provider, subToken,
-                                priorDecisions: priorSubDecisions, priorPromptTokens: priorSubPromptTokens, priorCompletionTokens: priorSubCompletionTokens,
-                                priorTrace: priorSubTrace, priorProviderRouteHistory: priorSubRoutes, recoverPlayerCaptivity: true),
+                            "partySize" => await AgentHostEstablishClanRecruitmentLoop.RunAsync(childRequest.RootElement, client, recruitmentClient, questDetailsClient, provider, runLedger, subToken),
+                            "companions" => await AgentHostEstablishClanCompanionLoop.RunAsync(childRequest.RootElement, client, companionClient, provider, runLedger, subToken),
+                            "renown" => await AgentHostBattleSimulationLoop.RunAsync(childRequest.RootElement, battleClient, provider, runLedger, subToken,
+                                recoverPlayerCaptivity: true),
                             "captivityRecovery" => client is IAgentHostCaptivityRecoveryNativeClient captivityRecoveryClient
-                                ? await AgentHostCaptivityRecoveryLoop.RunAsync(childRequest.RootElement, client, captivityRecoveryClient, questDetailsClient, provider, subToken,
-                                    priorDecisions: priorSubDecisions, priorPromptTokens: priorSubPromptTokens, priorCompletionTokens: priorSubCompletionTokens,
-                                    priorTrace: priorSubTrace, priorProviderRouteHistory: priorSubRoutes, planObjectiveAfterRecovery: false)
+                                ? await AgentHostCaptivityRecoveryLoop.RunAsync(childRequest.RootElement, client, captivityRecoveryClient, questDetailsClient, provider, runLedger, subToken,
+                                    planObjectiveAfterRecovery: false)
                                 : throw new AgentHostException("establish-clan-captivity-recovery-client-unavailable", "The Native transport does not implement the current captivity recovery action contract required by the EYC parent loop."),
                             _ => throw new AgentHostException("establish-clan-objective-route-unavailable", "No integrated Native objective executor is registered for this StoryMode target.")
                         };
                     }
 
                     return await AgentHostEstablishYourClanAutonomyLoop.RunAsync(
-                        request, client, questDetailsClient, provider, ExecuteObjectiveAsync, elapsed.Token,
-                        priorDecisions: ledger.Decisions,
-                    priorPromptTokens: ledger.PromptTokens,
-                    priorCompletionTokens: ledger.CompletionTokens,
-                    priorTrace: ledger.Trace,
-                    priorProviderRouteHistory: ledger.Routes);
+                        request, client, questDetailsClient, provider, ledger, ExecuteObjectiveAsync, elapsed.Token);
                 }
                 if (goalClassification == "supported-captivity-recovery")
                 {
@@ -864,12 +819,7 @@ internal static class AgentHostCampaignLoop
                         client is not IAgentHostQuestDetailsNativeClient questDetailsClient)
                         throw new AgentHostException("captivity-recovery-native-client-unavailable", "The Native transport does not implement read-only Quest details and explicit Captivity recovery actions.");
                     return await AgentHostCaptivityRecoveryLoop.RunAsync(
-                        request, client, captivityClient, questDetailsClient, provider, elapsed.Token,
-                        priorDecisions: ledger.Decisions,
-                    priorPromptTokens: ledger.PromptTokens,
-                    priorCompletionTokens: ledger.CompletionTokens,
-                    priorTrace: ledger.Trace,
-                    priorProviderRouteHistory: ledger.Routes);
+                        request, client, captivityClient, questDetailsClient, provider, ledger, elapsed.Token);
                 }
                 if (goalClassification == "supported-establish-clan-gold-sale")
                 {
@@ -880,12 +830,7 @@ internal static class AgentHostCampaignLoop
                     if (client is not IAgentHostGoldSaleNativeClient goldSaleClient)
                         throw new AgentHostException("establish-clan-gold-sale-native-client-unavailable", "The Native transport does not implement the original Trade sale and active StoryMode Journal protocol.");
                     return await AgentHostEstablishClanGoldSaleLoop.RunAsync(
-                        request, client, goldSaleClient, provider, elapsed.Token,
-                        priorDecisions: ledger.Decisions,
-                    priorPromptTokens: ledger.PromptTokens,
-                    priorCompletionTokens: ledger.CompletionTokens,
-                    priorTrace: ledger.Trace,
-                    priorProviderRouteHistory: ledger.Routes);
+                        request, client, goldSaleClient, provider, ledger, elapsed.Token);
                 }
                 if (!goalScopeClassified)
                 {
@@ -1077,7 +1022,7 @@ internal static class AgentHostCampaignLoop
             ["providerPromptCacheMissTokens"] = provider is OllamaNativeProvider missMeter ? missMeter.PromptCacheMissTokens : null,
             ["providerActualCostEstimateCny"] = provider is OllamaNativeProvider actualCostMeter ? actualCostMeter.ActualCostEstimateCny : null,
             ["providerReservedCostUpperCny"] = provider is OllamaNativeProvider costMeter ? costMeter.ReservedCostUpperBoundCny : null,
-            ["providerRouteHistory"] = ledger.Routes,
+            ["providerRouteHistory"] = ledger.Routes.DeepClone(),
             ["termination"] = new JsonObject { ["reason"] = terminationReason, ["completedByProvider"] = completedByProvider, ["goalVerified"] = goalVerified },
             ["failure"] = failure,
             ["failureCode"] = failureCode,

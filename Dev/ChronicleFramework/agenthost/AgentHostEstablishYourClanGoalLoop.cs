@@ -110,7 +110,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
         using var request = JsonDocument.Parse("""
             {"runId":"establish-clan-planner-selftest","goal":"Choose one unmet Establish Your Clan objective.","parentProcessId":321,"maxDecisions":8,"maxElapsedSeconds":10,"allowedActionNames":["questDetails"]}
             """);
-        var result = await RunAsync(request.RootElement, native, native, provider, CancellationToken.None);
+        var result = await RunAsync(request.RootElement, native, native, provider, new DecisionRunLedger(provider, null), CancellationToken.None);
         var providerCatalog = provider.FirstRequest?["allowedActions"] as JsonArray;
         if (ReadString(result, "status") != "completed" || ReadString(result, "resultKind") != "objective-plan" || ReadString(result["selection"] as JsonObject, "objectiveId") != "partySize" ||
             ReadBoolean(result["termination"] as JsonObject, "goalVerified") == true || native.QuestDetailsReads != 1 || native.MutatingActionCount != 0 ||
@@ -135,7 +135,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
         var correctionNative = new FakeNativeClient(snapshot);
         var correctionProvider = new FakeObjectiveCorrectionProvider("companions", "partySize");
         var correctionSupported = new HashSet<string>(StringComparer.Ordinal) { "partySize" };
-        var correctedPlan = await RunAsync(request.RootElement, correctionNative, correctionNative, correctionProvider, CancellationToken.None,
+        var correctedPlan = await RunAsync(request.RootElement, correctionNative, correctionNative, correctionProvider, new DecisionRunLedger(correctionProvider, null), CancellationToken.None,
             supportedObjectives: correctionSupported);
         var correctedCatalog = correctionProvider.Requests.Count > 1 ? correctionProvider.Requests[1]["allowedActions"] as JsonArray : null;
         if (ReadString(correctedPlan, "status") != "completed" || ReadString(correctedPlan["selection"] as JsonObject, "objectiveId") != "partySize" ||
@@ -148,7 +148,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
 
         var truncatedNative = new FakeNativeClient(snapshot);
         var truncatedProvider = new FakeTruncatedObjectiveProvider("partySize");
-        var truncatedPlan = await RunAsync(request.RootElement, truncatedNative, truncatedNative, truncatedProvider, CancellationToken.None);
+        var truncatedPlan = await RunAsync(request.RootElement, truncatedNative, truncatedNative, truncatedProvider, new DecisionRunLedger(truncatedProvider, null), CancellationToken.None);
         if (ReadString(truncatedPlan, "status") != "completed" || ReadString(truncatedPlan["selection"] as JsonObject, "objectiveId") != "partySize" ||
             ReadInt(truncatedPlan, "decisions", 0) != 2 || truncatedProvider.CallCount != 2 || truncatedNative.MutatingActionCount != 0 ||
             ReadString(truncatedProvider.Requests[1]["decisionFeedback"] as JsonObject, "kind") != "decision-rejected-before-native" ||
@@ -161,7 +161,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
         inconsistentSnapshot["partySize"]!["met"] = true;
         var inconsistentProvider = new FakeDecisionProvider("partySize");
         var inconsistentNative = new FakeNativeClient(inconsistentSnapshot);
-        var inconsistentResult = await RunAsync(request.RootElement, inconsistentNative, inconsistentNative, inconsistentProvider, CancellationToken.None);
+        var inconsistentResult = await RunAsync(request.RootElement, inconsistentNative, inconsistentNative, inconsistentProvider, new DecisionRunLedger(inconsistentProvider, null), CancellationToken.None);
         var resultJournalSnapshot = inconsistentResult["objectiveSnapshot"]?["partySize"] as JsonObject;
         if (ReadString(inconsistentResult, "status") != "completed" || ReadString(inconsistentResult["selection"] as JsonObject, "objectiveId") != "partySize" ||
             ReadNumber(resultJournalSnapshot, "current") != 8 || ReadNumber(resultJournalSnapshot, "target") != 20 ||
@@ -172,7 +172,7 @@ internal static class AgentHostEstablishYourClanGoalLoop
         var inactiveProvider = new FakeDecisionProvider("partySize");
         try
         {
-            _ = await RunAsync(request.RootElement, inactiveNative, inactiveNative, inactiveProvider, CancellationToken.None);
+            _ = await RunAsync(request.RootElement, inactiveNative, inactiveNative, inactiveProvider, new DecisionRunLedger(inactiveProvider, null), CancellationToken.None);
             throw new AgentHostException("establish-clan-inactive-quest-planner-accepted", "The planner accepted a Campaign without the exact active StoryMode quest.");
         }
         catch (AgentHostException exception) when (exception.Code == "establish-clan-quest-no-longer-active")
@@ -198,12 +198,8 @@ internal static class AgentHostEstablishYourClanGoalLoop
         IAgentHostCampaignNativeClient client,
         IAgentHostQuestDetailsNativeClient questDetailsClient,
         IAgentHostDecisionProvider provider,
+        DecisionRunLedger ledger,
         CancellationToken cancellationToken,
-        int priorDecisions = 0,
-        long priorPromptTokens = 0,
-        long priorCompletionTokens = 0,
-        JsonArray? priorTrace = null,
-        JsonArray? priorProviderRouteHistory = null,
         IReadOnlySet<string>? supportedObjectives = null,
         JsonObject? observedQuestDetails = null,
         JsonObject? observedNativeState = null,
@@ -287,7 +283,6 @@ internal static class AgentHostEstablishYourClanGoalLoop
             ["allowedActions"] = actionCatalog,
             ["allowedControls"] = new JsonArray()
         };
-        var ledger = new DecisionRunLedger(provider, null, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         ProviderDecisionResult decision = null!;
         string? selectedObjective = null;
         JsonObject? selectedGoal = null;
@@ -365,8 +360,8 @@ internal static class AgentHostEstablishYourClanGoalLoop
                 ["actionsExecuted"] = 1,
                 ["promptTokens"] = ledger.PromptTokens,
                 ["completionTokens"] = ledger.CompletionTokens,
-                ["providerRouteHistory"] = ledger.Routes,
-                ["trace"] = ledger.Trace,
+                ["providerRouteHistory"] = ledger.Routes.DeepClone(),
+                ["trace"] = ledger.Trace.DeepClone(),
                 ["questDetails"] = receipt.DeepClone(),
                 ["objectiveSnapshot"] = snapshot.DeepClone(),
                 ["journalObjectiveSnapshot"] = journalObjectives.DeepClone(),
@@ -390,8 +385,8 @@ internal static class AgentHostEstablishYourClanGoalLoop
             ["actionsExecuted"] = 1,
             ["promptTokens"] = ledger.PromptTokens,
             ["completionTokens"] = ledger.CompletionTokens,
-            ["providerRouteHistory"] = ledger.Routes,
-            ["trace"] = ledger.Trace,
+            ["providerRouteHistory"] = ledger.Routes.DeepClone(),
+            ["trace"] = ledger.Trace.DeepClone(),
             ["questDetails"] = receipt.DeepClone(),
             ["objectiveSnapshot"] = snapshot.DeepClone(),
             ["journalObjectiveSnapshot"] = journalObjectives.DeepClone(),

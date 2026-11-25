@@ -43,7 +43,7 @@ internal static class AgentHostStoryModeBootstrapLoop
         var fakeClient = new FakeBootstrapNativeClient();
         var fakeProvider = new FakeBootstrapProvider();
         using var request = JsonDocument.Parse("{\"runId\":\"storymode-bootstrap-selftest\",\"goal\":\"Autonomously complete the original Establish Your Clan quest.\",\"maxElapsedSeconds\":10}");
-        var execution = RunAsync(request.RootElement, fakeClient, fakeClient, fakeProvider, CancellationToken.None).GetAwaiter().GetResult();
+        var execution = RunAsync(request.RootElement, fakeClient, fakeClient, fakeProvider, new DecisionRunLedger(fakeProvider, null), CancellationToken.None).GetAwaiter().GetResult();
         if (ReadString(execution, "status") != "completed" ||
             ReadString(execution["termination"]?.AsObject(), "reason") != "native-establish-your-clan-activated-after-visible-menu-action" ||
             ReadInt(execution, "decisions", -1) != 1 || ReadInt(execution, "actionsExecuted", -1) != 1 ||
@@ -52,7 +52,7 @@ internal static class AgentHostStoryModeBootstrapLoop
 
         var activeQuestClient = new FakeBootstrapNativeClient(activeQuestAtStart: true);
         var activeQuestProvider = new FakeBootstrapProvider();
-        var activeQuestExecution = RunAsync(request.RootElement, activeQuestClient, activeQuestClient, activeQuestProvider, CancellationToken.None).GetAwaiter().GetResult();
+        var activeQuestExecution = RunAsync(request.RootElement, activeQuestClient, activeQuestClient, activeQuestProvider, new DecisionRunLedger(activeQuestProvider, null), CancellationToken.None).GetAwaiter().GetResult();
         if (ReadString(activeQuestExecution, "status") != "completed" ||
             ReadString(activeQuestExecution["termination"]?.AsObject(), "reason") != "native-training-field-left-with-active-eyc" ||
             ReadInt(activeQuestExecution, "decisions", -1) != 1 || ReadInt(activeQuestExecution, "actionsExecuted", -1) != 1 ||
@@ -131,17 +131,9 @@ internal static class AgentHostStoryModeBootstrapLoop
         IAgentHostCampaignNativeClient client,
         IAgentHostStoryModeBootstrapNativeClient bootstrapClient,
         IAgentHostDecisionProvider provider,
-        CancellationToken cancellationToken,
-        int priorDecisions = 0,
-        long priorPromptTokens = 0,
-        long priorCompletionTokens = 0,
-        JsonArray? priorTrace = null,
-        JsonArray? priorProviderRouteHistory = null)
+        DecisionRunLedger ledger,
+        CancellationToken cancellationToken)
     {
-        var ledger = new DecisionRunLedger(
-            provider,
-            ReadString(request, "runId"),
-            priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var goal = ReadString(request, "goal") ?? "Complete the original StoryMode Establish Your Clan quest.";
         var nativeActions = 0;
         var started = Stopwatch.GetTimestamp();

@@ -23,7 +23,7 @@ internal static class AgentHostMapIncidentLoop
         {
             var native = new FakeIncidentNativeClient();
             var provider = new FakeIncidentDecisionProvider(optionIndex: 1);
-            var result = await RunAsync(request.RootElement, native, null, provider, CancellationToken.None);
+            var result = await RunAsync(request.RootElement, native, null, provider, new DecisionRunLedger(provider, null), CancellationToken.None);
             if (ReadString(result, "status") != "completed" || ReadInt(result, "decisions") != 1 ||
                 ReadInt(result, "actionsExecuted") != 1 || provider.CallCount != 1 ||
                 native.SubmittedOptionIndex != 1 || native.ClockActions != 0 || native.IncidentActive)
@@ -48,19 +48,9 @@ internal static class AgentHostMapIncidentLoop
         IAgentHostCampaignNativeClient client,
         IAgentHostQuestDetailsNativeClient? questDetailsClient,
         IAgentHostDecisionProvider provider,
-        CancellationToken cancellationToken,
-        int priorDecisions = 0,
-        long priorPromptTokens = 0,
-        long priorCompletionTokens = 0,
-        JsonArray? priorTrace = null,
-        JsonArray? priorProviderRouteHistory = null)
+        DecisionRunLedger ledger,
+        CancellationToken cancellationToken)
     {
-        var ledger = new DecisionRunLedger(
-            provider,
-            request.ValueKind == JsonValueKind.Object && request.TryGetProperty("runId", out var runIdNode) && runIdNode.ValueKind == JsonValueKind.String
-                ? runIdNode.GetString()
-                : null,
-            priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var actionsExecuted = 0;
 
         Task<JsonObject> ResultAsync(string status, string reason, string? failureCode = null, string? failure = null) =>

@@ -537,7 +537,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         var client = new FakeGoldSaleFailureNativeClient();
         var provider = new FakeGoldSaleFailureProvider();
         using var request = JsonDocument.Parse("{\"runId\":\"gold-sale-failure-receipt-selftest\",\"goal\":\"Raise Gold Journal progress with one Native sale.\",\"maxDecisions\":6,\"maxElapsedSeconds\":30}");
-        var result = await RunAsync(request.RootElement, client, client, provider, CancellationToken.None);
+        var result = await RunAsync(request.RootElement, client, client, provider, new DecisionRunLedger(provider, null), CancellationToken.None);
         var trace = result["trace"] as JsonArray;
         var routeHistory = result["providerRouteHistory"] as JsonArray;
         var failedRoute = routeHistory?.OfType<JsonObject>().LastOrDefault();
@@ -564,7 +564,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         var budgetExitClient = new FakeGoldSaleBudgetExitNativeClient();
         var budgetExitProvider = new FakeGoldSaleBudgetExitProvider();
         using var budgetExitRequest = JsonDocument.Parse("{\"runId\":\"gold-sale-budget-exit-selftest\",\"goal\":\"Raise Gold Journal progress with one Native sale.\",\"maxDecisions\":1,\"maxElapsedSeconds\":30}");
-        var budgetExitResult = await RunAsync(budgetExitRequest.RootElement, budgetExitClient, budgetExitClient, budgetExitProvider, CancellationToken.None);
+        var budgetExitResult = await RunAsync(budgetExitRequest.RootElement, budgetExitClient, budgetExitClient, budgetExitProvider, new DecisionRunLedger(budgetExitProvider, null), CancellationToken.None);
         var budgetExitFinalState = budgetExitResult["finalNativeState"]?["state"] as JsonObject;
         var budgetExitTrace = budgetExitResult["trace"] as JsonArray;
         if (ReadString(budgetExitResult, "status") != "failed" ||
@@ -589,20 +589,14 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         IAgentHostCampaignNativeClient stateClient,
         IAgentHostGoldSaleNativeClient actionClient,
         IAgentHostDecisionProvider provider,
-        CancellationToken cancellationToken,
-        int priorDecisions = 0,
-        long priorPromptTokens = 0,
-        long priorCompletionTokens = 0,
-        JsonArray? priorTrace = null,
-        JsonArray? priorProviderRouteHistory = null)
+        DecisionRunLedger ledger,
+        CancellationToken cancellationToken)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", AgentHostCampaignLoop.MaxCumulativeDecisions), 1, AgentHostCampaignLoop.MaxCumulativeDecisions);
         var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 1800), 10, 86400);
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
-        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens,
-            priorTrace, priorProviderRouteHistory);
         var actionCount = 0;
         var saleActionCount = 0;
         var noTransferableGoodsInPlayerInventory = false;
@@ -642,12 +636,7 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             if (ReadBoolean((initialState["context"] as JsonObject)?["captivity"] as JsonObject, "isCaptive"))
             {
                 initialCaptivityRecovery = await AgentHostCaptivityRecoveryLoop.RunAsync(
-                    request, stateClient, actionClient, actionClient, provider, elapsed.Token,
-                    priorDecisions: ledger.Decisions,
-                    priorPromptTokens: ledger.PromptTokens,
-                    priorCompletionTokens: ledger.CompletionTokens,
-                    priorTrace: ledger.Trace,
-                    priorProviderRouteHistory: ledger.Routes);
+                    request, stateClient, actionClient, actionClient, provider, ledger, elapsed.Token);
                 if (ReadString(initialCaptivityRecovery, "resultKind") != "captivity-recovered-objective-plan" ||
                     ReadBoolean(initialCaptivityRecovery, "captivityRecoveryVerified") != true)
                     throw new AgentHostException("gold-sale-captivity-prelude-failed", "The original W7-O recovery flow did not return a verified free Campaign Map; no sale action was attempted.");
@@ -692,7 +681,8 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 {
                     if (!IsPendingNativeTradeConfirmation(state, previousReceipt))
                         throw new AgentHostException("gold-sale-unexpected-native-inquiry", "The Gold sale loop will resolve only the Native Trade Done confirmation that it just received as accepted.");
-                    var inquiry = await AgentHostNativeInquiryResolution.RunAsync(stateClient, actionClient, provider, elapsed.Token,
+                    var inquiry = await AgentHostNativeInquiryResolution.RunAsync(stateClient, actionClient, provider,
+            elapsed.Token,
                         runId + "-trade-inquiry-" + ledger.NextDecisionNumber.ToString(CultureInfo.InvariantCulture),
                         "Reach the current original Establish Your Clan Gold Journal target. Decide whether to accept the exact Native Trade capacity warning using the current sale amount and party state; accepting keeps the over-capacity risk, declining must leave the sale uncommitted.");
                     ledger.RecordDelegated(inquiry);

@@ -475,7 +475,7 @@ internal static class AgentHostEstablishClanCompanionLoop
         var client = new FakeCompanionClient();
         var provider = new FakeCompanionProvider();
         using var request = JsonDocument.Parse("{\"runId\":\"establish-clan-companion-selftest\",\"goal\":\"Reach the original Journal companion target.\",\"maxDecisions\":24,\"maxElapsedSeconds\":60}");
-        var result = await RunAsync(request.RootElement, client, client, provider, CancellationToken.None);
+        var result = await RunAsync(request.RootElement, client, client, provider, new DecisionRunLedger(provider, null), CancellationToken.None);
         var expected = new[] { "menuSelect", "menuSelect", "missionSceneAgents", "missionNavigateToAgent", "missionSceneAgents", "missionInteract", "dialogueSelect", "dialogueSelect", "dialogueSelect", "missionLeave" };
         var automaticSceneObservations = result["trace"] is JsonArray transportTrace
             ? transportTrace.OfType<JsonObject>().Count(step => ReadString(step, "stepKind") == "native-tavern-scene-observation")
@@ -490,7 +490,7 @@ internal static class AgentHostEstablishClanCompanionLoop
 
         var delayedTavernClient = new FakeCompanionClient(tavernEntryTransitionDelayReads: 3);
         var delayedTavernProvider = new FakeCompanionProvider();
-        var delayedTavernResult = await RunAsync(request.RootElement, delayedTavernClient, delayedTavernClient, delayedTavernProvider, CancellationToken.None);
+        var delayedTavernResult = await RunAsync(request.RootElement, delayedTavernClient, delayedTavernClient, delayedTavernProvider, new DecisionRunLedger(delayedTavernProvider, null), CancellationToken.None);
         var delayedTavernWaitRows = (delayedTavernResult["trace"] as JsonArray)?.OfType<JsonObject>()
             .Where(step => ReadString(step, "stage") == "native-tavern-entry-transition-wait").ToArray() ?? Array.Empty<JsonObject>();
         var delayedTavernSummary = delayedTavernResult["tavernEntryTransitionSummary"] as JsonObject;
@@ -505,7 +505,7 @@ internal static class AgentHostEstablishClanCompanionLoop
 
         var missingTavernMissionClient = new FakeCompanionClient(neverEnterTavernMission: true);
         var missingTavernMissionProvider = new FakeCompanionProvider();
-        var missingTavernMission = await RunAsync(request.RootElement, missingTavernMissionClient, missingTavernMissionClient, missingTavernMissionProvider, CancellationToken.None);
+        var missingTavernMission = await RunAsync(request.RootElement, missingTavernMissionClient, missingTavernMissionClient, missingTavernMissionProvider, new DecisionRunLedger(missingTavernMissionProvider, null), CancellationToken.None);
         var missingMissionTrace = missingTavernMission["trace"] as JsonArray;
         if (ReadString(missingTavernMission, "status") != "interrupted" ||
             ReadString(missingTavernMission["termination"] as JsonObject, "reason") != "native-tavern-entry-transition-not-observed" ||
@@ -521,7 +521,8 @@ internal static class AgentHostEstablishClanCompanionLoop
         var canceledTavernEntryClient = new FakeCompanionClient(tavernEntryTransitionDelayReads: 1, cancelAfterTavernEntryMapRead: tavernTransitionCancellation);
         var canceledTavernEntryProvider = new FakeCompanionProvider();
         var canceledTavernEntry = await RunAsync(request.RootElement, canceledTavernEntryClient, canceledTavernEntryClient,
-            canceledTavernEntryProvider, tavernTransitionCancellation.Token);
+            canceledTavernEntryProvider, new DecisionRunLedger(canceledTavernEntryProvider, null),
+            tavernTransitionCancellation.Token);
         if (ReadString(canceledTavernEntry, "status") != "failed" ||
             ReadString(canceledTavernEntry["termination"] as JsonObject, "reason") != "host-stop-or-time-budget" ||
             canceledTavernEntryProvider.CallCount != 2 ||
@@ -532,7 +533,7 @@ internal static class AgentHostEstablishClanCompanionLoop
 
         var stalledClient = new FakeCompanionClient(simulateStalledNavigation: true);
         var stalledProvider = new FakeCompanionStallProvider();
-        var stalled = await RunAsync(request.RootElement, stalledClient, stalledClient, stalledProvider, CancellationToken.None);
+        var stalled = await RunAsync(request.RootElement, stalledClient, stalledClient, stalledProvider, new DecisionRunLedger(stalledProvider, null), CancellationToken.None);
         if (ReadString(stalled["termination"] as JsonObject, "reason") != "companion-model-stopped" ||
             stalledClient.NavigationAttemptCount != 3 || stalledClient.MissionLeaveCount != 1 ||
             stalledProvider.NavigationDecisionCount != 3 || !stalledProvider.StoppedOnFreeMap ||
@@ -542,14 +543,14 @@ internal static class AgentHostEstablishClanCompanionLoop
         var stopClient = new FakeCompanionClient();
         var stopProvider = new FakeCompanionStopProvider();
         using var stopRequest = JsonDocument.Parse("{\"runId\":\"establish-clan-companion-safe-stop-selftest\",\"goal\":\"Hire one Companion.\",\"maxDecisions\":1,\"maxElapsedSeconds\":10}");
-        var stopped = await RunAsync(stopRequest.RootElement, stopClient, stopClient, stopProvider, CancellationToken.None);
+        var stopped = await RunAsync(stopRequest.RootElement, stopClient, stopClient, stopProvider, new DecisionRunLedger(stopProvider, null), CancellationToken.None);
         if (ReadString(stopped, "status") != "interrupted" ||
             ReadString(stopped["termination"] as JsonObject, "reason") != "companion-model-stopped" ||
             ReadInt(stopped, "actionsExecuted", 0) != 0 || stopProvider.CallCount != 1 || stopClient.Actions.Count != 0)
             throw new AgentHostException("establish-clan-companion-safe-stop-self-test-failed", "A listed stop control must stop the Companion subgoal explicitly without being rejected as an unavailable control or sending a Native action.");
         var missionStopClient = new FakeMissionStopRecoveryClient();
         var missionStopProvider = new FakeMissionStopRecoveryProvider();
-        var missionStopRecovered = await RunAsync(request.RootElement, missionStopClient, missionStopClient, missionStopProvider, CancellationToken.None);
+        var missionStopRecovered = await RunAsync(request.RootElement, missionStopClient, missionStopClient, missionStopProvider, new DecisionRunLedger(missionStopProvider, null), CancellationToken.None);
         if (ReadString(missionStopRecovered, "status") != "interrupted" ||
             ReadString(missionStopRecovered["termination"] as JsonObject, "reason") != "companion-model-stopped" ||
             ReadInt(missionStopRecovered, "actionsExecuted", 0) != 3 || missionStopProvider.CallCount != 4 ||
@@ -581,7 +582,7 @@ internal static class AgentHostEstablishClanCompanionLoop
         var firstClient = new FakePersistentNoCandidateCompanionClient();
         var firstProvider = new FakeNoCandidateCompanionProvider(firstRun: true);
         using var request = JsonDocument.Parse("{\"runId\":\"establish-clan-companion-memory-write-selftest\",\"goal\":\"Hire one companion.\",\"maxDecisions\":12,\"maxElapsedSeconds\":60}");
-        var first = await RunAsync(request.RootElement, firstClient, firstClient, firstProvider, CancellationToken.None);
+        var first = await RunAsync(request.RootElement, firstClient, firstClient, firstProvider, new DecisionRunLedger(firstProvider, null), CancellationToken.None);
         using var storedCheckpointReceipt = firstClient.ReadStoredCheckpointReceipt();
         var checkpoint = AgentHostCampaignCheckpointCodec.ReadFromNativeReceipt(storedCheckpointReceipt.RootElement);
         var storedTownIds = AgentHostEycCompanionSearchMemory.ReadNoCandidateTownIds(checkpoint);
@@ -596,7 +597,7 @@ internal static class AgentHostEstablishClanCompanionLoop
         var resumedClient = new FakePersistentNoCandidateCompanionClient(firstClient.StoredCheckpointJson, startAtFreeMap: true);
         var resumedProvider = new FakeNoCandidateCompanionProvider(firstRun: false);
         using var resumeRequest = JsonDocument.Parse("{\"runId\":\"establish-clan-companion-memory-resume-selftest\",\"goal\":\"Hire one companion.\",\"maxDecisions\":4,\"maxElapsedSeconds\":60}");
-        var resumed = await RunAsync(resumeRequest.RootElement, resumedClient, resumedClient, resumedProvider, CancellationToken.None);
+        var resumed = await RunAsync(resumeRequest.RootElement, resumedClient, resumedClient, resumedProvider, new DecisionRunLedger(resumedProvider, null), CancellationToken.None);
         if (ReadString(resumed["termination"] as JsonObject, "reason") != "companion-model-stopped" ||
             !resumedProvider.SawOnlyTownBAfterResume || resumedClient.CheckpointWrites != 0)
             throw new AgentHostException("eyc-companion-memory-resume-self-test-failed", "A new Host on the same saved Campaign must skip the previously verified no-candidate Town without rewriting or losing the checkpoint.");
@@ -608,7 +609,7 @@ internal static class AgentHostEstablishClanCompanionLoop
     {
         var client = new FakeCompanionClient();
         var provider = new FakeInvalidCompanionActionProvider();
-        var result = await RunAsync(request, client, client, provider, CancellationToken.None);
+        var result = await RunAsync(request, client, client, provider, new DecisionRunLedger(provider, null), CancellationToken.None);
         var expectedActions = new[] { "menuSelect", "menuSelect", "missionSceneAgents" };
         if (ReadString(result, "status") != "failed" ||
             ReadString(result["termination"] as JsonObject, "reason") != "companion-action-recovery-exhausted" ||
@@ -624,7 +625,7 @@ internal static class AgentHostEstablishClanCompanionLoop
         var client = new FakeMovementCompanionClient();
         var provider = new FakeMovementDecisionProvider();
         using var request = JsonDocument.Parse("{\"runId\":\"establish-clan-companion-map-movement-selftest\",\"goal\":\"Reach a friendly Town Tavern to hire one Companion.\",\"maxDecisions\":4,\"maxElapsedSeconds\":30}");
-        var result = await RunAsync(request.RootElement, client, client, provider, CancellationToken.None);
+        var result = await RunAsync(request.RootElement, client, client, provider, new DecisionRunLedger(provider, null), CancellationToken.None);
         var expectedActions = new[] { "mapSettlementTargets", "move", "continueSceneNotification", "menuSelect" };
         if (provider.CallCount != 4 || client.Actions.Count != expectedActions.Length ||
             !client.Actions.SequenceEqual(expectedActions, StringComparer.Ordinal) || client.ActiveMovementStateReads < 2 ||
@@ -639,7 +640,7 @@ internal static class AgentHostEstablishClanCompanionLoop
         var client = new FakeInheritedNativeMoveCompanionClient();
         var provider = new FakeInheritedNativeMoveProvider();
         using var request = JsonDocument.Parse("{\"runId\":\"establish-clan-companion-inherited-native-move-selftest\",\"goal\":\"Hire one Companion.\",\"maxDecisions\":1,\"maxElapsedSeconds\":10}");
-        var result = await RunAsync(request.RootElement, client, client, provider, CancellationToken.None);
+        var result = await RunAsync(request.RootElement, client, client, provider, new DecisionRunLedger(provider, null), CancellationToken.None);
         var inheritedTrace = result["trace"] is JsonArray trace
             ? trace.OfType<JsonObject>().Any(step => ReadString(step, "stage") == "native-settlement-move-inherited-by-companion-route")
             : false;
@@ -654,17 +655,12 @@ internal static class AgentHostEstablishClanCompanionLoop
         IAgentHostCampaignNativeClient campaignClient,
         IAgentHostCompanionHiringNativeClient companionClient,
         IAgentHostDecisionProvider provider,
-        CancellationToken cancellationToken,
-        int priorDecisions = 0,
-        long priorPromptTokens = 0,
-        long priorCompletionTokens = 0,
-        JsonArray? priorTrace = null,
-        JsonArray? priorProviderRouteHistory = null)
+        DecisionRunLedger ledger,
+        CancellationToken cancellationToken)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", MaxDecisions), 1, MaxDecisions);
         var maxSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", (int)MaxElapsed.TotalSeconds), 10, (int)MaxElapsed.TotalSeconds);
-        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var actionsExecuted = 0;
         var safeTowns = (JsonArray?)null;
         var sceneAgentsReceipt = (JsonObject?)null;

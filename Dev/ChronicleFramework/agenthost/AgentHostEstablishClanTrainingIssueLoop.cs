@@ -391,7 +391,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             maxElapsedSeconds = 10,
             allowedActionNames = AgentHostCampaignLoop.AllSupportedActions.ToArray()
         }));
-        var result = await RunAsync(request.RootElement, client, client, provider, CancellationToken.None);
+        var result = await RunAsync(request.RootElement, client, client, provider, new DecisionRunLedger(provider, null), CancellationToken.None);
         if (ReadString(result, "status") != "failed" ||
             ReadString(result, "termination") != "training-issue-interrupted-by-encounter" ||
             ReadInt(result, "decisions") != 1 || ReadInt(result, "actionsExecuted") != 1 ||
@@ -411,7 +411,8 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             allowedActionNames = AgentHostCampaignLoop.AllSupportedActions.ToArray()
         }));
         var movementResult = await RunAsync(movementRequest.RootElement, movementClient, movementClient,
-            movementProvider, CancellationToken.None);
+            movementProvider, new DecisionRunLedger(movementProvider, null),
+            CancellationToken.None);
         var movementTrace = movementResult["trace"] as JsonArray ?? new JsonArray();
         if (ReadString(movementResult, "status") != "failed" ||
             ReadString(movementResult, "termination") != "training-issue-budget-exhausted" ||
@@ -439,7 +440,8 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
             allowedActionNames = AgentHostCampaignLoop.AllSupportedActions.ToArray()
         }));
         var villagersResult = await RunAsync(villagersRequest.RootElement, villagersClient, villagersClient,
-            villagersProvider, CancellationToken.None);
+            villagersProvider, new DecisionRunLedger(villagersProvider, null),
+            CancellationToken.None);
         var villagersFinalState = villagersResult["finalNativeState"]?["state"] as JsonObject;
         if (ReadString(villagersResult, "termination") != "training-issue-budget-exhausted" ||
             ReadInt(villagersResult, "decisions") != 2 || ReadInt(villagersResult, "actionsExecuted") != 2 ||
@@ -466,14 +468,11 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
         IAgentHostEstablishClanTrainingIssueNativeClient client,
         IAgentHostBattleSimulationNativeClient battleClient,
         IAgentHostDecisionProvider provider,
-        CancellationToken cancellationToken,
-        int priorDecisions = 0,
-        long priorPromptTokens = 0,
-        long priorCompletionTokens = 0,
-        JsonArray? priorTrace = null,
-        JsonArray? priorProviderRouteHistory = null)
+        DecisionRunLedger ledger,
+        CancellationToken cancellationToken)
     {
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
+        var priorDecisions = ledger.Decisions;
         var goal = ReadString(request, "goal") ?? "Earn original EYC Gold through the visible Native retainer-training Issue.";
         var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", AgentHostCampaignLoop.MaxCumulativeDecisions), 1, AgentHostCampaignLoop.MaxCumulativeDecisions);
         var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 86400), 1, 86400);
@@ -485,8 +484,6 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
 
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
-        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens,
-            priorTrace, priorProviderRouteHistory);
         var actionsExecuted = 0;
         var rejected = 0;
         var rejectedDecisionFingerprints = new HashSet<string>(StringComparer.Ordinal);
@@ -694,7 +691,8 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                         termination = failureCode;
                         break;
                     }
-                    var inquiryResult = await AgentHostNativeInquiryResolution.RunAsync(client, client, provider, elapsed.Token,
+                    var inquiryResult = await AgentHostNativeInquiryResolution.RunAsync(client, client, provider,
+            elapsed.Token,
                         runId + "-training-return", "Return the currently trained borrowed troops to the Issue giver to finish the active Native training quest and claim its reward.");
                     ledger.RecordDelegated(inquiryResult);
                     actionsExecuted += ReadInt(inquiryResult, "actionsExecuted", 0);
@@ -859,9 +857,7 @@ internal static class AgentHostEstablishClanTrainingIssueLoop
                     var battleRequestNode = JsonNode.Parse(request.GetRawText())?.AsObject() ?? new JsonObject();
                     battleRequestNode["goal"] = "Train the current borrowed retainers for the active Native Landlord Training Issue. Resolve one currently visible weak hostile Bandit through Native BattleSimulation to earn experience, then return to the current Issue Journal; do not enter a realtime Mission or alter the clock.";
                     using var battleRequest = JsonDocument.Parse(battleRequestNode.ToJsonString());
-                    var battle = await AgentHostBattleSimulationLoop.RunAsync(battleRequest.RootElement, battleClient, provider, elapsed.Token,
-                        priorDecisions: ledger.Decisions, priorPromptTokens: ledger.PromptTokens, priorCompletionTokens: ledger.CompletionTokens,
-                        priorTrace: ledger.Trace, priorProviderRouteHistory: ledger.Routes, recoverPlayerCaptivity: true);
+                    var battle = await AgentHostBattleSimulationLoop.RunAsync(battleRequest.RootElement, battleClient, provider, ledger, elapsed.Token, recoverPlayerCaptivity: true);
                     AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("trainingIssueBattleSimulation", battle);
                     ledger.AdoptDelegated(battle);
                     actionsExecuted += ReadInt(battle, "actionsExecuted", 0);
