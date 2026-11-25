@@ -712,9 +712,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         var runId = ReadString(request, "runId") ?? Guid.NewGuid().ToString("N");
         var maxDecisions = Math.Clamp(ReadInt(request, "maxDecisions", AgentHostCampaignLoop.MaxCumulativeDecisions), 1, AgentHostCampaignLoop.MaxCumulativeDecisions);
         var maxElapsedSeconds = Math.Clamp(ReadInt(request, "maxElapsedSeconds", 86400), 1, 86400);
-        var trace = priorTrace?.DeepClone() as JsonArray ?? new JsonArray();
-        var routes = priorProviderRouteHistory?.DeepClone() as JsonArray ?? new JsonArray();
-        var decisions = priorDecisions;
+        var ledger = new DecisionRunLedger(provider, runId, priorDecisions, priorPromptTokens, priorCompletionTokens, priorTrace, priorProviderRouteHistory);
         var nativeActions = 0;
         var checkpointClient = client as IAgentHostCampaignCheckpointNativeClient;
         JsonObject? campaignCheckpoint = null;
@@ -724,8 +722,6 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         var objectiveAttemptPlannerInitialized = false;
         string? pendingObjectiveId = null;
         JsonObject? latestJournalSnapshotForAttempt = null;
-        long promptTokens = priorPromptTokens;
-        long completionTokens = priorCompletionTokens;
         var unavailableObjectives = new HashSet<string>(StringComparer.Ordinal);
         var unavailableObjectiveFingerprints = new Dictionary<string, string>(StringComparer.Ordinal);
         var safeSettlementRefreshVisitedIds = new HashSet<string>(StringComparer.Ordinal);
@@ -774,7 +770,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             campaignCheckpoint = AgentHostCampaignCheckpointCodec.ReadFromNativeReceipt(receipt.RootElement);
             objectiveAttemptMemory = AgentHostEycObjectiveAttemptMemory.Read(campaignCheckpoint);
             objectiveAttemptCheckpointRead = true;
-            trace.Add(new JsonObject
+            ledger.Trace.Add(new JsonObject
             {
                 ["stage"] = "eyc-objective-attempt-checkpoint-read",
                 ["attemptCount"] = AgentHostEycObjectiveAttemptMemory.Count(objectiveAttemptMemory),
@@ -795,7 +791,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
             campaignCheckpoint = updatedCheckpoint;
             objectiveAttemptCheckpointDirty = false;
-            trace.Add(new JsonObject
+            ledger.Trace.Add(new JsonObject
             {
                 ["stage"] = "eyc-objective-attempt-checkpoint-written",
                 ["attemptCount"] = AgentHostEycObjectiveAttemptMemory.Count(objectiveAttemptMemory),
@@ -826,14 +822,10 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             "The Native transport cannot submit the visible original training-field menu option.", "storymode-bootstrap-native-client-unavailable");
 
                     var bootstrap = await AgentHostStoryModeBootstrapLoop.RunAsync(request, client, bootstrapClient, provider, elapsed.Token,
-                        priorDecisions: decisions, priorPromptTokens: promptTokens, priorCompletionTokens: completionTokens,
-                        priorTrace: trace, priorProviderRouteHistory: routes);
-                    decisions = ReadInt(bootstrap, "decisions", decisions);
-                    promptTokens = ReadLong(bootstrap, "promptTokens", promptTokens);
-                    completionTokens = ReadLong(bootstrap, "completionTokens", completionTokens);
+                        priorDecisions: ledger.Decisions, priorPromptTokens: ledger.PromptTokens, priorCompletionTokens: ledger.CompletionTokens,
+                        priorTrace: ledger.Trace, priorProviderRouteHistory: ledger.Routes);
+                    ledger.AdoptDelegated(bootstrap);
                     nativeActions += ReadInt(bootstrap, "actionsExecuted", 0);
-                    trace = bootstrap["trace"]?.DeepClone() as JsonArray ?? trace;
-                    routes = bootstrap["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
 
                     if (ReadString(bootstrap, "status") != "completed")
                         return BuildResult("failed", "storymode-bootstrap-failed", false,
@@ -856,25 +848,21 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             if (client is IAgentHostNativeInquiryClient startupInquiryClient && client is IAgentHostStoryModeBannerEditorNativeClient startupBannerEditorClient)
             {
                 var setup = await AgentHostStoryModeSetupLoop.RunAsync(request, client, startupInquiryClient, startupBannerEditorClient, provider, elapsed.Token,
-                    decisions, promptTokens, completionTokens, trace, routes);
-                decisions = ReadInt(setup, "decisions", decisions);
-                promptTokens = ReadLong(setup, "promptTokens", promptTokens);
-                completionTokens = ReadLong(setup, "completionTokens", completionTokens);
+                    ledger.Decisions, ledger.PromptTokens, ledger.CompletionTokens, ledger.Trace, ledger.Routes);
+                ledger.AdoptDelegated(setup);
                 nativeActions += ReadInt(setup, "actionsExecuted", 0);
-                trace = setup["trace"]?.DeepClone() as JsonArray ?? trace;
-                routes = setup["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
                 if (ReadString(setup, "status") == "failed")
                     return BuildResult("failed", "storymode-initial-setup-failed", false,
                         ReadString(setup, "failure") ?? "The original StoryMode family-name/BannerEditor setup could not be completed.",
                         ReadString(setup, "failureCode"));
                 if (ReadString(setup, "status") == "completed")
-                    trace.Add(new JsonObject { ["stage"] = "storymode-initial-setup-completed", ["termination"] = setup["termination"]?.DeepClone() });
+                    ledger.Trace.Add(new JsonObject { ["stage"] = "storymode-initial-setup-completed", ["termination"] = setup["termination"]?.DeepClone() });
             }
 
             // Each ordinary pass consumes at least one planner decision. Reuse the
             // shared cumulative decision limit instead of imposing a second 20-cycle
             // ceiling that can stop a healthy long campaign before its budget ends.
-            for (var cycle = 0; cycle < maxDecisions && decisions < maxDecisions; cycle++)
+            for (var cycle = 0; cycle < maxDecisions && ledger.Decisions < maxDecisions; cycle++)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
                 using var current = await client.ReadStateAsync(elapsed.Token);
@@ -890,17 +878,13 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         ?? throw new AgentHostException("quest-troop-screen-request-invalid", "The current EYC run request could not be copied into the QuestTroopManage decision envelope.");
                     var questTroopScreen = await AgentHostQuestTroopScreenLoop.RunAsync(
                         questTroopRunRequest, client, questTroopScreenClient, provider, elapsed.Token,
-                        priorDecisions: decisions,
-                        priorPromptTokens: promptTokens,
-                        priorCompletionTokens: completionTokens,
-                        priorTrace: trace,
-                        priorProviderRouteHistory: routes);
-                    decisions = ReadInt(questTroopScreen, "decisions", decisions);
-                    promptTokens = ReadLong(questTroopScreen, "promptTokens", promptTokens);
-                    completionTokens = ReadLong(questTroopScreen, "completionTokens", completionTokens);
+                        priorDecisions: ledger.Decisions,
+                        priorPromptTokens: ledger.PromptTokens,
+                        priorCompletionTokens: ledger.CompletionTokens,
+                        priorTrace: ledger.Trace,
+                        priorProviderRouteHistory: ledger.Routes);
+                    ledger.AdoptDelegated(questTroopScreen);
                     nativeActions += ReadInt(questTroopScreen, "actionsExecuted", 0);
-                    trace = questTroopScreen["trace"]?.DeepClone() as JsonArray ?? trace;
-                    routes = questTroopScreen["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
                     objectiveRuns.Add(new JsonObject
                     {
                         ["objectiveId"] = "nativeQuestTroopAssignment",
@@ -918,17 +902,13 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 {
                     var mapIncident = await AgentHostMapIncidentLoop.RunAsync(
                         request, client, questDetailsClient, provider, elapsed.Token,
-                        priorDecisions: decisions,
-                        priorPromptTokens: promptTokens,
-                        priorCompletionTokens: completionTokens,
-                        priorTrace: trace,
-                        priorProviderRouteHistory: routes);
-                    decisions = ReadInt(mapIncident, "decisions", decisions);
-                    promptTokens = ReadLong(mapIncident, "promptTokens", promptTokens);
-                    completionTokens = ReadLong(mapIncident, "completionTokens", completionTokens);
+                        priorDecisions: ledger.Decisions,
+                        priorPromptTokens: ledger.PromptTokens,
+                        priorCompletionTokens: ledger.CompletionTokens,
+                        priorTrace: ledger.Trace,
+                        priorProviderRouteHistory: ledger.Routes);
+                    ledger.AdoptDelegated(mapIncident);
                     nativeActions += ReadInt(mapIncident, "actionsExecuted", 0);
-                    trace = mapIncident["trace"]?.DeepClone() as JsonArray ?? trace;
-                    routes = mapIncident["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
                     objectiveRuns.Add(new JsonObject
                     {
                         ["objectiveId"] = "nativeMapIncident",
@@ -953,7 +933,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 {
                     unavailableObjectives.Remove(previouslyBlocked);
                     unavailableObjectiveFingerprints.Remove(previouslyBlocked);
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "objective-route-reopened-after-native-state-change",
                         ["objectiveId"] = previouslyBlocked
@@ -971,13 +951,9 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
                 if (IsPlayerCaptive(current.RootElement))
                 {
-                    var recovery = await executeObjective("captivityRecovery", decisions, promptTokens, completionTokens, trace, routes, elapsed.Token);
-                    decisions = ReadInt(recovery, "decisions", decisions);
-                    promptTokens = ReadLong(recovery, "promptTokens", promptTokens);
-                    completionTokens = ReadLong(recovery, "completionTokens", completionTokens);
+                    var recovery = await executeObjective("captivityRecovery", ledger.Decisions, ledger.PromptTokens, ledger.CompletionTokens, ledger.Trace, ledger.Routes, elapsed.Token);
+                    ledger.AdoptDelegated(recovery);
                     nativeActions += ReadInt(recovery, "actionsExecuted", 0);
-                    trace = recovery["trace"]?.DeepClone() as JsonArray ?? trace;
-                    routes = recovery["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
                     objectiveRuns.Add(new JsonObject
                     {
                         ["objectiveId"] = "captivityRecovery",
@@ -1007,7 +983,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             "native-stalled-move-campaign-day-unavailable");
                     if (!ShouldQueryStalledMoveTargetVisibility(stalledMoveTargetsMissingFromVisibleMapDays, stalledMoveTarget, stalledMoveCampaignDay))
                     {
-                        trace.Add(new JsonObject
+                        ledger.Trace.Add(new JsonObject
                         {
                             ["stage"] = "stalled-native-move-target-still-unlisted-replanned",
                             ["targetStillCurrent"] = true,
@@ -1026,7 +1002,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             stalledMoveTargetsMissingFromVisibleMapDays[stalledMoveTarget] = stalledMoveCampaignDay;
                             foreach (var blockedObjectiveId in InitiallyIntegratedObjectives)
                                 MarkObjectiveUnavailable(blockedObjectiveId, current.RootElement);
-                            trace.Add(new JsonObject
+                            ledger.Trace.Add(new JsonObject
                             {
                                 ["stage"] = "stalled-native-move-target-unlisted-replanned",
                                 ["safeVisibleSettlementCount"] = safeVisibleTargets.Count,
@@ -1062,7 +1038,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             var newNativeBoundary = AgentHostCampaignStateFacts.IsActiveEncounter(afterMoveState) ||
                                 ReadBoolean(afterMoveContext, "inquiryOpen") || ReadBoolean(afterMoveContext, "escapeMenuOpen");
                             var moveRestoredNativeTime = afterMoveMode is "StoppablePlay" or "UnstoppableFastForward";
-                            trace.Add(new JsonObject
+                            ledger.Trace.Add(new JsonObject
                             {
                                 ["stage"] = "native-stopped-move-reissued-through-current-target",
                                 ["targetSettlementId"] = stalledMoveTarget,
@@ -1131,9 +1107,9 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         ["campaignDayBefore"] = restRecovery["campaignDayBefore"]?.DeepClone(),
                         ["campaignDayAfter"] = restRecovery["campaignDayAfter"]?.DeepClone()
                     });
-                    if (restRecovery["monitorStep"] is JsonObject monitorStep) trace.Add(monitorStep.DeepClone());
-                    if (restRecovery["leaveStep"] is JsonObject leaveStep) trace.Add(leaveStep.DeepClone());
-                    trace.Add(new JsonObject
+                    if (restRecovery["monitorStep"] is JsonObject monitorStep) ledger.Trace.Add(monitorStep.DeepClone());
+                    if (restRecovery["leaveStep"] is JsonObject leaveStep) ledger.Trace.Add(leaveStep.DeepClone());
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "eyc-native-wounded-party-rest-recovery",
                         ["fingerprint"] = nativeRestRecoveryFingerprint,
@@ -1212,7 +1188,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             ? JsonNode.Parse(readinessStateElement.GetRawText())?.AsObject() ?? new JsonObject()
                             : new JsonObject();
                         var currentParty = currentState["party"] as JsonObject;
-                        trace.Add(new JsonObject
+                        ledger.Trace.Add(new JsonObject
                         {
                             ["stage"] = "objective-route-blocked-native-party-readiness",
                             ["objectiveId"] = "renown",
@@ -1231,7 +1207,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 pendingObjectiveId = null;
                 if (resumeObjectiveId is not null)
                 {
-                    trace.Add(new JsonObject
+                    ledger.Trace.Add(new JsonObject
                     {
                         ["stage"] = "objective-resumed-from-native-campaign-checkpoint",
                         ["objectiveId"] = resumeObjectiveId,
@@ -1242,33 +1218,29 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     {
                         ["status"] = "completed",
                         ["resultKind"] = "objective-plan",
-                        ["decisions"] = decisions,
-                        ["promptTokens"] = promptTokens,
-                        ["completionTokens"] = completionTokens,
+                        ["decisions"] = ledger.Decisions,
+                        ["promptTokens"] = ledger.PromptTokens,
+                        ["completionTokens"] = ledger.CompletionTokens,
                         ["selection"] = new JsonObject { ["objectiveId"] = resumeObjectiveId },
-                        ["trace"] = trace.DeepClone(),
-                        ["providerRouteHistory"] = routes.DeepClone()
+                        ["trace"] = ledger.Trace.DeepClone(),
+                        ["providerRouteHistory"] = ledger.Routes.DeepClone()
                     };
                 }
                 else
                 {
                     planner = await AgentHostEstablishYourClanGoalLoop.RunAsync(
                         request, client, questDetailsClient, provider, elapsed.Token,
-                        priorDecisions: decisions,
-                        priorPromptTokens: promptTokens,
-                        priorCompletionTokens: completionTokens,
-                        priorTrace: trace,
-                        priorProviderRouteHistory: routes,
+                        priorDecisions: ledger.Decisions,
+                        priorPromptTokens: ledger.PromptTokens,
+                        priorCompletionTokens: ledger.CompletionTokens,
+                        priorTrace: ledger.Trace,
+                        priorProviderRouteHistory: ledger.Routes,
                         supportedObjectives: selectableObjectives,
                         observedQuestDetails: detailsReceipt,
                         observedNativeState: JsonNode.Parse(current.RootElement.GetRawText())?.AsObject(),
                         activeQuestAlreadyVerified: true);
                 }
-                decisions = ReadInt(planner, "decisions", decisions);
-                promptTokens = ReadLong(planner, "promptTokens", promptTokens);
-                completionTokens = ReadLong(planner, "completionTokens", completionTokens);
-                trace = planner["trace"]?.DeepClone() as JsonArray ?? trace;
-                routes = planner["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
+                ledger.AdoptDelegated(planner);
 
                 if (ReadString(planner, "status") == "failed")
                     return BuildResult("failed", "objective-planner-failed", false,
@@ -1285,7 +1257,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         .Where(id => !InitiallyIntegratedObjectives.Contains(id))
                         .Select(id => (JsonNode?)JsonValue.Create(id)).ToArray());
                     var allIntegratedRoutesBlocked = unimplemented.Count == 0 && unavailableObjectives.Count > 0;
-                    if (allIntegratedRoutesBlocked && decisions < maxDecisions)
+                    if (allIntegratedRoutesBlocked && ledger.Decisions < maxDecisions)
                     {
                         using var beforeRefresh = await client.ReadStateAsync(elapsed.Token);
                         var beforeRefreshState = beforeRefresh.RootElement.TryGetProperty("state", out var beforeStateElement) && beforeStateElement.ValueKind == JsonValueKind.Object
@@ -1306,7 +1278,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         refreshRequestNode["maxDecisions"] = maxDecisions;
                         refreshRequestNode["maxElapsedSeconds"] = remainingSeconds;
                         using var refreshRequest = JsonDocument.Parse(refreshRequestNode.ToJsonString());
-                        trace.Add(new JsonObject
+                        ledger.Trace.Add(new JsonObject
                         {
                             ["stage"] = "no-integrated-route-safe-settlement-refresh-started",
                             ["objectiveIdsBlocked"] = new JsonArray(unavailableObjectives.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()),
@@ -1317,18 +1289,14 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         var refresh = await AgentHostCampaignLoop.RunAsync(
                             refreshRequest.RootElement, client, provider, elapsed.Token,
                             disposeProvider: false,
-                            priorDecisions: decisions,
-                            priorPromptTokens: promptTokens,
-                            priorCompletionTokens: completionTokens,
-                            priorTrace: trace,
-                            priorProviderRouteHistory: routes);
+                            priorDecisions: ledger.Decisions,
+                            priorPromptTokens: ledger.PromptTokens,
+                            priorCompletionTokens: ledger.CompletionTokens,
+                            priorTrace: ledger.Trace,
+                            priorProviderRouteHistory: ledger.Routes);
                         AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("safeSettlementRefresh", refresh);
-                        decisions = ReadInt(refresh, "decisions", decisions);
+                        ledger.AdoptDelegated(refresh);
                         nativeActions += ReadInt(refresh, "actionsExecuted", 0);
-                        promptTokens = ReadLong(refresh, "promptTokens", promptTokens);
-                        completionTokens = ReadLong(refresh, "completionTokens", completionTokens);
-                        trace = refresh["trace"]?.DeepClone() as JsonArray ?? trace;
-                        routes = refresh["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
                         using var afterRefresh = await client.ReadStateAsync(elapsed.Token);
                         var afterRefreshState = afterRefresh.RootElement.TryGetProperty("state", out var afterStateElement) && afterStateElement.ValueKind == JsonValueKind.Object
                             ? JsonNode.Parse(afterStateElement.GetRawText())?.AsObject() ?? new JsonObject()
@@ -1342,29 +1310,25 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         if (verifiedArrival) safeSettlementRefreshVisitedIds.Add(afterRefreshSettlementId!);
 
                         var refreshFailureCode = ReadString(refresh, "failureCode");
-                        if (!verifiedArrival && decisions < maxDecisions &&
+                        if (!verifiedArrival && ledger.Decisions < maxDecisions &&
                             ShouldRouteToBattleSimulation(afterRefresh.RootElement, refreshFailureCode) &&
                             client is IAgentHostBattleSimulationNativeClient refreshBattleClient)
                         {
                             using var refreshBattleRequest = await BuildCurrentBattleInterruptionRequestAsync(request, questDetailsClient, "safeSettlementRefresh", elapsed.Token);
                             var interruptedBattle = await AgentHostBattleSimulationLoop.RunAsync(
                                 refreshBattleRequest.RootElement, refreshBattleClient, provider, elapsed.Token,
-                                priorDecisions: decisions,
-                                priorPromptTokens: promptTokens,
-                                priorCompletionTokens: completionTokens,
-                                priorTrace: trace,
-                                priorProviderRouteHistory: routes,
+                                priorDecisions: ledger.Decisions,
+                                priorPromptTokens: ledger.PromptTokens,
+                                priorCompletionTokens: ledger.CompletionTokens,
+                                priorTrace: ledger.Trace,
+                                priorProviderRouteHistory: ledger.Routes,
                                 recoverPlayerCaptivity: true);
                             AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("safeSettlementRefreshBanditInterruption", interruptedBattle);
-                            decisions = ReadInt(interruptedBattle, "decisions", decisions);
-                            promptTokens = ReadLong(interruptedBattle, "promptTokens", promptTokens);
-                            completionTokens = ReadLong(interruptedBattle, "completionTokens", completionTokens);
+                            ledger.AdoptDelegated(interruptedBattle);
                             nativeActions += ReadInt(interruptedBattle, "actionsExecuted", 0);
-                            trace = interruptedBattle["trace"]?.DeepClone() as JsonArray ?? trace;
-                            routes = interruptedBattle["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
                             using var afterInterruptedBattle = await client.ReadStateAsync(elapsed.Token);
                             var canReplanAfterEncounter = IsSafeMapForObjectiveProviderReplan(afterInterruptedBattle.RootElement);
-                            trace.Add(new JsonObject
+                            ledger.Trace.Add(new JsonObject
                             {
                                 ["stage"] = canReplanAfterEncounter ? "safe-settlement-refresh-bandit-resolved-or-left" : "safe-settlement-refresh-bandit-unresolved",
                                 ["battleStatus"] = ReadString(interruptedBattle, "status"),
@@ -1375,7 +1339,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             if (canReplanAfterEncounter) continue;
                         }
 
-                        trace.Add(new JsonObject
+                        ledger.Trace.Add(new JsonObject
                         {
                             ["stage"] = verifiedArrival ? "no-integrated-route-safe-settlement-refresh-arrived" : "no-integrated-route-safe-settlement-refresh-failed",
                             ["fromSettlementId"] = beforeRefreshSettlementId,
@@ -1395,7 +1359,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             ["status"] = verifiedArrival ? "completed" : "failed",
                             ["termination"] = verifiedArrival ? "native-settlement-arrival-verified" : ReadString(refresh["termination"] as JsonObject, "reason"),
                             ["actionsExecuted"] = ReadInt(refresh, "actionsExecuted", 0),
-                            ["decisions"] = decisions
+                            ["decisions"] = ledger.Decisions
                         });
                         if (verifiedArrival) continue;
                     }
@@ -1423,15 +1387,12 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 }
 
                 JsonObject child;
-                child = await executeObjective(objectiveId, decisions, promptTokens, completionTokens, trace, routes, elapsed.Token);
+                child = await executeObjective(objectiveId, ledger.Decisions, ledger.PromptTokens, ledger.CompletionTokens, ledger.Trace, ledger.Routes, elapsed.Token);
                 AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult(objectiveId, child);
 
-                decisions = ReadInt(child, "decisions", decisions);
-                promptTokens = ReadLong(child, "promptTokens", promptTokens);
-                completionTokens = ReadLong(child, "completionTokens", completionTokens);
+                ledger.AdoptDelegated(child);
+
                 nativeActions += ReadInt(child, "actionsExecuted", 0);
-                trace = child["trace"]?.DeepClone() as JsonArray ?? trace;
-                routes = child["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
                 objectiveRuns.Add(new JsonObject
                 {
                     ["objectiveId"] = objectiveId,
@@ -1448,7 +1409,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     if (ShouldReconsiderUnavailableObjectives(journalProgressChanged: failedChildJournalProgress))
                     {
                         ClearUnavailableObjectives();
-                        trace.Add(new JsonObject
+                        ledger.Trace.Add(new JsonObject
                         {
                             ["stage"] = "failed-objective-native-actions-reopened-other-routes",
                             ["objectiveId"] = objectiveId,
@@ -1466,17 +1427,13 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     {
                         var mapIncident = await AgentHostMapIncidentLoop.RunAsync(
                             request, client, questDetailsClient, provider, elapsed.Token,
-                            priorDecisions: decisions,
-                            priorPromptTokens: promptTokens,
-                            priorCompletionTokens: completionTokens,
-                            priorTrace: trace,
-                            priorProviderRouteHistory: routes);
-                        decisions = ReadInt(mapIncident, "decisions", decisions);
-                        promptTokens = ReadLong(mapIncident, "promptTokens", promptTokens);
-                        completionTokens = ReadLong(mapIncident, "completionTokens", completionTokens);
+                            priorDecisions: ledger.Decisions,
+                            priorPromptTokens: ledger.PromptTokens,
+                            priorCompletionTokens: ledger.CompletionTokens,
+                            priorTrace: ledger.Trace,
+                            priorProviderRouteHistory: ledger.Routes);
+                        ledger.AdoptDelegated(mapIncident);
                         nativeActions += ReadInt(mapIncident, "actionsExecuted", 0);
-                        trace = mapIncident["trace"]?.DeepClone() as JsonArray ?? trace;
-                        routes = mapIncident["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
                         objectiveRuns.Add(new JsonObject
                         {
                             ["objectiveId"] = "nativeMapIncident",
@@ -1489,7 +1446,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         if (ReadString(mapIncident, "status") != "completed")
                             return BuildResult("failed", "native-map-incident-interruption-failed", false,
                                 ReadString(mapIncident, "failure"), ReadString(mapIncident, "failureCode"));
-                        trace.Add(new JsonObject
+                        ledger.Trace.Add(new JsonObject
                         {
                             ["stage"] = "objective-interrupted-by-native-map-incident-resolved",
                             ["interruptedObjectiveId"] = objectiveId,
@@ -1499,7 +1456,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     }
                     if (ShouldReturnPausedNativeMoveToParent(child, failedState.RootElement, out var pausedMoveTarget))
                     {
-                        trace.Add(new JsonObject
+                        ledger.Trace.Add(new JsonObject
                         {
                             ["stage"] = "objective-child-returned-paused-native-move-to-parent",
                             ["objectiveId"] = objectiveId,
@@ -1524,19 +1481,15 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         using var incidentBattleRequest = await BuildCurrentBattleInterruptionRequestAsync(request, questDetailsClient, objectiveId, elapsed.Token);
                         var incidentBattle = await AgentHostBattleSimulationLoop.RunAsync(
                             incidentBattleRequest.RootElement, incidentBattleClient, provider, elapsed.Token,
-                            priorDecisions: decisions,
-                            priorPromptTokens: promptTokens,
-                            priorCompletionTokens: completionTokens,
-                            priorTrace: trace,
-                            priorProviderRouteHistory: routes,
+                            priorDecisions: ledger.Decisions,
+                            priorPromptTokens: ledger.PromptTokens,
+                            priorCompletionTokens: ledger.CompletionTokens,
+                            priorTrace: ledger.Trace,
+                            priorProviderRouteHistory: ledger.Routes,
                             recoverPlayerCaptivity: true);
                         AgentHostHarnessProgressTrace.RecordObjectiveSubflowResult("incidentBattleSimulation", incidentBattle);
-                        decisions = ReadInt(incidentBattle, "decisions", decisions);
-                        promptTokens = ReadLong(incidentBattle, "promptTokens", promptTokens);
-                        completionTokens = ReadLong(incidentBattle, "completionTokens", completionTokens);
+                        ledger.AdoptDelegated(incidentBattle);
                         nativeActions += ReadInt(incidentBattle, "actionsExecuted", 0);
-                        trace = incidentBattle["trace"]?.DeepClone() as JsonArray ?? trace;
-                        routes = incidentBattle["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
                         objectiveRuns.Add(new JsonObject
                         {
                             ["objectiveId"] = "incidentBattleSimulation",
@@ -1551,7 +1504,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         if (IsPlayerCaptive(afterIncidentBattle.RootElement))
                         {
                             MarkObjectiveUnavailable(objectiveId, afterIncidentBattle.RootElement);
-                            trace.Add(new JsonObject
+                            ledger.Trace.Add(new JsonObject
                             {
                                 ["stage"] = "incident-bandit-battle-returned-player-captive",
                                 ["interruptedObjectiveId"] = objectiveId,
@@ -1568,7 +1521,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                                     "The current Native Leave option was used because Send Troops was unavailable, but a safe Map and active EYC were not reverified.",
                                     "incident-bandit-leave-return-state-unverified", journalObjectives, snapshot, differences);
                             MarkObjectiveUnavailable(objectiveId, afterIncidentBattle.RootElement);
-                            trace.Add(new JsonObject
+                            ledger.Trace.Add(new JsonObject
                             {
                                 ["stage"] = "incident-bandit-native-leave-without-simulation-replanned",
                                 ["interruptedObjectiveId"] = objectiveId,
@@ -1583,7 +1536,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             if (ShouldReplanAfterIncidentBattleNoSafeAction(incidentBattle, afterIncidentBattle.RootElement))
                             {
                                 MarkObjectiveUnavailable(objectiveId, afterIncidentBattle.RootElement);
-                                trace.Add(new JsonObject
+                                ledger.Trace.Add(new JsonObject
                                 {
                                     ["stage"] = "incident-bandit-target-lost-returned-to-safe-map",
                                     ["interruptedObjectiveId"] = objectiveId,
@@ -1614,7 +1567,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             ClearUnavailableObjectives();
                         else
                             MarkObjectiveUnavailable(objectiveId, afterIncidentBattle.RootElement);
-                        trace.Add(new JsonObject
+                        ledger.Trace.Add(new JsonObject
                         {
                             ["stage"] = "hostile-bandit-interruption-resolved-and-parent-replanned",
                             ["interruptedObjectiveId"] = objectiveId,
@@ -1630,7 +1583,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     if (IsPlayerCaptive(failedState.RootElement))
                     {
                         MarkObjectiveUnavailable(objectiveId, failedState.RootElement);
-                        trace.Add(new JsonObject
+                        ledger.Trace.Add(new JsonObject
                         {
                             ["stage"] = "objective-child-returned-mainhero-captive",
                             ["objectiveId"] = objectiveId,
@@ -1651,7 +1604,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             AgentHostEstablishYourClanGoalLoop.HasActiveQuest(failedState.RootElement))
                         {
                             MarkObjectiveUnavailable(objectiveId, failedState.RootElement);
-                            trace.Add(new JsonObject
+                            ledger.Trace.Add(new JsonObject
                             {
                                 ["stage"] = "objective-provider-failure-route-blocked-on-free-map",
                                 ["objectiveId"] = objectiveId,
@@ -1675,7 +1628,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                                     "companion-provider-failure-native-leave-rejected", journalObjectives, snapshot, differences);
 
                             nativeActions++;
-                            trace.Add(new JsonObject
+                            ledger.Trace.Add(new JsonObject
                             {
                                 ["stage"] = "companion-provider-failure-native-leave-started",
                                 ["objectiveId"] = objectiveId,
@@ -1705,7 +1658,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                                     "companion-provider-failure-leave-unverified", journalObjectives, snapshot, differences);
 
                             MarkObjectiveUnavailable(objectiveId, failedState.RootElement);
-                            trace.Add(new JsonObject
+                            ledger.Trace.Add(new JsonObject
                             {
                                 ["stage"] = "objective-route-blocked-after-companion-provider-failure",
                                 ["objectiveId"] = objectiveId,
@@ -1734,13 +1687,9 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         client is IAgentHostStoryModeBannerEditorNativeClient storySetupBannerClient)
                     {
                         var setup = await AgentHostStoryModeSetupLoop.RunAsync(request, client, storySetupInquiryClient, storySetupBannerClient, provider, elapsed.Token,
-                            decisions, promptTokens, completionTokens, trace, routes);
-                        decisions = ReadInt(setup, "decisions", decisions);
-                        promptTokens = ReadLong(setup, "promptTokens", promptTokens);
-                        completionTokens = ReadLong(setup, "completionTokens", completionTokens);
+                            ledger.Decisions, ledger.PromptTokens, ledger.CompletionTokens, ledger.Trace, ledger.Routes);
+                        ledger.AdoptDelegated(setup);
                         nativeActions += ReadInt(setup, "actionsExecuted", 0);
-                        trace = setup["trace"]?.DeepClone() as JsonArray ?? trace;
-                        routes = setup["providerRouteHistory"]?.DeepClone() as JsonArray ?? routes;
                         if (ReadString(setup, "status") == "failed")
                             return BuildResult("failed", "storymode-setup-interrupted-objective", false,
                                 ReadString(setup, "failure") ?? "The original StoryMode name/banner setup could not be completed after the current objective interruption.",
@@ -1751,7 +1700,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             if (AgentHostEstablishYourClanGoalLoop.HasActiveQuest(resumedAfterStorySetup.RootElement) &&
                                 !IsPlayerCaptive(resumedAfterStorySetup.RootElement))
                             {
-                                trace.Add(new JsonObject
+                                ledger.Trace.Add(new JsonObject
                                 {
                                     ["stage"] = "objective-replanned-after-storymode-setup",
                                     ["objectiveId"] = objectiveId,
@@ -1776,16 +1725,10 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         var inquiryGoal = await BuildCurrentEycNativeInquiryGoalAsync(request, questDetailsClient, objectiveId, elapsed.Token);
                         var resolution = await AgentHostNativeInquiryResolution.RunAsync(
                             client, inquiryClient, provider, elapsed.Token,
-                            runId + "-inquiry-" + (decisions + 1).ToString(CultureInfo.InvariantCulture), inquiryGoal);
-                        decisions += ReadInt(resolution, "decisions", 0);
-                        promptTokens += ReadLong(resolution, "promptTokens", 0);
-                        completionTokens += ReadLong(resolution, "completionTokens", 0);
+                            runId + "-inquiry-" + ledger.NextDecisionNumber.ToString(CultureInfo.InvariantCulture), inquiryGoal);
+                        ledger.RecordDelegated(resolution);
                         nativeActions += ReadInt(resolution, "actionsExecuted", 0);
-                        if (resolution["providerRouteHistory"] is JsonArray inquiryRoutes)
-                            foreach (var inquiryRoute in inquiryRoutes) routes.Add(inquiryRoute?.DeepClone());
-                        else if (resolution["providerRoute"] is JsonObject inquiryRoute)
-                            routes.Add(inquiryRoute.DeepClone());
-                        trace.Add(new JsonObject
+                        ledger.Trace.Add(new JsonObject
                         {
                             ["stage"] = "native-inquiry-resolution",
                             ["objectiveId"] = objectiveId,
@@ -1812,7 +1755,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                                 AgentHostEstablishYourClanGoalLoop.HasActiveQuest(afterInquiry.RootElement);
                             if (inquiryClosedOnFreeMap)
                             {
-                                trace.Add(new JsonObject
+                                ledger.Trace.Add(new JsonObject
                                 {
                                     ["stage"] = "objective-replanned-after-native-inquiry",
                                     ["objectiveId"] = objectiveId,
@@ -1832,7 +1775,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     if (IsSafeObjectiveRouteUnavailable(objectiveId, termination, freeMap))
                     {
                         if (!failedChildJournalProgress) MarkObjectiveUnavailable(objectiveId, failedState.RootElement);
-                        trace.Add(new JsonObject
+                        ledger.Trace.Add(new JsonObject
                         {
                             ["stage"] = failedChildJournalProgress ? "objective-route-retry-after-partial-journal-progress" : "objective-route-blocked",
                             ["objectiveId"] = objectiveId,
@@ -1908,17 +1851,17 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 ["runId"] = runId,
                 ["providerModelId"] = provider.ModelId,
                 ["providerConfigurationSource"] = provider.ConfigurationSource,
-                ["decisions"] = decisions,
+                ["decisions"] = ledger.Decisions,
                 ["actionsExecuted"] = nativeActions,
-                ["promptTokens"] = promptTokens,
-                ["completionTokens"] = completionTokens,
+                ["promptTokens"] = ledger.PromptTokens,
+                ["completionTokens"] = ledger.CompletionTokens,
                 ["providerPromptCacheHitTokens"] = provider is OllamaNativeProvider cacheMeter ? cacheMeter.PromptCacheHitTokens : null,
                 ["providerPromptCacheMissTokens"] = provider is OllamaNativeProvider missMeter ? missMeter.PromptCacheMissTokens : null,
                 ["providerActualCostEstimateCny"] = provider is OllamaNativeProvider actualCostMeter ? actualCostMeter.ActualCostEstimateCny : null,
                 ["providerReservedCostUpperCny"] = provider is OllamaNativeProvider costMeter ? costMeter.ReservedCostUpperBoundCny : null,
                 ["elapsedSeconds"] = Math.Round(elapsedSeconds, 3),
-                ["providerRouteHistory"] = routes.DeepClone(),
-                ["trace"] = trace.DeepClone(),
+                ["providerRouteHistory"] = ledger.Routes.DeepClone(),
+                ["trace"] = ledger.Trace.DeepClone(),
                 ["objectiveRuns"] = objectiveRuns.DeepClone(),
                 ["unavailableObjectiveIds"] = new JsonArray(unavailableObjectives.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()),
                 ["journalObjectiveSnapshot"] = journal?.DeepClone(),
