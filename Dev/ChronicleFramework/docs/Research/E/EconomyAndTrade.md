@@ -256,6 +256,10 @@ EYC 产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanGoldSal
 
 把价差与日烧放在一起：每件毛利 6，25 人队伍日工资 78，单程一天要背 17 件才够本（收据字段 `arbitrage.breakEvenUnitsPerTravelDay`）。也就是说价差是真的，但它是一门体积生意——决定盈亏的是货运量与路程，不是眼力。这一条对「城镇经济」场景的直接影响是：判据要能算出「一趟背多少件」，而不是奖励一次捡便宜。
 
+第二次运行把负重一侧量进同一份收据（`TestResults/20261126-market-probe-4/Temp/MarketProbeResult.json`）：一件 `flax` 重 10，买 2 件使 `cargoWeight` 223.53→243.53，`cargoCapacity` 1210、剩余 986，按负重可背 98 件；`town_ES3` 该货库存 71 件，按 9 买入价用 2277 金可买 253 件。三个上限的次序是库存 71 < 负重 98 < 资金 253，单程毛利上限 426、扣 78 工资净 348。也就是说体积生意的天花板由**原版库存**决定，负重与资金都不是瓶颈。
+
+同一次运行也暴露一个读数陷阱：同一件货在 `sellOffers` 里可以有多行且单价不同（本轮同时看到 7 与 15），因为堆叠与修正分别成行；成交价必须取被提交那一行的报价，并用金币差核对。
+
 探针本身也留下两条工具事实。`tradeOptions` 的 `buyOffers` 是 OtherInventory 侧（A 城 257 行），`sellOffers` 是 PlayerInventory 侧（A 城 30 行），同一 `itemId` 的装备条目会有元素级 `viewModelItemId` 多行；单价字段是 `nativeItemCost`，买入与卖出的价格不是同一个数。另外结算回执里 `nativeTransactionAmount` 的符号随方向变（卖为负、买为正），拿它和 `playerGold` 的差值对账必须分开读。
 
 ### 货物、负重、动物与战后物资

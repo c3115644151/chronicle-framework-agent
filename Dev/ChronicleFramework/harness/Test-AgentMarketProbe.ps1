@@ -190,15 +190,26 @@ try {
     if ($confirmBuy.status -notin @('completed', 'accepted')) { throw "Native tradeConfirm did not accept the purchase: status=$($confirmBuy.status)." }
     $afterBuy = Close-Market 'buy'
     $afterBuySnapshot = Invoke-Checkpoint 'after-buy'
+    # The spread only pays if the party can carry enough units to cover the leg, so the probe prices the
+    # cargo side as well: one unit's weight comes from the difference the purchase itself made.
+    $startCargoWeight = [double]$start.state.party.cargoWeight
+    $afterBuyCargoWeight = [double]$afterBuySnapshot.state.party.cargoWeight
+    $afterBuyCargoCapacity = [double]$afterBuySnapshot.state.party.cargoCapacity
+    $unitWeight = if ($BuyAmount -gt 0) { [Math]::Round(($afterBuyCargoWeight - $startCargoWeight) / $BuyAmount, 4) } else { 0 }
     $record.afterBuy = [ordered]@{
         gold = [int]$afterBuySnapshot.state.economy.gold
         goldDelta = [int]$afterBuySnapshot.state.economy.gold - [int]$start.state.economy.gold
         itemCount = [int]$afterBuySnapshot.state.party.itemCount
         campaignDay = [double]$afterBuySnapshot.state.campaignDay
+        cargoWeight = $afterBuyCargoWeight
+        cargoCapacity = $afterBuyCargoCapacity
+        unitWeight = $unitWeight
         confirmReceipt = $confirmBuy.data
     }
     $assertions['PurchaseChargedItsPrice'] = ([int]$afterBuySnapshot.state.economy.gold -le [int]$start.state.economy.gold)
     $assertions['PurchaseAddedOneItem'] = ([int]$afterBuySnapshot.state.party.itemCount -ge [int]$start.state.party.itemCount + $BuyAmount)
+    $assertions['ItemWeightIsPositive'] = ($unitWeight -gt 0)
+    $assertions['CargoCapacityExposed'] = ($afterBuyCargoCapacity -gt 0)
 
     $leftA = Leave-Town $townA
     $arrivedB = Enter-Town $townB 'townB'
@@ -246,6 +257,8 @@ try {
         $travelWageCost = $goldBeforeSale - [int]$record.afterBuy.gold
         $grossPerUnit = $sellPrice - $boughtFor
         $breakEvenUnits = if ($grossPerUnit -gt 0 -and $travelDays -gt 0) { [Math]::Ceiling((-$travelWageCost) / ($grossPerUnit * $travelDays)) } else { $null }
+        $cargoHeadroom = [Math]::Max(0, $afterBuyCargoCapacity - $afterBuyCargoWeight)
+        $maxUnitsByCargo = if ($unitWeight -gt 0) { [Math]::Floor($cargoHeadroom / $unitWeight) } else { $null }
         $record.arbitrage = [ordered]@{
             itemId = [string]$chosen.itemId
             boughtFor = $boughtFor
@@ -255,6 +268,12 @@ try {
             travelWageCost = $travelWageCost
             dailyWage = [int]$start.state.party.dailyWage
             breakEvenUnitsPerTravelDay = $breakEvenUnits
+            unitWeight = $unitWeight
+            cargoWeight = $afterBuyCargoWeight
+            cargoCapacity = $afterBuyCargoCapacity
+            cargoHeadroom = $cargoHeadroom
+            maxUnitsByCargo = $maxUnitsByCargo
+            breakEvenFitsCargo = if ($null -ne $maxUnitsByCargo -and $null -ne $breakEvenUnits) { ($maxUnitsByCargo -ge $breakEvenUnits) } else { $false }
         }
     } else {
         $record.afterSell = $null
