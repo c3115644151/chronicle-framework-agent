@@ -35,12 +35,19 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'HarnessPaths.ps1')
+$layout = Get-HarnessLayout -HarnessRoot $PSScriptRoot
+$stageRoot = [string]$layout.StageRoot
+$agentHostRoot = [string]$layout.AgentHostRoot
+$modRoot = [string]$layout.ModRoot
+$docsRoot = [string]$layout.DocsRoot
+
 $HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 $startupEvidenceScript = Join-Path $PSScriptRoot 'HarnessStartupEvidence.ps1'
 . $startupEvidenceScript
 $researchReadinessScript = Join-Path $PSScriptRoot 'HarnessResearchReadiness.ps1'
 . $researchReadinessScript
-$HarnessContractVersion = '7.678'
+$HarnessContractVersion = '7.679'
 $providerCredentialScript = Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1'
 function Get-HarnessConfiguredProviderCredential {
     . $providerCredentialScript
@@ -156,53 +163,53 @@ $previousAgentHostTestPath = [Environment]::GetEnvironmentVariable('CHRONICLE_AG
 $manifestPath = Join-Path $gameRoot 'Modules\ChronicleFramework\SubModule.xml'
 $sourceManifestPath = Join-Path $repositoryRoot 'Modules\ChronicleFramework\SubModule.xml'
 $gameExe = Join-Path $gameRoot 'bin\Win64_Shipping_Client\Bannerlord.exe'
-$projectPath = Join-Path $harnessRoot 'ChronicleFramework.csproj'
-$agentHostProjectPath = Join-Path $harnessRoot 'AgentHost\ChronicleAgentHost.csproj'
-$agentHostDllPath = Join-Path $harnessRoot 'AgentHost\bin\Release\net8.0\ChronicleAgentHost.dll'
-$agentHostMovementProbeScript = Join-Path $harnessRoot 'Test-AgentHostNativeMapMovementMonitorProbe.ps1'
+$projectPath = Join-Path $modRoot 'ChronicleFramework.csproj'
+$agentHostProjectPath = Join-Path $agentHostRoot 'ChronicleAgentHost.csproj'
+$agentHostDllPath = Join-Path $agentHostRoot 'bin\Release\net8.0\ChronicleAgentHost.dll'
+$agentHostMovementProbeScript = Join-Path $stageRoot 'Test-AgentHostNativeMapMovementMonitorProbe.ps1'
 $apiScript = Join-Path (Split-Path -Parent $harnessRoot) 'ApiProbe\Inspect-CampaignApi.ps1'
-$smokeScript = Join-Path $harnessRoot 'Test-Module.ps1'
-$campaignScript = Join-Path $harnessRoot 'Test-Campaign.ps1'
-$freshCampaignScript = Join-Path $harnessRoot 'Test-AgentFreshCampaign.ps1'
-$persistentEycCampaignScript = Join-Path $harnessRoot 'Test-AgentPersistentStoryModeCampaign.ps1'
-$eycObjectiveCheckpointReadbackScript = Join-Path $harnessRoot 'Test-AgentEycObjectiveCheckpointReadback.ps1'
-$freshCampaignBaselineMatrixScript = Join-Path $harnessRoot 'Test-AgentEvaluationFreshCampaignBaseline.ps1'
-$freshCampaignLiveModelEvaluationScript = Join-Path $harnessRoot 'Test-AgentEvaluationFreshCampaignLiveModel.ps1'
-$saveModuleMetadataTestScript = Join-Path $harnessRoot 'Test-AgentSaveMetadata.ps1'
-$protocolScript = Join-Path $harnessRoot 'Test-AgentProtocol.ps1'
-$observationScript = Join-Path $harnessRoot 'Test-AgentObservation.ps1'
-$captivityObservationScript = Join-Path $harnessRoot 'Test-AgentCaptivityObservation.ps1'
-$captivityOutcomeScript = Join-Path $harnessRoot 'Test-AgentCaptivityOutcome.ps1'
-$encounterSurrenderScript = Join-Path $harnessRoot 'Test-AgentEncounterSurrender.ps1'
-$encounterEscapeScript = Join-Path $harnessRoot 'Test-AgentEncounterEscape.ps1'
-$joinEncounterScript = Join-Path $harnessRoot 'Test-AgentJoinEncounterDefenders.ps1'
-$joinEncounterEligibilityScript = Join-Path $harnessRoot 'Test-AgentJoinEncounterEligibility.ps1'
-$joinEncounterAbandonArmyScript = Join-Path $harnessRoot 'Test-AgentJoinEncounterAbandonArmy.ps1'
-$movingArmyJoinScript = Join-Path $harnessRoot 'Test-AgentMovingArmyJoin.ps1'
-$joinSiegeEventScript = Join-Path $harnessRoot 'Test-AgentJoinSiegeEvent.ps1'
-$mapNotificationsScript = Join-Path $harnessRoot 'Test-AgentMapNotifications.ps1'
-$mapIncidentInputGuardScript = Join-Path $harnessRoot 'Test-AgentMapIncidentInputGuard.ps1'
-$quickInformationScript = Join-Path $harnessRoot 'Test-AgentQuickInformation.ps1'
-$sceneNotificationScript = Join-Path $harnessRoot 'Test-AgentSceneNotification.ps1'
-$missionLeaveScript = Join-Path $harnessRoot 'Test-AgentMissionLeave.ps1'
-$villageToolsDeliveryScript = Join-Path $harnessRoot 'Test-AgentVillageToolsDelivery.ps1'
-$movementScript = Join-Path $harnessRoot 'Test-AgentMovement.ps1'
-$holdScript = Join-Path $harnessRoot 'Test-AgentHold.ps1'
-$moveToPointScript = Join-Path $harnessRoot 'Test-AgentMoveToPoint.ps1'
-$recruitmentScript = Join-Path $harnessRoot 'Test-AgentRecruitment.ps1'
-$restScript = Join-Path $harnessRoot 'Test-AgentRest.ps1'
-$multiDaySupplyBaselineScript = Join-Path $harnessRoot 'Test-AgentMultiDaySupplyBaseline.ps1'
-$freshCampaignSupplyBaselineScript = Join-Path $harnessRoot 'Test-AgentEvaluationFreshCampaignSupplyBaseline.ps1'
-$freshCampaignRecruitmentFallbackScript = Join-Path $harnessRoot 'Test-AgentEvaluationFreshCampaignRecruitmentFallback.ps1'
-$agentEvaluationLiveModelSupplyScript = Join-Path $harnessRoot 'Test-AgentEvaluationLiveModelSupply.ps1'
-$pursuitScript = Join-Path $harnessRoot 'Test-AgentPursuit.ps1'
-$agentLoopScript = Join-Path $harnessRoot 'Test-AgentLoop.ps1'
-$agentModelProviderScript = Join-Path $harnessRoot 'Test-AgentOpenAICompatibleProvider.ps1'
-$agentHostPackageScript = Join-Path $harnessRoot 'Test-AgentHostPackage.ps1'
-$agentHostReleasePackageScript = Join-Path $harnessRoot 'Test-AgentHostReleasePackage.ps1'
-$agentHostCampaignLoopEvaluationScript = Join-Path $harnessRoot 'Test-AgentHostCampaignLoopEvaluation.ps1'
-$campaignActorThinkTraceScript = Join-Path $harnessRoot 'Test-AgentCampaignActorThinkTrace.ps1'
-$agentHostLifecycleEvaluationScript = Join-Path $harnessRoot 'Test-AgentHostLifecycleEvaluation.ps1'
+$smokeScript = Join-Path $stageRoot 'Test-Module.ps1'
+$campaignScript = Join-Path $stageRoot 'Test-Campaign.ps1'
+$freshCampaignScript = Join-Path $stageRoot 'Test-AgentFreshCampaign.ps1'
+$persistentEycCampaignScript = Join-Path $stageRoot 'Test-AgentPersistentStoryModeCampaign.ps1'
+$eycObjectiveCheckpointReadbackScript = Join-Path $stageRoot 'Test-AgentEycObjectiveCheckpointReadback.ps1'
+$freshCampaignBaselineMatrixScript = Join-Path $stageRoot 'Test-AgentEvaluationFreshCampaignBaseline.ps1'
+$freshCampaignLiveModelEvaluationScript = Join-Path $stageRoot 'Test-AgentEvaluationFreshCampaignLiveModel.ps1'
+$saveModuleMetadataTestScript = Join-Path $stageRoot 'Test-AgentSaveMetadata.ps1'
+$protocolScript = Join-Path $stageRoot 'Test-AgentProtocol.ps1'
+$observationScript = Join-Path $stageRoot 'Test-AgentObservation.ps1'
+$captivityObservationScript = Join-Path $stageRoot 'Test-AgentCaptivityObservation.ps1'
+$captivityOutcomeScript = Join-Path $stageRoot 'Test-AgentCaptivityOutcome.ps1'
+$encounterSurrenderScript = Join-Path $stageRoot 'Test-AgentEncounterSurrender.ps1'
+$encounterEscapeScript = Join-Path $stageRoot 'Test-AgentEncounterEscape.ps1'
+$joinEncounterScript = Join-Path $stageRoot 'Test-AgentJoinEncounterDefenders.ps1'
+$joinEncounterEligibilityScript = Join-Path $stageRoot 'Test-AgentJoinEncounterEligibility.ps1'
+$joinEncounterAbandonArmyScript = Join-Path $stageRoot 'Test-AgentJoinEncounterAbandonArmy.ps1'
+$movingArmyJoinScript = Join-Path $stageRoot 'Test-AgentMovingArmyJoin.ps1'
+$joinSiegeEventScript = Join-Path $stageRoot 'Test-AgentJoinSiegeEvent.ps1'
+$mapNotificationsScript = Join-Path $stageRoot 'Test-AgentMapNotifications.ps1'
+$mapIncidentInputGuardScript = Join-Path $stageRoot 'Test-AgentMapIncidentInputGuard.ps1'
+$quickInformationScript = Join-Path $stageRoot 'Test-AgentQuickInformation.ps1'
+$sceneNotificationScript = Join-Path $stageRoot 'Test-AgentSceneNotification.ps1'
+$missionLeaveScript = Join-Path $stageRoot 'Test-AgentMissionLeave.ps1'
+$villageToolsDeliveryScript = Join-Path $stageRoot 'Test-AgentVillageToolsDelivery.ps1'
+$movementScript = Join-Path $stageRoot 'Test-AgentMovement.ps1'
+$holdScript = Join-Path $stageRoot 'Test-AgentHold.ps1'
+$moveToPointScript = Join-Path $stageRoot 'Test-AgentMoveToPoint.ps1'
+$recruitmentScript = Join-Path $stageRoot 'Test-AgentRecruitment.ps1'
+$restScript = Join-Path $stageRoot 'Test-AgentRest.ps1'
+$multiDaySupplyBaselineScript = Join-Path $stageRoot 'Test-AgentMultiDaySupplyBaseline.ps1'
+$freshCampaignSupplyBaselineScript = Join-Path $stageRoot 'Test-AgentEvaluationFreshCampaignSupplyBaseline.ps1'
+$freshCampaignRecruitmentFallbackScript = Join-Path $stageRoot 'Test-AgentEvaluationFreshCampaignRecruitmentFallback.ps1'
+$agentEvaluationLiveModelSupplyScript = Join-Path $stageRoot 'Test-AgentEvaluationLiveModelSupply.ps1'
+$pursuitScript = Join-Path $stageRoot 'Test-AgentPursuit.ps1'
+$agentLoopScript = Join-Path $stageRoot 'Test-AgentLoop.ps1'
+$agentModelProviderScript = Join-Path $stageRoot 'Test-AgentOpenAICompatibleProvider.ps1'
+$agentHostPackageScript = Join-Path $stageRoot 'Test-AgentHostPackage.ps1'
+$agentHostReleasePackageScript = Join-Path $stageRoot 'Test-AgentHostReleasePackage.ps1'
+$agentHostCampaignLoopEvaluationScript = Join-Path $stageRoot 'Test-AgentHostCampaignLoopEvaluation.ps1'
+$campaignActorThinkTraceScript = Join-Path $stageRoot 'Test-AgentCampaignActorThinkTrace.ps1'
+$agentHostLifecycleEvaluationScript = Join-Path $stageRoot 'Test-AgentHostLifecycleEvaluation.ps1'
 
 function Remove-RetainedAgentHostPackage([string]$PackageRoot) {
     if ([string]::IsNullOrWhiteSpace($PackageRoot)) { return }
@@ -212,58 +219,58 @@ function Remove-RetainedAgentHostPackage([string]$PackageRoot) {
         (Split-Path -Leaf $resolvedPackageRoot) -notmatch '^ChronicleAgentHost-win-x64-[0-9a-f]{32}$') {
         throw 'Refusing retained Agent Host package cleanup outside its unique D: BuildCache package directory.'
     }
-    $cleanupScript = Join-Path $harnessRoot 'Test-AgentHostPackage.ps1'
+    $cleanupScript = Join-Path $stageRoot 'Test-AgentHostPackage.ps1'
     $cleanupOutput = & $HarnessPowerShell -NoProfile -File $cleanupScript -CleanupPackageRoot $resolvedPackageRoot 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Retained Agent Host package cleanup failed: $cleanupOutput" }
     $cleanupReceipt = $cleanupOutput | ConvertFrom-Json
     if (-not [bool]$cleanupReceipt.Removed -or (Test-Path -LiteralPath $resolvedPackageRoot)) { throw 'Retained Agent Host package directory remains after cleanup.' }
 }
-$agentLiveModelLoopScript = Join-Path $harnessRoot 'Test-AgentLiveModelLoop.ps1'
-$agentCheckpointPersistenceScript = Join-Path $harnessRoot 'Test-AgentCheckpointPersistence.ps1'
-$agentLiveModelResumeScript = Join-Path $harnessRoot 'Test-AgentLiveModelResume.ps1'
-$agentCheckpointValidationScript = Join-Path $harnessRoot 'Test-AgentCheckpointValidation.ps1'
-$agentEvaluationRecruitmentBaselineScript = Join-Path $harnessRoot 'Test-AgentEvaluationRecruitmentBaseline.ps1'
-$agentEvaluationLiveModelRecruitmentScript = Join-Path $harnessRoot 'Test-AgentEvaluationLiveModelRecruitment.ps1'
-$battleFixtureScript = Join-Path $harnessRoot 'Test-AgentBattleFixture.ps1'
-$battleMissionFormationProbeScript = Join-Path $harnessRoot 'Test-AgentBattleMissionFormationProbe.ps1'
-$visualCaptureScript = Join-Path $harnessRoot 'Test-AgentVisualCapture.ps1'
-$tavernMissionScript = Join-Path $harnessRoot 'Test-AgentTavernMission.ps1'
-$townCenterMissionScript = Join-Path $harnessRoot 'Test-AgentTownCenterMission.ps1'
-$settlementOverlayConversationScript = Join-Path $harnessRoot 'Test-AgentSettlementOverlayConversation.ps1'
-$mapSettlementTargetsScript = Join-Path $harnessRoot 'Test-AgentMapSettlementTargets.ps1'
-$mainHeroSkillsScript = Join-Path $harnessRoot 'Test-AgentMainHeroSkills.ps1'
-$characterDevelopmentScript = Join-Path $harnessRoot 'Test-AgentCharacterDevelopment.ps1'
-$spendSkillFocusScript = Join-Path $harnessRoot 'Test-AgentSpendSkillFocus.ps1'
-$partyRosterScript = Join-Path $harnessRoot 'Test-AgentPartyRoster.ps1'
-$mapPartyTargetsScript = Join-Path $harnessRoot 'Test-AgentMapPartyTargets.ps1'
-$mapPartyQuestMarkersScript = Join-Path $harnessRoot 'Test-AgentMapPartyQuestMarkers.ps1'
-$mapPartyQuestAcceptanceScript = Join-Path $harnessRoot 'Test-AgentMapPartyQuestAcceptance.ps1'
-$mapEscapeMenuScript = Join-Path $harnessRoot 'Test-AgentMapEscapeMenu.ps1'
-$mapInquiryScript = Join-Path $harnessRoot 'Test-AgentMapInquiry.ps1'
-$alleyLeaderInquiryScript = Join-Path $harnessRoot 'Test-AgentAlleyLeaderInquiry.ps1'
-$alleyRosterManagementScript = Join-Path $harnessRoot 'Test-AgentAlleyRosterManagement.ps1'
-$alleyAbandonmentScript = Join-Path $harnessRoot 'Test-AgentAlleyAbandonment.ps1'
-$alleyEntryMenuScript = Join-Path $harnessRoot 'Test-AgentAlleyEntryMenu.ps1'
-$missionSceneNavigationScript = Join-Path $harnessRoot 'Test-AgentAlleyLeaderSceneEntry.ps1'
-$alleyAttackYieldScript = Join-Path $harnessRoot 'Test-AgentAlleyAttackYield.ps1'
-$alleyAttackFightMissionScript = Join-Path $harnessRoot 'Test-AgentAlleyAttackFightMission.ps1'
-$persuasionDetailsScript = Join-Path $harnessRoot 'Test-AgentPersuasionDetails.ps1'
-$mapPartyCompositionScript = Join-Path $harnessRoot 'Test-AgentMapPartyComposition.ps1'
-$mapPartyBehaviorScript = Join-Path $harnessRoot 'Test-AgentMapPartyBehavior.ps1'
-$partyUpgradeScript = Join-Path $harnessRoot 'Test-AgentPartyUpgrade.ps1'
-$partyPrisonerRecruitmentScript = Join-Path $harnessRoot 'Test-AgentPartyPrisonerRecruitment.ps1'
-$missionInteractionScript = Join-Path $harnessRoot 'Test-AgentMissionInteraction.ps1'
-$arenaMasterInteractionScript = Join-Path $harnessRoot 'Test-AgentArenaMasterInteraction.ps1'
-$companionHiringScript = Join-Path $harnessRoot 'Test-AgentCompanionHiring.ps1'
-$partyRolesScript = Join-Path $harnessRoot 'Test-AgentPartyRoles.ps1'
-$inventoryNavigationScript = Join-Path $harnessRoot 'Test-AgentInventoryNavigation.ps1'
-$equipmentTransactionsScript = Join-Path $harnessRoot 'Test-AgentEquipmentTransactions.ps1'
-$tradeTransactionsScript = Join-Path $harnessRoot 'Test-AgentTradeTransactions.ps1'
-$barterTransactionsScript = Join-Path $harnessRoot 'Test-AgentBarterTransactions.ps1'
-$barterContextsScript = Join-Path $harnessRoot 'Test-AgentSafePassageBarterContext.ps1'
-$docsScript = Join-Path $harnessRoot 'Check-Docs.ps1'
-$contextPackScript = Join-Path $harnessRoot 'Get-ContextPack.ps1'
-$testResultsRetentionScript = Join-Path $harnessRoot 'Prune-TestResults.ps1'
+$agentLiveModelLoopScript = Join-Path $stageRoot 'Test-AgentLiveModelLoop.ps1'
+$agentCheckpointPersistenceScript = Join-Path $stageRoot 'Test-AgentCheckpointPersistence.ps1'
+$agentLiveModelResumeScript = Join-Path $stageRoot 'Test-AgentLiveModelResume.ps1'
+$agentCheckpointValidationScript = Join-Path $stageRoot 'Test-AgentCheckpointValidation.ps1'
+$agentEvaluationRecruitmentBaselineScript = Join-Path $stageRoot 'Test-AgentEvaluationRecruitmentBaseline.ps1'
+$agentEvaluationLiveModelRecruitmentScript = Join-Path $stageRoot 'Test-AgentEvaluationLiveModelRecruitment.ps1'
+$battleFixtureScript = Join-Path $stageRoot 'Test-AgentBattleFixture.ps1'
+$battleMissionFormationProbeScript = Join-Path $stageRoot 'Test-AgentBattleMissionFormationProbe.ps1'
+$visualCaptureScript = Join-Path $stageRoot 'Test-AgentVisualCapture.ps1'
+$tavernMissionScript = Join-Path $stageRoot 'Test-AgentTavernMission.ps1'
+$townCenterMissionScript = Join-Path $stageRoot 'Test-AgentTownCenterMission.ps1'
+$settlementOverlayConversationScript = Join-Path $stageRoot 'Test-AgentSettlementOverlayConversation.ps1'
+$mapSettlementTargetsScript = Join-Path $stageRoot 'Test-AgentMapSettlementTargets.ps1'
+$mainHeroSkillsScript = Join-Path $stageRoot 'Test-AgentMainHeroSkills.ps1'
+$characterDevelopmentScript = Join-Path $stageRoot 'Test-AgentCharacterDevelopment.ps1'
+$spendSkillFocusScript = Join-Path $stageRoot 'Test-AgentSpendSkillFocus.ps1'
+$partyRosterScript = Join-Path $stageRoot 'Test-AgentPartyRoster.ps1'
+$mapPartyTargetsScript = Join-Path $stageRoot 'Test-AgentMapPartyTargets.ps1'
+$mapPartyQuestMarkersScript = Join-Path $stageRoot 'Test-AgentMapPartyQuestMarkers.ps1'
+$mapPartyQuestAcceptanceScript = Join-Path $stageRoot 'Test-AgentMapPartyQuestAcceptance.ps1'
+$mapEscapeMenuScript = Join-Path $stageRoot 'Test-AgentMapEscapeMenu.ps1'
+$mapInquiryScript = Join-Path $stageRoot 'Test-AgentMapInquiry.ps1'
+$alleyLeaderInquiryScript = Join-Path $stageRoot 'Test-AgentAlleyLeaderInquiry.ps1'
+$alleyRosterManagementScript = Join-Path $stageRoot 'Test-AgentAlleyRosterManagement.ps1'
+$alleyAbandonmentScript = Join-Path $stageRoot 'Test-AgentAlleyAbandonment.ps1'
+$alleyEntryMenuScript = Join-Path $stageRoot 'Test-AgentAlleyEntryMenu.ps1'
+$missionSceneNavigationScript = Join-Path $stageRoot 'Test-AgentAlleyLeaderSceneEntry.ps1'
+$alleyAttackYieldScript = Join-Path $stageRoot 'Test-AgentAlleyAttackYield.ps1'
+$alleyAttackFightMissionScript = Join-Path $stageRoot 'Test-AgentAlleyAttackFightMission.ps1'
+$persuasionDetailsScript = Join-Path $stageRoot 'Test-AgentPersuasionDetails.ps1'
+$mapPartyCompositionScript = Join-Path $stageRoot 'Test-AgentMapPartyComposition.ps1'
+$mapPartyBehaviorScript = Join-Path $stageRoot 'Test-AgentMapPartyBehavior.ps1'
+$partyUpgradeScript = Join-Path $stageRoot 'Test-AgentPartyUpgrade.ps1'
+$partyPrisonerRecruitmentScript = Join-Path $stageRoot 'Test-AgentPartyPrisonerRecruitment.ps1'
+$missionInteractionScript = Join-Path $stageRoot 'Test-AgentMissionInteraction.ps1'
+$arenaMasterInteractionScript = Join-Path $stageRoot 'Test-AgentArenaMasterInteraction.ps1'
+$companionHiringScript = Join-Path $stageRoot 'Test-AgentCompanionHiring.ps1'
+$partyRolesScript = Join-Path $stageRoot 'Test-AgentPartyRoles.ps1'
+$inventoryNavigationScript = Join-Path $stageRoot 'Test-AgentInventoryNavigation.ps1'
+$equipmentTransactionsScript = Join-Path $stageRoot 'Test-AgentEquipmentTransactions.ps1'
+$tradeTransactionsScript = Join-Path $stageRoot 'Test-AgentTradeTransactions.ps1'
+$barterTransactionsScript = Join-Path $stageRoot 'Test-AgentBarterTransactions.ps1'
+$barterContextsScript = Join-Path $stageRoot 'Test-AgentSafePassageBarterContext.ps1'
+$docsScript = Join-Path $stageRoot 'Check-Docs.ps1'
+$contextPackScript = Join-Path $stageRoot 'Get-ContextPack.ps1'
+$testResultsRetentionScript = Join-Path $stageRoot 'Prune-TestResults.ps1'
 
 $sourceControl = [ordered]@{
     Available = $false
@@ -572,7 +579,7 @@ foreach ($stage in $requestedStages) {
                 $savedLlmModel = [Environment]::GetEnvironmentVariable('CHRONICLE_LLM_MODEL', 'Process')
                 try {
                     [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_MODEL', $FreshStoryModeModel, 'Process')
-                    . (Join-Path $harnessRoot 'Get-FreeLLMAPIProfile.ps1')
+                    . (Join-Path $stageRoot 'Get-FreeLLMAPIProfile.ps1')
                     $providerBaseUrl = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_BASE_URL', 'Process')
                     if ([string]::IsNullOrWhiteSpace($providerBaseUrl)) { $providerBaseUrl = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_BASE_URL', 'User') }
                     $providerProtocol = [string][Environment]::GetEnvironmentVariable('CHRONICLE_LLM_PROTOCOL', 'Process')
@@ -773,16 +780,16 @@ foreach ($stage in $requestedStages) {
                     $runningClientSummary = ($runningBannerlordClients | ForEach-Object { "$($_.ProcessName)#$($_.Id)" }) -join ', '
                     throw "Refusing to build or deploy ChronicleFramework while a Bannerlord client is running ($runningClientSummary). Close the game normally and retry; Harness will not stop a live client or overwrite its loaded DLL."
                 }
-                $mainlinePath = Join-Path $harnessRoot 'Focus\MAINLINE.md'
+                $mainlinePath = Join-Path $docsRoot 'Focus\MAINLINE.md'
                 $mainlineText = Get-Content -LiteralPath $mainlinePath -Raw -Encoding UTF8
                 $researchGateReady = $mainlineText -match '(?m)^Research Gate: \*\*READY\*\*\s*$'
                 $implementationGateReady = $mainlineText -match '(?m)^Implementation Gate: \*\*READY\*\*\s*$'
                 $moduleDll = Join-Path $gameRoot 'Modules\ChronicleFramework\bin\Win64_Shipping_Client\ChronicleFramework.dll'
-                $sourceFiles = @(Get-ChildItem -LiteralPath $harnessRoot -File -Filter '*.cs')
+                $sourceFiles = @(Get-ChildItem -LiteralPath $modRoot -File -Filter '*.cs')
                 $changedFeatureSources = if (Test-Path -LiteralPath $moduleDll) {
                     @($sourceFiles | Where-Object { $_.LastWriteTimeUtc -gt (Get-Item -LiteralPath $moduleDll).LastWriteTimeUtc })
                 } else { $sourceFiles }
-                $subModuleSource = Join-Path $harnessRoot 'SubModule.cs'
+                $subModuleSource = Join-Path $modRoot 'SubModule.cs'
                 $diagnosticSourceHash = if (Test-Path -LiteralPath $subModuleSource) { Get-ChronicleCanonicalFileSha256 -LiteralPath $subModuleSource } else { '' }
                 $readiness = Get-ChronicleResearchReadiness -ResearchReady $researchGateReady -ImplementationReady $implementationGateReady -ChangedFeatureSources @($changedFeatureSources | ForEach-Object Name) -AuditedHarnessDiagnosticSha256 $diagnosticSourceHash
                 if (-not $readiness.Allowed) { throw $readiness.Reason }
@@ -795,6 +802,11 @@ foreach ($stage in $requestedStages) {
                 New-Item -ItemType Directory -Path $runtimeModuleData -Force | Out-Null
                 foreach ($moduleDataEntry in Get-ChildItem -LiteralPath $sourceModuleData -Force) {
                     Copy-Item -LiteralPath $moduleDataEntry.FullName -Destination $runtimeModuleData -Recurse -Force
+                }
+                $modAssetsPath = Join-Path (Split-Path -Parent $projectPath) 'obj\project.assets.json'
+                if (-not (Test-Path -LiteralPath $modAssetsPath)) {
+                    $modRestoreOutput = & dotnet restore $projectPath "-p:ChronicleGameRoot=$gameRoot" 2>&1 | Out-String
+                    if ($LASTEXITCODE -ne 0) { throw "Mod project restore failed with exit code $LASTEXITCODE." + [char]10 + $modRestoreOutput }
                 }
                 $buildOutput = & dotnet build $projectPath --configuration Release --no-restore "-p:ChronicleGameRoot=$gameRoot" 2>&1 | Out-String
                 $buildExitCode = $LASTEXITCODE
@@ -1110,7 +1122,7 @@ foreach ($stage in $requestedStages) {
         'Protocol' {
             Invoke-Stage -Name 'Protocol' -Action {
                 $fakeBridgeEvidence = Join-Path $harnessTempDirectory 'AgentHostProtocolContract'
-                $fakeBridgeOutput = & $HarnessPowerShell -NoProfile -File (Join-Path $harnessRoot 'Test-AgentHostProtocol.ps1') -HostDllPath $agentHostDllPath -EvidenceDirectory $fakeBridgeEvidence 2>&1 | Out-String
+                $fakeBridgeOutput = & $HarnessPowerShell -NoProfile -File (Join-Path $stageRoot 'Test-AgentHostProtocol.ps1') -HostDllPath $agentHostDllPath -EvidenceDirectory $fakeBridgeEvidence 2>&1 | Out-String
                 if ($LASTEXITCODE -ne 0) { throw "Agent Host mailbox contract test failed with exit code $LASTEXITCODE.`n$fakeBridgeOutput" }
                 $nativeProtocolOutput = & $HarnessPowerShell -NoProfile -File $protocolScript 2>&1 | Out-String
                 $nativeProtocolExitCode = $LASTEXITCODE
@@ -1125,11 +1137,11 @@ foreach ($stage in $requestedStages) {
                 if ($useBoundedProviderSmoke) { [Environment]::SetEnvironmentVariable('CHRONICLE_LLM_TIMEOUT_SECONDS', '90', 'Process') }
                 try {
                 $mailboxEvidencePath = Join-Path $harnessTempDirectory 'AgentHostMailboxContract'
-                $mailboxOutput = & $HarnessPowerShell -NoProfile -File (Join-Path $harnessRoot 'Test-AgentHostProtocol.ps1') -HostDllPath $agentHostDllPath -EvidenceDirectory $mailboxEvidencePath 2>&1 | Out-String
+                $mailboxOutput = & $HarnessPowerShell -NoProfile -File (Join-Path $stageRoot 'Test-AgentHostProtocol.ps1') -HostDllPath $agentHostDllPath -EvidenceDirectory $mailboxEvidencePath 2>&1 | Out-String
                 $mailboxExitCode = $LASTEXITCODE
                 if ($mailboxExitCode -ne 0) { throw "Local Agent Host mailbox regression failed with exit code $mailboxExitCode.`n$mailboxOutput" }
                 $providerEvidencePath = Join-Path $harnessTempDirectory 'AgentHostProvider'
-                $providerArguments = @('-NoProfile', '-File', (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1'),
+                $providerArguments = @('-NoProfile', '-File', (Join-Path $stageRoot 'Test-AgentHostProvider.ps1'),
                     '-HostDllPath', $agentHostDllPath, '-EvidencePath', $providerEvidencePath, '-MaxOutputTokens', [string]$ProviderSmokeMaxOutputTokens)
                 if ($AllowDshXdPoolFreeRoute) { $providerArguments += '-AllowDshXdPoolFreeRoute' }
                 if ($AllowDshWorkBuddyGateway) { $providerArguments += '-AllowDshWorkBuddyGateway' }
@@ -1147,7 +1159,7 @@ foreach ($stage in $requestedStages) {
         'AgentHostProviderHealth' {
             Invoke-Stage -Name 'AgentHostProviderHealth' -Action {
                 $providerHealthEvidencePath = Join-Path $harnessTempDirectory 'AgentHostProviderHealth'
-                $providerHealthArguments = @('-NoProfile', '-File', (Join-Path $harnessRoot 'Test-AgentHostProvider.ps1'),
+                $providerHealthArguments = @('-NoProfile', '-File', (Join-Path $stageRoot 'Test-AgentHostProvider.ps1'),
                     '-HostDllPath', $agentHostDllPath, '-EvidencePath', $providerHealthEvidencePath, '-HealthOnly')
                 if ($AllowDshXdPoolFreeRoute) { $providerHealthArguments += '-AllowDshXdPoolFreeRoute' }
                 if ($AllowDshWorkBuddyGateway) { $providerHealthArguments += '-AllowDshWorkBuddyGateway' }
@@ -1187,7 +1199,7 @@ foreach ($stage in $requestedStages) {
         }
         'AgentHostSupplyEvaluation' {
             Invoke-Stage -Name 'AgentHostSupplyEvaluation' -Action {
-                $testOutput = & $HarnessPowerShell -NoProfile -File (Join-Path $harnessRoot 'Test-AgentHostSupplyEvaluation.ps1') -Runs $AgentHostSupplyRuns 2>&1 | Out-String
+                $testOutput = & $HarnessPowerShell -NoProfile -File (Join-Path $stageRoot 'Test-AgentHostSupplyEvaluation.ps1') -Runs $AgentHostSupplyRuns 2>&1 | Out-String
                 $testExitCode = $LASTEXITCODE
                 if ($testExitCode -ne 0) { throw "FreeLLMAPI-routed real-model Agent Host supply evaluation failed with exit code $testExitCode.`n$testOutput" }
                 $testOutput
