@@ -24,6 +24,13 @@
 | #130 EYC 完整闭环 | 三个真实单点决策面缺陷已逐一闭环：招募合法 tuple（7.724 / 764b207，真机 6/6 合法 tuple、partySize 1→7）、gold 无安全动作路线封锁（7.725 / 9197918，自测+门）、60 决策边界记录（b3b7bc4） | `TestResults/20261127-eyc-autonomy-opening-tuples3`、`-goldblock-725`；provider self-test 467 场景；Docs 126/126/183/74/23；issue #130 comment 7200885139/7202537159 | 四目标未全部完成；真机反复证实为贫瘠世界状态（无可见劫匪→renown 屏蔽、planner 可选目标只剩 gold/partySize/companions）+ 3B 小模型 + 决策预算的综合边界；上游 `CHRONICLE_LLM_API_KEY` 为空且指向 api.deepseek.com | 真实外部模型或更强本地模型 + 更充足世界状态夹具 + 明确验收预算；此前不堆一次性修补，按 AGENTS「认识先于方案」 |
 
 判读纪律：工程交付完成 ≠ 产品验收通过；#141/#142 不因工程证据齐全而由 Agent 单方标 Done；#130 的失败按世界状态/模型/预算归因，不写成游戏代码缺陷，也不把预算耗尽写成通过。下一轮接手先读本段与 `Focus/MAINLINE.md`，不要重复探索已闭合的单点缺陷。
+## 2026-11-27 EYC 闭环推进与真实死锁边界（阶段①，未达成）
+
+- 阶段①目标：自跑/确定性方式把 EYC 四目标从零到原生 Quest 完成。本轮用 renown 夹具 `ChronicleW7P-manual-20261101-renown-47153` 做 4 次真机（llama3.2:3b、json_schema、40–60 决策），其中一次带 `-FixtureOpponent`（注入 hostile looter party，保留主队伍）。
+- 进展：gold✓（原生出售+Journal 确认）、companions✓（酒馆雇佣确认）、renown 首次真正 `completed:battle-and-captivity-resolved-and-verified`（战斗+俘虏恢复），journal renown 推到 49/50；partySize 23/25。`TestResults/20261127-eyc-closedloop-renownfixture`、`-fixture2`、`-fixture3`、`-opponent`。
+- 真实死锁（不是单点 bug）：`partySize` 子流程反复 `party-capacity-blocked-until-renown`（actionsExecuted=0，原版容量锁需家族等级提升，而家族等级需 renown 50）；renown 停在 49/50，战斗胜利消耗有限可见劫匪后反复 `no-safe-action`；战斗还会打散队伍使 partySize 倒退。两个目标互为前提，形成世界状态死锁。
+- HTTP 500 判定：fixture2 与 opponent 两次被 `provider-http-error`（Ollama 瞬时 500）中断。核实 `OllamaNativeProvider.ShouldRetryTransientFreeLlmApiFailure` 只对 FreeLLMAPI(31415) 的 502 重试；harness 与产品 MCM 把 `MaxHttpRequestsPerDecision` 锁为 1（成本优先，gate 06 断言 `[ValidateRange(1,2)]...=1`）。因此 loopback 500 零重试终止是**产品设计选择，不是缺陷**；改动会破坏产品成本控制契约，判定不修。
+- 结论：阶段①四目标完整闭环仍未达成，剩余为真实现实死锁 + 3B 小模型 + 成本优先 provider 策略的综合边界，非可堆修补的单点问题。不再同夹具重跑（同类型失败已充分刻画）。解除条件：能提供持续 renown 来源且不打散队伍的夹具，或放宽 provider 预算契约，或更强模型。
 ## 2026-11-27 模型决策过程可视化入口（契约 7.727）
 
 - 用户要求补上此前视频讨论时提过的"看到模型决策过程"的视觉入口，便于双方观察测试。
