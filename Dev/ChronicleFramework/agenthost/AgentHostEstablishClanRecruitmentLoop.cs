@@ -236,6 +236,12 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             troopIds is null || troopIds.Count != 1 || troopIds[0]?.GetValue<string>() != "vlandian_recruit" ||
             slots is null || slots.Count != 1 || slots[0]?.GetValue<int>() != 0)
             throw new AgentHostException("establish-clan-recruitment-catalog-failed", "The recruitment catalog must bind an affordable offer to its exact current owner, troop and VM slot; unaffordable/stale offers stay hidden.");
+        var legalTuples = recruitCatalog[0]?["legalTuples"] as JsonArray;
+        if (legalTuples is null || legalTuples.Count != 1 ||
+            ReadString(legalTuples[0] as JsonObject, "ownerId") != "notable-a" ||
+            ReadString(legalTuples[0] as JsonObject, "troopId") != "vlandian_recruit" ||
+            ReadInt(legalTuples[0] as JsonObject, "slot", -1) != 0)
+            throw new AgentHostException("establish-clan-recruitment-legal-tuples-failed", "The recruitment catalog must publish exact legal ownerId/troopId/slot tuples so a model cannot combine parallel arrays into a nonexistent offer.");
         var underfundedOffers = (JsonObject)offers.DeepClone();
         underfundedOffers["data"]!["gold"] = 10;
         var settlementState = new JsonObject { ["location"] = new JsonObject { ["currentSettlementId"] = "town-a" } };
@@ -612,6 +618,7 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             new { scenario = "native-recruit-all-is-cost-and-target-bounded-with-fresh-offer-set", offeredCount = 2, totalCost = 50, passed = true },
             new { scenario = "establish-clan-party-size-offers-current-prisoner-route-and-separate-native-prisoner-limit-confirmation", passed = true },
             new { scenario = "establish-clan-recruitment-rejects-stale-volunteer-identifiers", passed = true },
+            new { scenario = "establish-clan-recruitment-catalog-publishes-legal-owner-troop-slot-tuples", passed = true },
             new { scenario = "establish-clan-recruitment-leaves-town-after-current-vm-has-no-available-affordable-volunteers", passed = true },
             new { scenario = "establish-clan-recruitment-same-day-no-offer-memory-survives-party-size-subflow-restart", passed = true },
             new { scenario = "establish-clan-recruitment-pages-complete-safe-settlement-set", targetCount = manyTargets.Count,
@@ -1658,6 +1665,17 @@ internal static class AgentHostEstablishClanRecruitmentLoop
             ["confirmPartySizeWarning"] = partySize + 1 > partyCapacity ? new JsonArray(JsonValue.Create(0), JsonValue.Create(1)) : new JsonArray(JsonValue.Create(0))
         };
         action["currentOffers"] = new JsonArray(offers.Select(offer => offer.DeepClone()).ToArray());
+        // Native validates ownerId/troopId/slot as one exact tuple. Flat argumentValues arrays are
+        // parallel, not a cartesian product; publish the legal tuples explicitly so the model never
+        // has to guess which slot belongs to which owner.
+        action["legalTuples"] = new JsonArray(offers.Select(offer => (JsonNode?)new JsonObject
+        {
+            ["ownerId"] = ReadString(offer, "ownerId"),
+            ["troopId"] = ReadString(offer, "troopId"),
+            ["slot"] = (int)(ReadNumber(offer, "slot") ?? -1),
+            ["cost"] = (int)(ReadNumber(offer, "cost") ?? 0),
+            ["confirmPartySizeWarning"] = partySize + 1 > partyCapacity ? new JsonArray(0, 1) : new JsonArray(0)
+        }).ToArray());
         var catalog = new JsonArray(action);
         var bulkCost = allEligibleOffers.Sum(offer => ReadNumber(offer, "cost") ?? double.MaxValue);
         var remainingTarget = journalTarget - partySize;

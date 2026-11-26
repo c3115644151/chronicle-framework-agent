@@ -359,6 +359,7 @@ if ($agentHostTournamentLoopSource -notmatch 'DecideTournamentAsync' -or
     throw 'Contract 7.718 requires a runnable bounded tournament observation loop with its own provider prompt, exact action-profile dispatch, postcondition that never claims player victory or reward from a skip handler, and zero-model self-tests.'
 }
 $agentHostLiveModelLoopSource = Get-Content -LiteralPath (Join-Path $stageRoot 'Test-AgentLiveModelLoop.ps1') -Raw -Encoding UTF8
+$agentHostRecruitmentSource = Get-Content -LiteralPath (Join-Path $agentHostRoot 'AgentHostEstablishClanRecruitmentLoop.cs') -Raw -Encoding UTF8
 if ($agentHostCampaignLoopSource -notmatch 'townTradeProfileOnly' -or
     $agentHostCampaignLoopSource -notmatch 'townTradeProfileOnly: townTradeProfileOnly' -or
     $agentHostCampaignLoopSource -notmatch 'supportedTownTradeGoal' -or
@@ -420,6 +421,18 @@ if ($agentPathDivergenceSource -notmatch 'RunDirectories' -or
     $agentPathDivergenceSource -notmatch 'argumentDiverged' -or
     $agentPathDivergenceSource -notmatch 'Get-DecisionFingerprint') {
     throw 'Contract 7.722 requires divergence to be judged only across runs sharing fixture hash, commit, goal, model and budget, with a full Host receipt, and to refuse a claim when fewer than two comparable runs exist.'
+}
+if ($agentHostRecruitmentSource -notmatch 'legalTuples' -or
+    $agentHostRecruitmentSource -notmatch 'establish-clan-recruitment-catalog-publishes-legal-owner-troop-slot-tuples' -or
+    $agentHostDecisionCycleSource -notmatch 'use the legalTuples array') {
+    throw 'Contract 7.723 requires the recruitment catalog to publish exact legal ownerId/troopId/slot tuples so a real model cannot combine parallel argument arrays into a nonexistent Native offer.'
+}
+if ($providerHostSource -notmatch 'BuildExactValueSchema' -or
+    $providerHostSource -notmatch 'legalTuples' -or
+    $providerHostSource -notmatch '\["anyOf"\] = tupleBranches' -or
+    $agentHostProviderSelfTestSource -notmatch 'provider-legal-tuples-constrain-cross-field-recruitment-choices' -or
+    $agentHostProviderSelfTestSource -notmatch 'provider-legal-tuples-schema-invalid') {
+    throw 'Contract 7.724 requires the structured-output schema to constrain cross-field recruitment choices to complete legal tuples, so a small model cannot pick ownerId and slot from different offers.'
 }
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or

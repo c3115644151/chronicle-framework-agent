@@ -1405,13 +1405,45 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
                 }
                 var requiredArgumentNames = new JsonArray();
                 foreach (var argumentName in argumentNames) requiredArgumentNames.Add(argumentName);
-                    var branch = new JsonObject
+                JsonObject argumentsSchema;
+                if (action.TryGetProperty("legalTuples", out var legalTuples) &&
+                    legalTuples.ValueKind == JsonValueKind.Array && legalTuples.GetArrayLength() > 0)
+                {
+                    // Parallel argumentValues arrays let a small model mix ownerId from one offer with
+                    // slot from another. Publish one complete object per legal tuple so the structured
+                    // output schema itself forbids a cross-tuple combination before the model replies.
+                    var tupleBranches = new JsonArray();
+                    foreach (var tupleNode in legalTuples.EnumerateArray())
+                    {
+                        if (tupleNode.ValueKind != JsonValueKind.Object) continue;
+                        var tupleProperties = new JsonObject();
+                        foreach (var argumentName in argumentNames)
+                        {
+                            tupleProperties[argumentName] = BuildExactValueSchema(tupleNode, argumentName, argumentProperties[argumentName] as JsonObject);
+                        }
+                        tupleBranches.Add(new JsonObject
+                        {
+                            ["type"] = "object",
+                            ["properties"] = tupleProperties,
+                            ["required"] = requiredArgumentNames.DeepClone(),
+                            ["additionalProperties"] = false
+                        });
+                    }
+                    argumentsSchema = tupleBranches.Count > 0
+                        ? new JsonObject { ["anyOf"] = tupleBranches }
+                        : new JsonObject { ["type"] = "object", ["properties"] = argumentProperties, ["required"] = requiredArgumentNames, ["additionalProperties"] = false };
+                }
+                else
+                {
+                    argumentsSchema = new JsonObject { ["type"] = "object", ["properties"] = argumentProperties, ["required"] = requiredArgumentNames, ["additionalProperties"] = false };
+                }
+                var branch = new JsonObject
                 {
                     ["type"] = "object",
                     ["properties"] = new JsonObject
                     {
-                            ["action"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(actionName) },
-                            ["arguments"] = new JsonObject { ["type"] = "object", ["properties"] = argumentProperties, ["required"] = requiredArgumentNames, ["additionalProperties"] = false }
+                        ["action"] = new JsonObject { ["type"] = "string", ["enum"] = new JsonArray(actionName) },
+                        ["arguments"] = argumentsSchema
                     },
                     ["required"] = new JsonArray("action", "arguments"),
                     ["additionalProperties"] = false
@@ -1469,6 +1501,26 @@ internal sealed class OllamaNativeProvider : IAgentHostDecisionProvider
         };
     }
 
+    private static JsonObject BuildExactValueSchema(JsonElement tuple, string argumentName, JsonObject? fallback)
+    {
+        var fallbackType = fallback?["type"]?.GetValue<string>() ?? "string";
+        if (!tuple.TryGetProperty(argumentName, out var value) ||
+            value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            return fallback?.DeepClone() as JsonObject ?? new JsonObject { ["type"] = fallbackType };
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            var arrayType = InferEnumeratedJsonSchemaType(value) ?? fallbackType;
+            return new JsonObject { ["type"] = arrayType, ["enum"] = JsonNode.Parse(value.GetRawText()) };
+        }
+        var valueType = value.ValueKind switch
+        {
+            JsonValueKind.String => "string",
+            JsonValueKind.Number when value.TryGetInt32(out _) => "integer",
+            JsonValueKind.True or JsonValueKind.False => "boolean",
+            _ => fallbackType
+        };
+        return new JsonObject { ["type"] = valueType, ["enum"] = new JsonArray(JsonNode.Parse(value.GetRawText())) };
+    }
     private static string? InferEnumeratedJsonSchemaType(JsonElement values)
     {
         if (values.ValueKind != JsonValueKind.Array || values.GetArrayLength() == 0) return null;

@@ -469,6 +469,31 @@ internal static class ProviderContractSelfTest
             results.Add(new { scenario = "provider-prisoner-recruitment-confirmations-follow-native-integer-enums", passed = true });
         }
 
+        using (var tupleRequest = JsonDocument.Parse("""
+        {"goal":"Recruit one eligible Native volunteer.","observation":{"state":{"context":{"gameState":"MapState","menuId":"town_default"}},"party":{"members":1}},"allowedActions":[{"action":"recruit","arguments":["ownerId","troopId","slot","confirmPartySizeWarning"],"argumentValues":{"ownerId":["notable-a","notable-b"],"troopId":["vlandian_recruit","imperial_recruit"],"slot":[0,1],"confirmPartySizeWarning":[0]},"legalTuples":[{"ownerId":"notable-a","troopId":"vlandian_recruit","slot":1,"cost":30,"confirmPartySizeWarning":[0]},{"ownerId":"notable-b","troopId":"imperial_recruit","slot":0,"cost":40,"confirmPartySizeWarning":[0]}]}],"allowedControls":[]}
+        """))
+        {
+            var schema = OllamaNativeProvider.BuildDecisionSchema(tupleRequest.RootElement);
+            var argumentsSchema = schema["properties"]?["decision"]?["anyOf"]?[0]?["properties"]?["arguments"] as JsonObject;
+            var tupleAlternatives = argumentsSchema?["anyOf"] as JsonArray;
+            if (argumentsSchema?["properties"] is not null ||
+                tupleAlternatives?.Count != 2 ||
+                tupleAlternatives[0]?["properties"]?["ownerId"]?["enum"]?[0]?.GetValue<string>() != "notable-a" ||
+                tupleAlternatives[0]?["properties"]?["slot"]?["enum"]?[0]?.GetValue<int>() != 1 ||
+                tupleAlternatives[1]?["properties"]?["ownerId"]?["enum"]?[0]?.GetValue<string>() != "notable-b" ||
+                tupleAlternatives[1]?["properties"]?["slot"]?["enum"]?[0]?.GetValue<int>() != 0)
+                throw new AgentHostException("provider-legal-tuples-schema-invalid", "The structured-output schema must constrain cross-field ownerId/troopId/slot choices to complete legal tuples, not independent parallel enums.");
+
+            using var mixedTupleDecision = JsonDocument.Parse("{\"action\":\"recruit\",\"arguments\":{\"ownerId\":\"notable-a\",\"troopId\":\"vlandian_recruit\",\"slot\":0,\"confirmPartySizeWarning\":0}}");
+            try
+            {
+                _ = OllamaNativeProvider.NormalizeDecision(mixedTupleDecision.RootElement, tupleRequest.RootElement);
+            }
+            catch (AgentHostException exception) when (exception.Code.StartsWith("provider-", StringComparison.Ordinal)) { }
+
+            results.Add(new { scenario = "provider-legal-tuples-constrain-cross-field-recruitment-choices", passed = true });
+        }
+
         using (var oneChoiceArgumentRequest = JsonDocument.Parse("""
         {"goal":"Answer the current Native inquiry.","observation":{"state":{"context":{"inquiryOpen":true}}},"allowedActions":[{"action":"respondInquiry","arguments":["choice"],"argumentValues":{"choice":["affirmative","negative"]}}],"allowedControls":[]}
         """))

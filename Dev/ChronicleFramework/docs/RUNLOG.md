@@ -8,6 +8,18 @@
 
 关于收据留存：`TestResults/<runId>` 目录会被每次阶段运行末尾的 retention（`harness/Prune-TestResults.ps1`）清理，只保留最近若干个与 `DEVELOPMENT.md`、`MAINLINE.md`、`RUNLOG.md` 点名引用的运行。文档中点名的 run id 共 1,096 个，2026-11-26 盘上实际存在 148 个目录——差额主要是 `docs/Research/**` 与 `SYSTEM_INVENTORY.md` 引用的历史运行。所以本文件里的收据路径是**当时那次运行的证据指向，不保证今天还能打开**；要重跑同一观察，用同一条脚本与同一组参数（例如 `harness/Test-AgentIdlePressure.ps1 -LoadSaveName ChronicleEycDev-opening-20261126 -ChunkDays 1 -MaxChunks 1`）而不是指望旧目录。需要长期留盘的收据，必须在 `Prune-TestResults.ps1 -ReferenceDocumentPaths` 里被点名，或被写进上面三份默认文档。
 
+## 2026-11-27 招募合法三元组 schema 约束（契约 7.724）
+
+- 真机复核：健康 opening 检查点两次本地 llama3.2:3b 跑，第一次 `TestResults/20261127-eyc-autonomy-opening-tuples` 46 决策/63 动作、gold 目标完成一次后被 Ollama HTTP500 打断；第二次 `TestResults/20261127-eyc-autonomy-opening-tuples2` 仍以 `recruitment-rejection-limit` 停止，模型继续提交 1789+slot0。根因是 `BuildDecisionSchema` 的 ownerId/slot 独立 enum 允许笛卡尔组合，catalog/prompt 的 legalTuples 不足以约束 3B 输出。
+- 修复：`OllamaNativeProvider.BuildDecisionSchema` 对带 legalTuples 的 action 把 arguments 改为完整 tuple 的 `anyOf` 分支（固定 ownerId/troopId/slot/confirmPartySizeWarning 具体值），`BuildExactValueSchema` 保留数值类型与 confirm 枚举；`ProviderContractSelfTest` 新增 `provider-legal-tuples-constrain-cross-field-recruitment-choices`。
+- 真机验证 `TestResults/20261127-eyc-autonomy-opening-tuples3`（健康 opening 检查点、llama3.2:3b、80 决策预算）：49 决策/77 动作，6 次招募决策全部落在合法 tuple（1789+slot1、1790+slot0、1791+slot0/1/2、1792+slot2），不再出现此前 1789+slot0 的交叉组合；`partySize` 子流程从 1 增至 7，终止原因从 `recruitment-rejection-limit` 变为 `recruitment-model-stopped-with-safe-actions`，证明 schema 层 tuple 约束生效。gold 目标完成一次原生出售（`one-native-sale-and-journal-gold-increase-verified`）。整体仍以 `gold-sale-no-safe-native-action` 结束、四目标未完成，属 #130 已记录的贫瘠世界状态+3B 小模型+预算综合边界，不再归因为招募决策面缺陷。FixtureUnchanged/ProcessStopped/VisualEvidence 全 true。
+
+## 2026-11-27 招募合法三元组决策面修复（契约 7.723）
+
+- 健康 opening 检查点（`ChronicleEycDev-opening-20261126`，1000 金/1 健康/士气49/粮2.0/EYC active）的 EYC 自主运行 `TestResults/20261127-eyc-autonomy-opening`（80 决策预算）跑到 27 决策/37 动作，以 `recruitment-rejection-limit` 停止。零模型核对起点状态健康；根因：模型连续 3 次提交 `recruit={ownerId:CharacterObject_1789,troopId:imperial_recruit,slot:0,confirmPartySizeWarning:0}`，但 catalog 的 ownerId=[1789,1790,1791,...] 与 slot=[1,0,0,1,2,2] 是平行数组，1789 对应的合法 slot 是 1，0 属于 1790；原生正确拒绝不存在的配对，模型因看不出配对关系反复重试到上限。
+- 修复：`AgentHostEstablishClanRecruitmentLoop.BuildRecruitmentActionCatalog` 在 catalog 上发布 `legalTuples`（每项精确绑定 ownerId/troopId/slot/cost/confirmPartySizeWarning）；`EstablishClanRecruitmentSystemPrompt` 指示模型优先使用 legalTuples，不混用平行数组。自测 `establish-clan-recruitment-catalog-publishes-legal-owner-troop-slot-tuples` 通过。
+- 验证：dotnet build 0 警告/0 错误；provider self-test `TestResults/_selftest-tuples.json` passed=true、465 场景、failed=0。尚未用真机重跑验证修复是否让模型完成招募——那是下一增量。
+
 ## 2026-11-27 EYC 60 决策自主闭环尝试（#130，真实边界）
 
 - 运行：`harness/Test-AgentLiveModelLoop.ps1 -EstablishYourClanAutonomyLoop -AgentHostRuntime -LoadSaveName ChronicleEycDev-freshB-20261123092350-d1a1805e -MaxProviderDecisions 60 -HostMaxElapsedSeconds 1800`，本地 llama3.2:3b + json_schema、loopback 零外部凭据，收据 `TestResults/20261127-eyc-autonomy60`。

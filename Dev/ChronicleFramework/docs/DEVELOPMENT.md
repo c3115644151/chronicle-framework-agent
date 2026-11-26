@@ -1,6 +1,14 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.722
+Contract version: 7.724
+
+## Contract 7.724 — 结构化输出 schema 绑定招募合法三元组
+
+真机两跑证明只在 catalog/prompt 发布 `legalTuples` 不足以让 3B 模型稳定遵守配对：本地 Ollama json_schema 把 `ownerId`/`slot` 做成两个独立 enum，模型从笛卡尔积各取一值仍能生成 schema 合法但原生无效的 offer。修复：`BuildDecisionSchema` 对带 `legalTuples` 的招募动作把 arguments 改为 `anyOf` 的完整 tuple 对象分支（每个分支固定 ownerId/troopId/slot 为具体值），structured output 本身排除跨 tuple 组合；自测 `provider-legal-tuples-constrain-cross-field-recruitment-choices` 钉住 schema。
+
+## Contract 7.723 — 招募合法三元组决策面
+
+真机（健康 opening 检查点）暴露招募 catalog 表达缺口：`ownerId`/`troopId`/`slot` 是平行去重数组，3B 模型把不同索引的值交叉组合成不存在的 offer（1789+slot0，而 1789 实际 slot=1），被原生拒绝后反复重试到 `recruitment-rejection-limit`。修复：`BuildRecruitmentActionCatalog` 在 catalog 上显式发布 `legalTuples`（每项绑定精确 ownerId/troopId/slot/cost/confirmPartySizeWarning），招募 prompt 指示模型优先用 legalTuples，零模型自测 `establish-clan-recruitment-catalog-publishes-legal-owner-troop-slot-tuples` 钉住配对。
 
 ## Contract 7.722 — 同起点路径分化判据
 

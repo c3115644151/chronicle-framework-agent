@@ -726,6 +726,11 @@ AgentHostRuntime 的切片动作集必须与 `AgentHostCampaignLoop.SupportedAct
 
 契约 7.722 同起点双跑实证：`TestResults/20261127-divergence-towntrade-A/B` 在完全相同的可观测起点上两跑都完成一次原生买入，动作名路径一致但买入商品分为 grain 与 tools，构成目标选择层的真实分化。判据据此区分 `actionShapeDiverged`（动作名）与 `argumentDiverged`（动作+参数）：前者假、后者真、整体 `diverged=true`。这证明「同起点是否分化」要连决策参数一起看，只看动作名会把不同选择误判为收敛。
 
+契约 7.723 招募决策面事实：招募 catalog 的 `ownerId`/`troopId`/`slot` 是平行数组，合法 offer 是三元组而非笛卡尔积；Host 现在在 catalog 上发布 `legalTuples` 绑定精确配对并让 prompt 指示模型使用它。这来自健康 opening 检查点真机 `recruitment-rejection-limit` 根因（模型组合出不存在的 ownerId/slot 配对），不是原生拒绝逻辑缺陷。
+
+契约 7.724 schema 事实：本地 Ollama 的 json_schema 决策 schema 不能只给平行 argumentValues enum，否则 3B 模型仍会跨 offer 拼出 ownerId/slot 无效组合。`BuildDecisionSchema` 对带 `legalTuples` 的招募动作改出 arguments `anyOf`（每个分支固定一组 ownerId/troopId/slot/confirmPartySizeWarning 的具体值），让结构化输出本身只接受原生合法 offer；这是真机 legalTuples 两跑仍不稳定后的位置修复，不依赖模型阅读 catalog 能力。
+真机 `TestResults/20261127-eyc-autonomy-opening-tuples3` 验证：6/6 招募决策均落在合法 tuple，`partySize` 1→7，终止原因不再是 `recruitment-rejection-limit`；schema 层 tuple 约束是招募决策面缺陷的正确修复位置。整体四目标仍受 #130 世界状态/小模型/预算边界限制。
+
 #130 EYC 闭环边界（2026-11-27）：`TestResults/20261127-eyc-autonomy60`（1人0金 freshB 夹具、llama3.2:3b、60 决策）以 `establish-clan-autonomy-budget-exhausted` 结束，gold 目标三种失败分别是无可见劫匪、原生拒绝动作、预算耗尽安全回地图；四目标未完成。这是贫瘠起点+小模型+预算的综合边界，不作为游戏代码缺陷或产品通过证据。
 
 契约 7.722 登记 #142 同起点分化判据：只有夹具哈希、源提交、目标、模型与输出预算全部相同的 run 才可比较路径，且必须各自有完整 Host 收据；路径指纹来自完整 trace 的 Native 动作序列。可比 run 少于两个时不得声称分化。这是判定器而非模型能力，当前收据分属不同 commit/goal，按设计不产生分化结论。
