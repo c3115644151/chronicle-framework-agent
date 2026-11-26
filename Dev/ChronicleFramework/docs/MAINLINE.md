@@ -1,4 +1,4 @@
-﻿# 当前主线：AI自主游玩 Bannerlord 单机 Campaign
+# 当前主线：AI自主游玩 Bannerlord 单机 Campaign
 
 ## 当前产品方向（2026-10-19）
 
@@ -719,6 +719,8 @@ AgentHostRuntime 的切片动作集必须与 `AgentHostCampaignLoop.SupportedAct
 城镇买入腿的主机边界（`agenthost/AgentHostCampaignLoop.cs`、`agenthost/NativeMailboxClient.cs`）：`TownTradeActions` 是独立 profile `{mapSettlementTargets,move,menuSelect,tradeOptions,trade,tradeConfirm,tradeCancel,tradeCancelChanges,inventoryDone}`，不并入 `AllSupportedActions`；`IAgentHostTownTradeNativeClient.ExecuteTownTradeActionAsync` 走独立校验，只允许 `direction=buy` + `inventorySide=OtherInventory` + 小写当前报价 id + `amount>=1`，sell/PlayerInventory/时钟动词在发送前拒绝。
 
 这条边界是 #143 的地基而非完整收入腿：有界决策 loop、额度上限（库存/负重/金币）与 A→B 城净收益收据仍需下一增量。现有 `TestResults/20261126-market-probe-3/4` 只证明 Native 侧买→旅行→卖可行（flax 9→15，单程毛利上限 426，扣 78 日工资净 348），不证明 Host 已把买入开放给模型。
+
+契约 7.717 将买入腿推进到独立可运行 loop `AgentHostTownTradeLoop`：`DecideTownTradeAsync` 在 `supported-town-trade` classification 下、动作集合与 `TownTradeActions` 完全一致且 client 为 `IAgentHostTownTradeNativeClient` 时才接手。它绑定当前 `buyOffers` 与 `OtherInventory` 买入，单次原生买入后以 Gold/物品数量反向变化核实，成功终止结果为 `resultKind=town-trade-buy`、原因 `one native buy verified by Gold/item-count inverse changes`；失败/取消留在受控 profile 内。零模型 `RunContractSelfTests` 与 `05-observation-and-provider.ps1` 断言覆盖机制；本机验证 `TestResults/_selftest-towntrade-717-final.json` 为 `passed=true`、`scenarios=449`、`failed=0`、`modelCalls=0`、`nativeCommands=0`（town-trade 14 条），构建 0 警告/0 错误，`harness/Check-Docs.ps1` 通过且 Docs 数字不变。本条只证明受控零模型自测，不宣称真实模型或游戏运行通过。
 
 ### Campaign存档内的Agent目标Checkpoint
 

@@ -311,6 +311,25 @@ if ($agentHostCampaignLoopSource -notmatch 'TownTradeActions' -or
     $agentHostProviderSelfTestSource -notmatch 'RunTownTradeActionContractSelfTests') {
     throw 'The town market buy leg must be a separate accepted Host profile with its own bounded mailbox: buy direction, OtherInventory side, positive amount, and no sale or clock-control verbs.'
 }
+
+$agentHostTownTradeLoopPath = Join-Path $agentHostRoot 'AgentHostTownTradeLoop.cs'
+if (-not (Test-Path -LiteralPath $agentHostTownTradeLoopPath)) {
+    throw 'The town-trade bounded buy loop must live in agenthost/AgentHostTownTradeLoop.cs.'
+}
+$agentHostTownTradeLoopSource = Get-Content -LiteralPath $agentHostTownTradeLoopPath -Raw
+if ($agentHostTownTradeLoopSource -notmatch 'DecideTownTradeAsync' -or
+    $agentHostTownTradeLoopSource -notmatch 'TownTradeSystemPrompt' -or
+    $agentHostTownTradeLoopSource -notmatch 'direction\s*[!=]=\s*"buy"' -or
+    $agentHostTownTradeLoopSource -notmatch '(inventorySide|side)\s*[!=]=\s*"OtherInventory"' -or
+    $agentHostTownTradeLoopSource -notmatch '\["direction"\]\s*=\s*"buy"' -or
+    $agentHostTownTradeLoopSource -notmatch '\["inventorySide"\]\s*=\s*"OtherInventory"' -or
+    $agentHostCampaignLoopSource -notmatch 'supported-town-trade' -or
+    $agentHostCampaignLoopSource -notmatch 'SetEquals\(TownTradeActions\)' -or
+    $agentHostTownTradeLoopSource -notmatch 'IAgentHostTownTradeNativeClient' -or
+    $agentHostTownTradeLoopSource -notmatch 'buyVerified|one-native-buy' -or
+    $agentHostTownTradeLoopSource -notmatch 'RunContractSelfTests') {
+    throw 'Contract 7.717 requires a runnable bounded town-trade buy loop with its own provider prompt, exact action-profile dispatch, buy-side postconditions, and zero-model self-tests.'
+}
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\-BattleSimulationLoop' -or

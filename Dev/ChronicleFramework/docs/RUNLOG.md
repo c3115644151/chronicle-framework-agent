@@ -1,4 +1,4 @@
-﻿# Chronicle Framework 运行日志
+# Chronicle Framework 运行日志
 
 本文件是**每一次真实运行**（Harness 阶段、AgentHost 驱动、实机诊断、手动续跑）事实的权威来源，按时间顺序追加。
 持久的技术事实、机制契约、未知、分母与验收规则在 [MAINLINE.md](MAINLINE.md)；工程契约与验收阶梯在 [DEVELOPMENT.md](DEVELOPMENT.md)。
@@ -1200,6 +1200,10 @@ $env:CHRONICLE_LLM_MAX_TOKENS='1000'
 ## 2026-11-26 城镇买入腿的主机侧地基（契约 7.716）
 
 本轮没有启动游戏、没有真实模型请求。源码侧新增独立 `TownTradeActions` 与 `town-trade` profile；`NativeMailboxClient` 新增 `IAgentHostTownTradeNativeClient`、独立校验与 contract self-test。这一增量只钉住主机边界，不把零模型市场探针改写成模型能力证据。
+
+## 2026-11-26 独立 town-trade 有界买入 loop（契约 7.717）
+
+机制收据：`AgentHostTownTradeLoop` 在 `supported-town-trade` 分类、`TownTradeActions` 精确匹配与 `IAgentHostTownTradeNativeClient` 下运行；使用当前 `buyOffers/OtherInventory`，成功终止写作 `resultKind=town-trade-buy`，原因 `one native buy verified by Gold/item-count inverse changes`。本机零模型验证已通过：`dotnet build Dev/ChronicleFramework/agenthost/ChronicleAgentHost.csproj -c Release` 为 0 警告/0 错误；`ChronicleAgentHost.dll --provider-self-test` 收据 `TestResults/_selftest-towntrade-717-final.json` 为 `passed=true`、`scenarios=449`、`failed=0`、`modelCalls=0`、`nativeCommands=0`，其中 town-trade 场景 14 条（两处注册各 7 条）；`harness/Check-Docs.ps1` 通过且 Docs 数字不变（Catalog 126/126、ACT 183、OBS 74、NA 23）。这些是受控零模型自测，不构成真实模型或游戏运行通过证据。
 
 ## 2026-11-26 自主运行里的可见对手夹具（契约 7.715）
 

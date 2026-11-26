@@ -352,7 +352,7 @@ EYC/Autonomy 的 BattleSimulation 调用点都带 `recoverPlayerCaptivity: true`
 
 ### 9.7 买入腿先是边界，再是场景
 
-#143 不能靠给通用战役循环加一个 `trade` 解决：主机循环在非 MapState 直接退出，城镇市场发生在 InventoryState；Gold 切片又只接受 sell。现在的 `town-trade` profile 是独立的 Host 边界，只描述「安全移动到市场、读取当前报价、按报价买入、确认或取消、离开」，不承诺模型已经会用。
+#143 不能靠给通用战役循环加一个 `trade` 解决：主机循环在非 MapState 直接退出，城镇市场发生在 InventoryState；Gold 切片又只接受 sell。`town-trade` 是独立 Host profile；契约 7.717 的 `AgentHostTownTradeLoop` 已把「安全 Town 目标定位、移动到市场、读取当前报价、按报价买入、确认或取消、离开」做成可运行的受控子流程，并通过 Gold/物品数量反向变化验证单次原生买入。它仍然是受控 profile，不并入 gold-sale 或 AllSupportedActions，也不宣称模型已能自主完成跨城套利或完整经济决策。
 
 场景层面的买低卖高要同时满足三件事：当前报价决定可买数量，旅行工资与载重进入成本，第二座城镇的同货报价决定净收益。零模型 `MarketProbe` 只证明世界给得出这样的价差；有界 loop 与真机收据才证明模型能把三件事串成一次收入腿。
 

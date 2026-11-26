@@ -145,13 +145,14 @@ internal static class AgentHostCampaignLoop
         {
             ["allowedControls"] = new JsonArray("supportedMapArrivalGoal", "supportedVillageToolsQuestGoal", "supportedBattleSimulationGoal",
                 "supportedBattleAndCaptivityGoal", "supportedEstablishYourClanGoal", "supportedCaptivityRecoveryGoal",
-                "supportedEstablishClanGoldSaleGoal", "unsupportedGoal")
+                "supportedEstablishClanGoldSaleGoal", "supportedTownTradeGoal", "unsupportedGoal")
         });
         if (!AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("intermediate steps", StringComparison.Ordinal) ||
             !AgentHostDecisionCycle.CampaignGoalClassificationPrompt.Contains("not currently visible", StringComparison.Ordinal) ||
             !allScopeClassifierPrompt.Contains("BattleSimulation", StringComparison.Ordinal) ||
             !allScopeClassifierPrompt.Contains("rebuild_player_clan_storymode_quest", StringComparison.Ordinal) ||
-            !allScopeClassifierPrompt.Contains("currently sellable Goods item", StringComparison.Ordinal))
+            !allScopeClassifierPrompt.Contains("currently sellable Goods item", StringComparison.Ordinal) ||
+            !allScopeClassifierPrompt.Contains("currently buyable OtherInventory Goods", StringComparison.Ordinal))
             throw new AgentHostException("campaign-loop-self-test-classifier-confuses-scope-with-availability", "Goal scope classification must treat supported actions as intermediate steps and not depend on target availability.");
         results.Add(new { scenario = "campaign-loop-classification-is-independent-of-target-availability", passed = true });
         var activeEycGoal = "Autonomously complete the exact currently active original StoryMode Establish Your Clan quest.";
@@ -873,6 +874,17 @@ internal static class AgentHostCampaignLoop
                         throw new AgentHostException("establish-clan-gold-sale-native-client-unavailable", "The Native transport does not implement the original Trade sale and active StoryMode Journal protocol.");
                     return await AgentHostEstablishClanGoldSaleLoop.RunAsync(
                         request, client, goldSaleClient, provider, ledger, elapsed.Token);
+                }
+                if (goalClassification == "supported-town-trade")
+                {
+                    ledger.Trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                        providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
+                    if (!requestedActions.SetEquals(TownTradeActions))
+                        throw new AgentHostException("town-trade-action-set-unavailable", "The Campaign request must include exactly the bounded Town trade action set.");
+                    if (client is not IAgentHostTownTradeNativeClient townTradeClient)
+                        throw new AgentHostException("town-trade-native-client-unavailable", "The Native transport does not implement the original bounded Town trade protocol.");
+                    return await AgentHostTownTradeLoop.RunAsync(
+                        request, client, townTradeClient, provider, ledger, elapsed.Token);
                 }
                 if (!goalScopeClassified)
                 {

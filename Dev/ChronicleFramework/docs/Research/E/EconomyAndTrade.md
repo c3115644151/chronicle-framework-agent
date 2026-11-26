@@ -293,7 +293,7 @@ EYC 产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanGoldSal
 
 `TestResults/20261126-market-probe-3/4` 用零模型证明了 Native 买入可行：`town_ES3` 的 flax 9/件、`town_EW2` 收 15、单程毛利上限 426，扣 78 日工资净 348；但当时的动作目录只暴露地图动作，Gold 切片又只允许 sell，所以模型看不到这条收益。
 
-本轮在 Host 侧建立独立 `town-trade` profile 与 `IAgentHostTownTradeNativeClient`：交易参数仅 `direction=buy`、`inventorySide=OtherInventory`、当前报价的小写 `itemViewModelId` 和正整数 `amount`；`tradeConfirm` 是唯一等待 completed 回执的动作。额度上限（库存/负重/金币）仍由后续有界 loop 绑定当前报价，不能从这条传输白名单推断模型已经能选择买入。
+本轮在 Host 侧建立独立 `town-trade` profile 与 `IAgentHostTownTradeNativeClient`：交易参数仅 `direction=buy`、`inventorySide=OtherInventory`、当前报价的小写 `itemViewModelId` 和正整数 `amount`；`tradeConfirm` 是唯一等待 completed 回执的动作。边界本身仍不等于玩家会买。契约 7.717 已提供独立可跑的有界买入 loop：触发条件是 classification 的 `supportedTownTradeGoal`、精确 `TownTradeActions` profile 和 `IAgentHostTownTradeNativeClient`；动作链为安全 Town 目标定位、地图/菜单导航、`buyOffers/tradeOptions`、买入 `trade`、确认或取消与 `inventoryDone`；成功后验是 Gold 下降与对应物品数量上升的反向变化。它显式拒绝 sale/`PlayerInventory`、零数量、`Ransom`、clock 动词与容量/Journal 查询，不推断自动套利、异地净收益或完整经济 AI。零模型 self-test 与门禁代表机制已落代码，真实模型运行证据另行记录。
 
 ### 货物、负重、动物与战后物资
 

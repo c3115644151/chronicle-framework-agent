@@ -1,6 +1,12 @@
 ﻿# Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.716
+Contract version: 7.717
+
+## Contract 7.717 — 独立 town-trade 有界买入 loop 可运行
+
+#143 的城镇买入腿不再只是 Host boundary：`AgentHostTownTradeLoop` 提供独立的、有上限的决策循环；decision cycle 增加 `TownTradeSystemPrompt`、`DecideTownTradeAsync/BuildTownTradeSystemPrompt` 与支持目标分类 `supportedTownTradeGoal`；campaign loop 只在 classification 命中 supported-town-trade、动作集合与 `TownTradeActions` 完全一致且 client 是 `IAgentHostTownTradeNativeClient` 时派发到该 loop。此 profile 不并入 gold-sale 或 AllSupportedActions，MCM/通用战役运行不会静默获得买入能力。
+
+loop 只从当前 `buyOffers` 读取有报价的商品，使用小写 `itemViewModelId` 与正整数 `amount`，按「定位安全 Town 目标 → 地图/城镇菜单导航 → tradeOptions → 买入 trade → tradeConfirm/tradeCancel → inventoryDone」推进。成功须在原生买入完成后由 Gold 与对应物品数量的反向变化核实；无法确定额度或成交即取消/失败，不把推荐报价、库存/负重/金币容量推断或 Journal/Ransom/clock 查询写成买入证据。零模型 self-test 与 `harness/gate/05-observation-and-provider.ps1` 断言钉住这些机制；本条不记录任何真实模型或游戏运行通过结果。
 
 ## Contract 7.716 — give the town buy leg its own Host boundary
 
