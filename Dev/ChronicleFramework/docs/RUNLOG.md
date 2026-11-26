@@ -8,6 +8,15 @@
 
 关于收据留存：`TestResults/<runId>` 目录会被每次阶段运行末尾的 retention（`harness/Prune-TestResults.ps1`）清理，只保留最近若干个与 `DEVELOPMENT.md`、`MAINLINE.md`、`RUNLOG.md` 点名引用的运行。文档中点名的 run id 共 1,096 个，2026-11-26 盘上实际存在 148 个目录——差额主要是 `docs/Research/**` 与 `SYSTEM_INVENTORY.md` 引用的历史运行。所以本文件里的收据路径是**当时那次运行的证据指向，不保证今天还能打开**；要重跑同一观察，用同一条脚本与同一组参数（例如 `harness/Test-AgentIdlePressure.ps1 -LoadSaveName ChronicleEycDev-opening-20261126 -ChunkDays 1 -MaxChunks 1`）而不是指望旧目录。需要长期留盘的收据，必须在 `Prune-TestResults.ps1 -ReferenceDocumentPaths` 里被点名，或被写进上面三份默认文档。
 
+## L0 开放项工程交接状态（2026-11-27，工程事实；产品验收归 owner）
+
+| 项 | 工程交付 | 关键证据 | 未清零原因 | 再开启条件 |
+| --- | --- | --- | --- | --- |
+| #141 Arena tournament | 独立 opt-in Host profile + 5 原版 handler + 真机观察切片，均完成 | commit 3667b13/ab7e798，契约 7.718/7.721；`TestResults/20261127-tournament-live-catalogfix`（Passed=true、TournamentVerified=true、playerWon=false、playerVictoryVerified=false、reward/renown=false、7 handler、时间不变）；夹具仪器 `harness/Test-AgentTournamentFixtureProbe.ps1` | 产品验收归 owner；真机仅证 NPC 获胜，未证玩家胜利/奖励（边界刻意保持） | owner 判定观察收据是否满足 #141 验收并关闭 |
+| #142 开局求生 | 四项验收均有收据/仪器，完成 | 伤兵归因 fed/starved 对照 `TestResults/20261125-idle-hp-fed/-starved`（断粮 wounded 14 vs 补粮 0，encounterActive=false）；起点检查点 `ChronicleEycDev-opening-20261126`（1000金/1人）；决策面 DESIGN §9.3；同起点分化 `TestResults/20261127-divergence-towntrade/DivergenceResult.json`（diverged=true、actionShapeDiverged=false、argumentDiverged=true、双跑 -A/-B 同夹具同 commit 同模型）；仪器 `harness/Test-AgentOpeningScenario.ps1`、`harness/Get-AgentPathDivergence.ps1` | 产品验收归 owner | owner 判定四项是否已满足 #142 验收并关闭 |
+| #130 EYC 完整闭环 | 三个真实单点决策面缺陷已逐一闭环：招募合法 tuple（7.724 / 764b207，真机 6/6 合法 tuple、partySize 1→7）、gold 无安全动作路线封锁（7.725 / 9197918，自测+门）、60 决策边界记录（b3b7bc4） | `TestResults/20261127-eyc-autonomy-opening-tuples3`、`-goldblock-725`；provider self-test 467 场景；Docs 126/126/183/74/23；issue #130 comment 7200885139/7202537159 | 四目标未全部完成；真机反复证实为贫瘠世界状态（无可见劫匪→renown 屏蔽、planner 可选目标只剩 gold/partySize/companions）+ 3B 小模型 + 决策预算的综合边界；上游 `CHRONICLE_LLM_API_KEY` 为空且指向 api.deepseek.com | 真实外部模型或更强本地模型 + 更充足世界状态夹具 + 明确验收预算；此前不堆一次性修补，按 AGENTS「认识先于方案」 |
+
+判读纪律：工程交付完成 ≠ 产品验收通过；#141/#142 不因工程证据齐全而由 Agent 单方标 Done；#130 的失败按世界状态/模型/预算归因，不写成游戏代码缺陷，也不把预算耗尽写成通过。下一轮接手先读本段与 `Focus/MAINLINE.md`，不要重复探索已闭合的单点缺陷。
 ## 2026-11-27 Gold 无安全动作路线封锁修复（契约 7.725）
 
 - 根因：`TestResults/20261127-eyc-autonomy-opening-tuples3` 同一次真机里 gold 目标先完成一次原生出售、后以 `gold-sale-no-safe-native-action` 失败；该 termination 缺失于 `IsSafeObjectiveRouteUnavailable` 的 gold 分支，planner 因此反复重选当前不可达的 Gold 路线直到 49 决策预算耗尽。语义对称的 renown `no-safe-action` 与其余 gold 失败码均已封锁，属遗漏。
