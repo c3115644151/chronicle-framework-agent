@@ -24,6 +24,12 @@
 | #130 EYC 完整闭环 | 三个真实单点决策面缺陷已逐一闭环：招募合法 tuple（7.724 / 764b207，真机 6/6 合法 tuple、partySize 1→7）、gold 无安全动作路线封锁（7.725 / 9197918，自测+门）、60 决策边界记录（b3b7bc4） | `TestResults/20261127-eyc-autonomy-opening-tuples3`、`-goldblock-725`；provider self-test 467 场景；Docs 126/126/183/74/23；issue #130 comment 7200885139/7202537159 | 四目标未全部完成；真机反复证实为贫瘠世界状态（无可见劫匪→renown 屏蔽、planner 可选目标只剩 gold/partySize/companions）+ 3B 小模型 + 决策预算的综合边界；上游 `CHRONICLE_LLM_API_KEY` 为空且指向 api.deepseek.com | 真实外部模型或更强本地模型 + 更充足世界状态夹具 + 明确验收预算；此前不堆一次性修补，按 AGENTS「认识先于方案」 |
 
 判读纪律：工程交付完成 ≠ 产品验收通过；#141/#142 不因工程证据齐全而由 Agent 单方标 Done；#130 的失败按世界状态/模型/预算归因，不写成游戏代码缺陷，也不把预算耗尽写成通过。下一轮接手先读本段与 `Focus/MAINLINE.md`，不要重复探索已闭合的单点缺陷。
+## 2026-11-27 模型决策过程可视化入口（契约 7.727）
+
+- 用户要求补上此前视频讨论时提过的"看到模型决策过程"的视觉入口，便于双方观察测试。
+- 交付：`harness/Export-AgentDecisionTimeline.ps1` 把 run 的进度日志导出为自包含深色 HTML 时间线（决策/分类/控制/子流程四类节点，状态摘要、完整观察、动作目录、token、搜索/筛选/展开）；注册为 Harness `DecisionTimeline` phase + stage。UI skill 的 Python 搜索工具在本机损坏（`C:\Python313\python.exe` 无法启动），按其 fallback 使用已加载的核心指导（4.5:1 对比、语义色、键盘可达、无外部资源）。
+- 验证：脚本 PARSE_OK；直接导出 104 决策+23 子流程到 `DecisionTimeline.html`（202KB），数据/verdict JSON 块可解析、内嵌 JS 语法 OK、无模板残留；`Run-Harness.ps1 -Phase DecisionTimeline -DecisionTimelineRunDirectory ...` Passed=true。浏览器 CLI 本机不可用，未做运行时截图，已静态验证结构。
+
 ## 2026-11-27 共享 ledger trace 节点克隆修复（契约 7.726）
 
 - 真机 `TestResults/20261127-eyc-closedloop-renownfixture`（renown 夹具、llama3.2:3b、40 决策）跑到 `establish-clan-autonomy-unexpected-error` / `InvalidOperationException: ThrowHelper.ThrowInvalidOperationException_NodeAlreadyHasParent`，堆栈定位 `AgentHostCampaignLoop.cs:1142`。renown 路线本次真正被选中（`renown:failed:no-safe-action`），但返回时抛异常。

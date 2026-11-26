@@ -442,6 +442,14 @@ if ($agentHostCampaignLoopSource -notmatch '\["trace"\] = ledger\.Trace\.DeepClo
     $agentHostCampaignLoopSource -notmatch 'campaign-loop-reused-ledger-returns-independent-trace-clone') {
     throw 'Contract 7.726 requires the shared-ledger campaign loop receipt to clone its trace node so a reused ledger across nested EYC subflows cannot throw NodeAlreadyHasParent.'
 }
+$decisionTimelineExporterPath = Join-Path $stageRoot 'Export-AgentDecisionTimeline.ps1'
+$decisionTimelineStagePath = Join-Path (Join-Path $stageRoot 'stages') 'DecisionTimeline.ps1'
+if (-not (Test-Path -LiteralPath $decisionTimelineExporterPath -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $decisionTimelineStagePath -PathType Leaf) -or
+    $harnessScript -notmatch "'DecisionTimeline' \{ @\('DecisionTimeline'\) \}" -or
+    $harnessScript -notmatch 'DecisionTimelineRunDirectory') {
+    throw 'Contract 7.727 requires a discoverable, reproducible model-decision timeline viewer: a self-contained dark HTML export of the run progress log, registered as the DecisionTimeline Harness phase and driven by -DecisionTimelineRunDirectory.'
+}
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\-BattleSimulationLoop' -or
