@@ -36,6 +36,59 @@ internal static class ProviderContractSelfTest
             terminalReceipt.ToJsonString().Contains("PRIVATE_", StringComparison.Ordinal))
             throw new AgentHostException("campaign-terminal-receipt-self-test-failed", "The game-facing campaign terminal receipt must keep structured outcome/cost fields and omit the full trace and free text.");
         results.Add(new { scenario = "campaign-loop-emits-compact-cost-and-failure-receipt-without-trace-or-free-text", passed = true });
+        var harnessResultRoot = Path.Combine(Path.GetTempPath(), "ChronicleHarnessResult-" + Guid.NewGuid().ToString("N"));
+        var harnessResultTestResults = Path.Combine(harnessResultRoot, "TestResults");
+        var harnessResultTemp = Path.Combine(harnessResultTestResults, "Temp");
+        Directory.CreateDirectory(harnessResultTemp);
+        var harnessResultPath = Path.Combine(harnessResultTemp, Program.HarnessCampaignLoopResultFileName);
+        var previousMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        var previousTemp = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        var previousRepository = Environment.GetEnvironmentVariable("CHRONICLE_REPOSITORY_ROOT");
+        try
+        {
+            Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "visual-capture");
+            Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_TEMP", harnessResultTemp);
+            Environment.SetEnvironmentVariable("CHRONICLE_REPOSITORY_ROOT", harnessResultRoot);
+            var detailedResult = new JsonObject
+            {
+                ["status"] = "completed", ["runId"] = "harness-result-self-test", ["resultKind"] = "town-trade-buy",
+                ["buyVerified"] = true, ["buyReceipt"] = new JsonObject { ["amount"] = 1 },
+                ["trace"] = new JsonArray("PRIVATE_TRACE")
+            };
+            Program.RecordAuthorizedHarnessCampaignLoopResult(
+                JsonDocument.Parse("{\"runId\":\"harness-result-self-test\"}").RootElement, detailedResult);
+            if (!File.Exists(harnessResultPath))
+                throw new AgentHostException("campaign-harness-result-self-test-failed", "The authorized Harness run must receive the full Campaign loop result file.");
+            var harnessResult = JsonNode.Parse(File.ReadAllText(harnessResultPath)) as JsonObject;
+            if (harnessResult?["resultKind"]?.GetValue<string>() != "town-trade-buy" ||
+                harnessResult?["buyVerified"]?.GetValue<bool>() != true ||
+                (harnessResult?["trace"] as JsonArray ?? new JsonArray()).Count != 1)
+                throw new AgentHostException("campaign-harness-result-self-test-failed", "The Harness-only result file must preserve the full buy receipt and trace.");
+            results.Add(new { scenario = "campaign-loop-writes-full-result-to-authorized-harness-temp", passed = true });
+
+            File.Delete(harnessResultPath);
+            Program.RecordAuthorizedHarnessCampaignLoopResult(
+                JsonDocument.Parse("{\"runId\":\"other-run\"}").RootElement, detailedResult);
+            if (File.Exists(harnessResultPath))
+                throw new AgentHostException("campaign-harness-result-self-test-failed", "A mismatched runId must never overwrite the Harness result file.");
+            results.Add(new { scenario = "campaign-loop-result-rejects-run-id-mismatch", passed = true });
+
+            Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", "visual-capture");
+            Environment.SetEnvironmentVariable("CHRONICLE_REPOSITORY_ROOT", Path.Combine(harnessResultRoot, "Outside"));
+            Program.RecordAuthorizedHarnessCampaignLoopResult(
+                JsonDocument.Parse("{\"runId\":\"harness-result-self-test\"}").RootElement, detailedResult);
+            if (File.Exists(harnessResultPath))
+                throw new AgentHostException("campaign-harness-result-self-test-failed", "A temp path outside the repository TestResults tree must not receive a Harness result file.");
+            results.Add(new { scenario = "campaign-loop-result-rejects-temp-outside-testresults", passed = true });
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_MODE", previousMode);
+            Environment.SetEnvironmentVariable("CHRONICLE_HARNESS_TEMP", previousTemp);
+            Environment.SetEnvironmentVariable("CHRONICLE_REPOSITORY_ROOT", previousRepository);
+            if (File.Exists(harnessResultPath)) File.Delete(harnessResultPath);
+            Directory.Delete(harnessResultRoot, recursive: true);
+        }
         results.AddRange(DeepSeekPromptTokenEstimator.RunContractSelfTests());
         if (!AgentHostDecisionCycle.IsObserveAgainDecision(new JsonObject { ["observeAgain"] = true, ["waitSeconds"] = 2 }) ||
             !AgentHostDecisionCycle.IsObserveAgainDecision(new JsonObject { ["control"] = "observeAgain", ["waitSeconds"] = 2 }) ||

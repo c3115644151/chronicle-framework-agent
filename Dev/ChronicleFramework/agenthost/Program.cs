@@ -162,6 +162,7 @@ internal static class Program
                 var loopResult = await loopTask;
                 if (parentExited) MarkParentExited(loopResult);
                 AgentHostRuntimeProgressLog.RecordRunSummary(requestDocument.RootElement, loopResult);
+                RecordAuthorizedHarnessCampaignLoopResult(requestDocument.RootElement, loopResult);
                 Console.Out.WriteLine(JsonSerializer.Serialize(BuildCampaignLoopTerminalReceipt(loopResult), OutputJsonOptions));
                 var terminationReason = (loopResult["termination"] as JsonObject)?["reason"]?.GetValue<string>();
                 return loopResult["status"]?.GetValue<string>() == "completed" || terminationReason == "host-stop-requested" ? 0 : 1;
@@ -248,6 +249,39 @@ internal static class Program
             ["fallbackAttempts"] = JsonValue.Create(exception.ProviderFallbackAttempts),
             ["fallbackTrail"] = JsonValue.Create(exception.ProviderFallbackTrail)
         };
+    }
+
+    internal const string HarnessCampaignLoopResultFileName = "AgentHostCampaignLoopResult.json";
+
+    internal static void RecordAuthorizedHarnessCampaignLoopResult(JsonElement request, JsonObject loopResult)
+    {
+        var mode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        var harnessTemp = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        var repositoryRoot = Environment.GetEnvironmentVariable("CHRONICLE_REPOSITORY_ROOT");
+        if (string.IsNullOrWhiteSpace(mode) || string.IsNullOrWhiteSpace(harnessTemp) || string.IsNullOrWhiteSpace(repositoryRoot)) return;
+
+        try
+        {
+            var fullTemp = Path.GetFullPath(harnessTemp).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var testResultsRoots = new[]
+            {
+                Path.Combine(Path.GetFullPath(repositoryRoot), "TestResults"),
+                Path.Combine(Path.GetFullPath(repositoryRoot), "Dev", "ChronicleFramework", "TestResults")
+            };
+            if (!testResultsRoots.Any(root => fullTemp.StartsWith(
+                    Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase))) return;
+
+            var requestRunId = request.TryGetProperty("runId", out var requestRunIdNode) ? requestRunIdNode.GetString() : null;
+            var resultRunId = loopResult["runId"]?.GetValue<string>();
+            if (string.IsNullOrWhiteSpace(requestRunId) || !string.Equals(requestRunId, resultRunId, StringComparison.Ordinal)) return;
+            var resultPath = Path.Combine(Path.GetFullPath(harnessTemp), HarnessCampaignLoopResultFileName);
+            File.WriteAllText(resultPath, JsonSerializer.Serialize(loopResult, OutputJsonOptions), new UTF8Encoding(false));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            // A Harness-only evidence write must never change the game-facing terminal receipt.
+        }
     }
 
     internal static JsonObject BuildCampaignLoopTerminalReceipt(JsonObject result)

@@ -371,6 +371,23 @@ if ($agentHostCampaignLoopSource -notmatch 'townTradeProfileOnly' -or
     $agentHostLiveModelLoopSource -notmatch 'TownTradeVerification') {
     throw 'Contract 7.719 requires a town-trade-only goal classification opt-in and a real-model bounded buy slice with Native buy receipt verification, not a hand-copied action set or sell-side assertions.'
 }
+$agentHostProgramSource = Get-Content -LiteralPath (Join-Path $agentHostRoot 'Program.cs') -Raw -Encoding UTF8
+$agentHostProviderContractSelfTestSource = Get-Content -LiteralPath (Join-Path $agentHostRoot 'ProviderContractSelfTest.cs') -Raw -Encoding UTF8
+if ($agentHostProgramSource -notmatch 'RecordAuthorizedHarnessCampaignLoopResult' -or
+    $agentHostProgramSource -notmatch 'HarnessCampaignLoopResultFileName' -or
+    $agentHostProgramSource -notmatch 'CHRONICLE_REPOSITORY_ROOT' -or
+    $agentHostProgramSource -notmatch 'Path.Combine\(Path.GetFullPath\(harnessTemp\), HarnessCampaignLoopResultFileName\)' -or
+    $agentHostLiveModelLoopSource -notmatch 'AgentHostCampaignLoopResult.json' -or
+    $agentHostLiveModelLoopSource -notmatch 'did not publish its full Campaign result' -or
+    $agentHostLiveModelLoopSource -notmatch 'did not match its terminal receipt for the current run' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'campaign-loop-writes-full-result-to-authorized-harness-temp' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'campaign-loop-result-rejects-run-id-mismatch' -or
+    $agentHostProviderContractSelfTestSource -notmatch 'campaign-loop-result-rejects-temp-outside-testresults' -or
+    $agentHostLiveModelLoopSource -notmatch 'CHRONICLE_REPOSITORY_ROOT = Split-Path -Parent \$PSScriptRoot' -or
+    $agentHostLiveModelLoopSource -notmatch 'buyOffer\[0\].inventorySide' -or
+    $agentHostLiveModelLoopSource -notmatch 'CHRONICLE_REPOSITORY_ROOT = Split-Path -Parent \$PSScriptRoot[\r\n\s]+\$hostStartInfo') {
+    throw 'Contract 7.720 requires a Harness-only full Campaign result file, bound by runId and terminal outcome, so real-model receipt verification sees the complete Native buy trace without weakening the game-facing compact terminal receipt.'
+}
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\-BattleSimulationLoop' -or

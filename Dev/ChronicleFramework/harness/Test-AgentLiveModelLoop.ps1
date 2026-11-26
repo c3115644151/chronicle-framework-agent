@@ -732,6 +732,7 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
                 }
             }
         }
+        $env:CHRONICLE_REPOSITORY_ROOT = Split-Path -Parent $PSScriptRoot
         $hostStartInfo = [Diagnostics.ProcessStartInfo]::new()
         $hostStartInfo.FileName = (Get-Command dotnet -ErrorAction Stop).Source
         $hostStartInfo.Arguments = '"{0}" --{1}' -f $agentHostDll, $hostRunMode
@@ -743,6 +744,8 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
         $hostProcess = [Diagnostics.Process]::new()
         $hostProcess.StartInfo = $hostStartInfo
         if (-not $hostProcess.Start()) { throw "Could not start the local Agent Host $hostRunMode." }
+        $hostResultPath = Join-Path $env:CHRONICLE_HARNESS_TEMP "AgentHostCampaignLoopResult.json"
+        if (Test-Path -LiteralPath $hostResultPath -PathType Leaf) { Remove-Item -LiteralPath $hostResultPath -Force }
         $hostStdoutTask = $hostProcess.StandardOutput.ReadToEndAsync()
         $hostStderrTask = $hostProcess.StandardError.ReadToEndAsync()
         $hostProcess.StandardInput.WriteLine(($hostRequest | ConvertTo-Json -Depth 12 -Compress))
@@ -782,6 +785,19 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
     }
     $loopTrace = $output | ConvertFrom-Json
     if ($loopTrace.status -eq 'failed') { throw "Real-model decision loop failed: $($loopTrace.error)" }
+    if ($AgentHostRuntime -and $hostRunMode -eq "campaign-loop") {
+        $hostResultPath = Join-Path $env:CHRONICLE_HARNESS_TEMP "AgentHostCampaignLoopResult.json"
+        if (-not (Test-Path -LiteralPath $hostResultPath -PathType Leaf)) {
+            throw "The Local Agent Host did not publish its full Campaign result to the authorized Harness temp directory."
+        }
+        $hostFullResult = Get-Content -LiteralPath $hostResultPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ([string]$hostFullResult.runId -ne [string]$hostRequest.runId -or [string]$hostFullResult.status -ne [string]$loopTrace.status -or
+            [string]$hostFullResult.termination.reason -ne [string]$loopTrace.termination.reason -or
+            [bool]$hostFullResult.termination.goalVerified -ne [bool]$loopTrace.termination.goalVerified) {
+            throw "The full Local Agent Host Campaign result did not match its terminal receipt for the current run."
+        }
+        $loopTrace = $hostFullResult
+    }
 
     $steps = @($loopTrace.trace)
     $safePassageRoute = $null
@@ -1084,7 +1100,7 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
             $purchasedAmount -ge 1 -and [int]$draftArguments.Amount -eq $purchasedAmount -and
             [string]$confirmReceipt.itemId -ceq [string]$buyOffer[0].itemId -and
             [bool]$confirmReceipt.postconditionPassed -and [string]$confirmReceipt.direction -ceq 'buy' -and
-            [string]$confirmReceipt.inventorySide -ceq 'OtherInventory' -and
+            [string]$buyOffer[0].inventorySide -ceq 'OtherInventory' -and
             $goldAfter -lt $goldBefore -and $playerAfter -eq ($playerBefore + $purchasedAmount) -and
             $marketAfter -eq ($marketBefore - $purchasedAmount) -and
             ($goldBefore - $goldAfter) -eq [Math]::Abs([int]$confirmReceipt.nativeTransactionAmount) -and

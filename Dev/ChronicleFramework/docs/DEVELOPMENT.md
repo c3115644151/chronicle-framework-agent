@@ -1,11 +1,16 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.719
+Contract version: 7.720
+
+## Contract 7.720 — Harness 完整 Campaign 结果回执
+
+游戏侧 stdout 仍只输出精简 campaign terminal receipt，保持不带 trace/failure/free text 的旧合同；Harness 模式下的 Host 在授权 TestResults 临时目录内额外写 `AgentHostCampaignLoopResult.json`，写入需同时具备 CHRONICLE_HARNESS_MODE、CHRONICLE_HARNESS_TEMP、CHRONICLE_REPOSITORY_ROOT，request 与完整 loopResult 的 runId 一致，且临时目录位于 repositoryRoot/TestResults 或 repositoryRoot/Dev/ChronicleFramework/TestResults。写文件失败不改变游戏侧 receipt。`Test-AgentLiveModelLoop.ps1` 启动前删除旧结果文件，Host 退出后用 runId、status、termination.reason、termination.goalVerified 与 terminal receipt 对齐，再把完整结果交给 buy/gold 等收据验收；对齐失败必须显式报错，不能退回精简 receipt。自测覆盖授权写入、runId 不匹配拒绝、TestResults 外路径拒绝。
+`CHRONICLE_REPOSITORY_ROOT` 必须在启动 Host 子进程前写入当前进程环境（在 `Start()` 之后设置无效），否则 `Program` 的路径授权校验因 env 缺失直接跳过写文件。买入验收的库存侧从 `buyOffers[0].inventorySide` 对读，原生 commit receipt 不含 `inventorySide`。`TestResults/20261126-towntrade-live-llama32-720c` 是该通道接通后的本地模型真机通过回执：llama3.2:3b + json_schema，模型自主买入 tools ×1，Gold 2277→2137、玩家 0→1、市场 12→11、town_ES3、Campaign 日/Stop 时钟不变，TownTradeVerified=true。
 
 ## Contract 7.719 — town-trade 分类入口与真机买入切片
 
 Contract 7.719 只给 town-trade profile 开放 supportedTownTradeGoal 分类：AgentHostCampaignLoop 在请求动作集精确等于 TownTradeActions 时把该分类加入首轮 classifier controls，通用 MCM 全范围和 safe-settlement arrival 看不到它，避免买入能力污染普通战役循环。Test-AgentLiveModelLoop.ps1 增加显式 opt-in -TownTradeLoop，从当前 action catalog 的 town-trade profile 取动作集（拒绝手抄与多 profile），使用本地 OpenAI-compatible 模型自主完成一次 bounded Native buy，并在报告里用买入专用 receipt 验证：Gold 反向、玩家物品数增加、市场物品数减少、Campaign day/time-control 不变、无额外 clock 动词。这是模型能力切片，不等于证明跨城套利闭环。
-第一次真实本地模型有界运行证明模型能完成分类与整条导航/买入动作链，但 `tradeConfirm` 的空 provider 参数暴露了 Host 验证 bug：期望 amount 必须来自前一条 completed `trade` draft receipt，不能从 `tradeConfirm` arguments 读取。`VerifyBuyConfirmReceipt` 绑定 draft 的 amount、itemViewModelId、inventorySide 与 commitData 后再调用原来的 Gold/物品/时间后置检查；零模型自测覆盖空参数解析、draft/commit 绑定与 mismatch 拒绝。
+第一次真实本地模型有界运行证明模型能完成分类与整条导航/买入动作链，但 `tradeConfirm` 的空 provider 参数暴露了 Host 验证 bug：期望 amount 必须来自前一条 completed `trade` draft receipt 的 Native `data` 字段，不能从 `tradeConfirm` arguments 或 Host 扁平化副本读取。`VerifyBuyConfirmReceipt` 绑定 draft 的 amount、itemViewModelId、inventorySide 与 commitData 后再调用原来的 Gold/物品/时间后置检查；零模型自测覆盖空参数解析、Native draft/commit 绑定与 mismatch 拒绝。
 
 ## Contract 7.718 — 独立 tournament observation slice 可运行
 

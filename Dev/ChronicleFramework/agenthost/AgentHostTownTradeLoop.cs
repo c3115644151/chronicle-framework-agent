@@ -774,15 +774,21 @@ internal static class AgentHostTownTradeLoop
         if (ReadString(tradeDraftReceipt, "action") != "trade" || ReadString(tradeDraftReceipt, "status") != "completed" ||
             ReadString(tradeDraftReceipt, "direction") != "buy")
             return false;
-        var expectedAmount = ReadInt(tradeDraftReceipt, "amount", 0);
-        var expectedItemId = ReadString(tradeDraftReceipt, "itemViewModelId");
-        var expectedSide = ReadString(tradeDraftReceipt, "inventorySide") ?? ReadString(tradeDraftReceipt?["data"] as JsonObject, "inventorySide");
+        var draftData = tradeDraftReceipt?["data"] as JsonObject;
+        var expectedAmount = ReadInt(draftData, "amount", 0);
+        if (expectedAmount < 1) expectedAmount = ReadInt(tradeDraftReceipt, "amount", 0);
+        var expectedItemId = ReadString(draftData, "itemViewModelId") ?? ReadString(tradeDraftReceipt, "itemViewModelId");
+        var expectedSide = ReadString(draftData, "inventorySide") ?? ReadString(tradeDraftReceipt, "inventorySide");
         if (expectedAmount < 1 || string.IsNullOrWhiteSpace(expectedItemId) || expectedSide != "OtherInventory" ||
             ReadInt(commitData, "amount", 0) != expectedAmount ||
-            ReadString(commitData, "itemViewModelId") != expectedItemId ||
-            ReadString(commitData, "inventorySide") != expectedSide)
+            ReadString(commitData, "direction") != "buy")
             return false;
-        return VerifyBuyReceipt(commitData, expectedAmount);
+        if (ReadString(commitData, "itemViewModelId") is string commitItemId && commitItemId != expectedItemId) return false;
+        if (ReadString(commitData, "inventorySide") is string commitSide && commitSide != expectedSide) return false;
+        var verifiedCommit = commitData.DeepClone().AsObject();
+        verifiedCommit["itemViewModelId"] = expectedItemId;
+        verifiedCommit["inventorySide"] = expectedSide;
+        return VerifyBuyReceipt(verifiedCommit, expectedAmount);
     }
 
     private static bool VerifyBuyReceipt(JsonObject data, int expectedAmount)
@@ -1188,13 +1194,25 @@ internal static class AgentHostTownTradeLoop
                 null, MaxPurchaseUnitsDefault, out var confirmAction, out var confirmResolvedArguments, out _) ||
             confirmAction != "tradeConfirm" || confirmResolvedArguments is null || confirmResolvedArguments.Count != 0)
             throw new AgentHostException("town-trade-self-test-confirm-empty-arguments", "tradeConfirm must be resolvable with empty provider arguments.");
+        var nativeDraftData = new JsonObject
+        {
+            ["amount"] = 3,
+            ["itemViewModelId"] = "grain",
+            ["inventorySide"] = "OtherInventory"
+        };
+        var completedTradeReceipt = new JsonObject
+        {
+            ["action"] = "trade", ["status"] = "completed", ["direction"] = "buy", ["data"] = nativeDraftData.DeepClone()
+        };
         var commitData = validCommit.DeepClone().AsObject();
-        commitData["itemViewModelId"] = "grain";
-        if (!VerifyBuyConfirmReceipt(tradeDraftReceipt, commitData) ||
-            VerifyBuyConfirmReceipt(tradeDraftReceipt, invalidCommit))
+        commitData.Remove("inventorySide");
+        commitData["amount"] = 3;
+        if (!VerifyBuyConfirmReceipt(completedTradeReceipt, commitData) ||
+            VerifyBuyConfirmReceipt(completedTradeReceipt, invalidCommit))
             throw new AgentHostException("town-trade-self-test-confirm-draft-binding", "An empty tradeConfirm must verify the commit against the preceding completed buy draft, never an argument-supplied amount.");
         var mismatchedDraft = tradeDraftReceipt.DeepClone().AsObject();
         mismatchedDraft["amount"] = 4;
+        mismatchedDraft["data"] = new JsonObject { ["amount"] = 4, ["itemViewModelId"] = "grain", ["inventorySide"] = "OtherInventory" };
         if (VerifyBuyConfirmReceipt(mismatchedDraft, commitData))
             throw new AgentHostException("town-trade-self-test-confirm-draft-mismatch", "A Native commit with a different amount than the preceding buy draft must be rejected.");
 
