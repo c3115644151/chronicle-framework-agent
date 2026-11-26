@@ -284,6 +284,7 @@ $townTradeVerification = $null
 $townTradeVerified = $false
 $tournamentVerification = $null
 $tournamentVerified = $false
+$tournamentSetupBaseline = $null
 $completionContractBase64 = $null
 $chosenSettlementId = ''
 $chosenSettlementName = ''
@@ -357,7 +358,7 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
     $harnessInputLockRequired = $true
     $env:CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION = [string]$MaxHttpRequestsPerDecision
     $loadArguments = @('-SaveName', $LoadSaveName)
-    if ($EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop -or $CaptivityRecoveryLoop -or $EstablishClanGoldSaleLoop -or $TownTradeLoop) { $loadArguments += '-IncludeChronicleFramework' }
+    if ($EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop -or $CaptivityRecoveryLoop -or $EstablishClanGoldSaleLoop -or $TownTradeLoop -or $TournamentLoop) { $loadArguments += '-IncludeChronicleFramework' }
     $start = Invoke-AgentCli 'load' $loadArguments
     $sessionStarted = $true
     $baseline = Invoke-AgentCli 'state'
@@ -444,7 +445,64 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
             TargetNames = @($visibleBandits | Select-Object -First 12 -ExpandProperty name)
         }
         $battleTargetPreflight | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'BattleTargetPreflight.json') -Encoding UTF8
-        if ($visibleBandits.Count -eq 0) { throw 'No current Native-visible hostile Bandit was available in the selected world; the test stopped before model inference and did not create an encounter.' }
+    }
+    if ($TournamentLoop) {
+        # Deterministic, no-model setup: bring the current world into a visible TournamentVM
+        # using only original Native menus/dialogue. The model trial begins only afterward.
+        $tournamentSetup = [ordered]@{ IsReadOnlyHarnessGate = $true; ModelInferenceStarted = $false }
+        $towns = @($baseline.state.nearbySettlements | Where-Object { [string]$_.type -ceq 'town' -and -not [bool]$_.hostile -and -not [bool]$_.underSiege } | Sort-Object { [double]$_.distance })
+        $tournamentTownId = $null
+        foreach($candidate in $towns){
+            $move = Invoke-AgentCli 'move' @('-SettlementId',[string]$candidate.id,'-CommandId',('tournament-setup-move-' + [Guid]::NewGuid().ToString('N'))) 120
+            $deadline = [DateTime]::UtcNow.AddSeconds(150)
+            $arrived = $null
+            while ([DateTime]::UtcNow -lt $deadline) {
+                $arrived = Invoke-AgentCli 'state' @('-CommandId',('tournament-setup-arrival-' + [Guid]::NewGuid().ToString('N')))
+                if ([string]$arrived.state.context.menuId -ceq 'town' -and [string]$arrived.state.location.currentSettlementId -ceq [string]$candidate.id) { break }
+                if ([string]$arrived.state.context.gameState -ne 'MapState' -or [bool]$arrived.state.context.encounterActive) { break }
+                Start-Sleep -Milliseconds 800
+            }
+            if ($arrived -and [string]$arrived.state.context.menuId -ceq 'town' -and [string]$arrived.state.location.currentSettlementId -ceq [string]$candidate.id) {
+                $tournamentTownId = [string]$candidate.id; $tournamentArrival = $arrived; break
+            }
+        }
+        if (-not $tournamentTownId) { throw 'Tournament setup could not reach a safe Town menu; no model decision was sent.' }
+        $townMenu = Invoke-AgentCli 'menuSelect' @('-MenuId','town','-OptionId','town_arena','-CommandId',('tournament-setup-arena-' + [Guid]::NewGuid().ToString('N')))
+        $arenaOpts = @($townMenu.state.availableMenuOptions | ForEach-Object { [string]$_.id })
+        if ($arenaOpts -notcontains 'join_tournament') { throw 'Tournament setup Town has no currently joinable tournament; no model decision was sent.' }
+        $enter = Invoke-AgentCli 'menuSelect' @('-MenuId','town_arena','-OptionId','town_enter_arena','-CommandId',('tournament-setup-enter-' + [Guid]::NewGuid().ToString('N')))
+        if ([string]$enter.state.context.gameState -cne 'MissionState') { throw 'Tournament setup did not enter the original Arena Mission; no model decision was sent.' }
+        $deadline = [DateTime]::UtcNow.AddSeconds(20)
+        $master = @(); $arenaState = $null
+        while ([DateTime]::UtcNow -lt $deadline) {
+            $arenaState = Invoke-AgentCli 'state' @('-CommandId',('tournament-setup-master-' + [Guid]::NewGuid().ToString('N')))
+            $master = @($arenaState.state.mission.nearbySceneAgents | Where-Object { $_.occupation -eq 'ArenaMaster' -and $_.isInteractable -and [int]$_.agentIndex -ge 0 })
+            if ($master.Count -gt 0 -and [bool]$arenaState.state.mission.nativeConversationReady) { break }
+            Start-Sleep -Milliseconds 500
+        }
+        if ($master.Count -eq 0) { throw 'Tournament setup found no interactable ArenaMaster; no model decision was sent.' }
+        $interact = Invoke-AgentCli 'missionInteract' @('-AgentIndex',[string]$master[0].agentIndex,'-CommandId',('tournament-setup-interact-' + [Guid]::NewGuid().ToString('N')))
+        $conversation = Invoke-AgentCli 'state' @('-CommandId',('tournament-setup-conversation-' + [Guid]::NewGuid().ToString('N')))
+        $signUp = @($conversation.state.context.conversation.options | Where-Object { [string]$_.id -ceq 'arena_master_sign_up_tournament' -and [bool]$_.clickable })
+        if ($signUp.Count -ne 1) { throw 'Tournament setup ArenaMaster did not offer original sign-up; no model decision was sent.' }
+        $null = Invoke-AgentCli 'dialogueSelect' @('-OptionId','arena_master_sign_up_tournament','-CommandId',('tournament-setup-signup-' + [Guid]::NewGuid().ToString('N')))
+        $confirmState = Invoke-AgentCli 'state' @('-CommandId',('tournament-setup-confirmstate-' + [Guid]::NewGuid().ToString('N')))
+        $confirm = @($confirmState.state.context.conversation.options | Where-Object { [string]$_.id -ceq 'arena_master_enter_tournament_confirm' -and [bool]$_.clickable })
+        if ($confirm.Count -ne 1) { throw 'Tournament setup did not show original tournament entry confirmation; no model decision was sent.' }
+        $null = Invoke-AgentCli 'dialogueSelect' @('-OptionId','arena_master_enter_tournament_confirm','-CommandId',('tournament-setup-confirm-' + [Guid]::NewGuid().ToString('N')))
+        $joinMenu = Invoke-AgentCli 'state' @('-CommandId',('tournament-setup-joinmenu-' + [Guid]::NewGuid().ToString('N')))
+        $joinOption = @($joinMenu.state.availableMenuOptions | Where-Object { [string]$_.id -like 'mno_tournament_event_*' -and [bool]$_.enabled -ne $false } | Select-Object -First 1)
+        if ($joinOption.Count -ne 1) { throw 'Tournament setup did not expose a current tournament event; no model decision was sent.' }
+        $null = Invoke-AgentCli 'menuSelect' @('-MenuId','menu_town_tournament_join','-OptionId',[string]$joinOption[0].id,'-CommandId',('tournament-setup-join-' + [Guid]::NewGuid().ToString('N')))
+        $active = Invoke-AgentCli 'state' @('-CommandId',('tournament-setup-active-' + [Guid]::NewGuid().ToString('N')))
+        if ([string]$active.state.context.gameState -cne 'MissionState' -or -not [bool]$active.state.context.tournament.available) { throw 'Tournament setup did not reach a visible active TournamentVM; no model decision was sent.' }
+        $tournamentSetup = [ordered]@{
+            IsReadOnlyHarnessGate = $true; ModelInferenceStarted = $false; Town = $tournamentTownId
+            Scene = [string]$active.state.mission.sceneName; Tournament = $active.state.context.tournament
+            CampaignDay = [double]$active.campaignDay; TimeControlMode = [string]$active.timeControlMode
+        }
+        $tournamentSetupBaseline = $active
+        $tournamentSetup | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $env:CHRONICLE_HARNESS_TEMP 'TournamentSetup.json') -Encoding UTF8
     }
     $null = Capture-EngineFrame 'LiveModelEngine-before'
     $capture = Start-ChronicleWindowVideoCapture -ProcessId ([int]$start.session.processId) -OutputPath $videoPath -FrameRate $FrameRate
@@ -1155,8 +1213,8 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
         $tournamentResult = $loopTrace.tournamentResult
         $reportedWin = if ($null -ne $loopTrace.playerWonReported) { [bool]$loopTrace.playerWonReported } else { $null }
         $winnerObserved = (-not [string]::IsNullOrWhiteSpace([string]$loopTrace.winnerCharacterId)) -or (-not [string]::IsNullOrWhiteSpace([string]$loopTrace.winnerName))
-        $campaignDayUnchanged = ([Math]::Abs([double]$baseline.campaignDay - [double]$loopTrace.finalNativeState.campaignDay) -le 0.000001)
-        $timeModeUnchanged = ([string]$baseline.state.context.timeControlMode -ceq [string]$loopTrace.finalNativeState.state.context.timeControlMode)
+        $campaignDayUnchanged = ([Math]::Abs([double]$tournamentSetupBaseline.campaignDay - [double]$loopTrace.finalNativeState.campaignDay) -le 0.000001)
+        $timeModeUnchanged = ([string]$tournamentSetupBaseline.timeControlMode -ceq [string]$loopTrace.finalNativeState.state.context.timeControlMode)
         $tournamentVerified = (
             [string]$loopTrace.status -ceq 'completed' -and [string]$loopTrace.resultKind -ceq 'tournament-observation' -and
             [bool]$loopTrace.termination.goalVerified -and

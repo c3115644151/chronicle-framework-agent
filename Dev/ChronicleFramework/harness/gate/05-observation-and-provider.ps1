@@ -397,7 +397,13 @@ if ($agentHostCampaignLoopSource -notmatch 'tournamentProfileOnly' -or
     $agentHostLiveModelLoopSource -notmatch 'tournament-observation' -or
     $agentHostLiveModelLoopSource -notmatch 'Real-model tournament observation did not reach' -or
     $agentHostLiveModelLoopSource -notmatch 'TournamentVerified' -or
-    $agentHostLiveModelLoopSource -notmatch 'TournamentVerification') {
+    $agentHostLiveModelLoopSource -notmatch 'TournamentVerification' -or
+    $agentHostLiveModelLoopSource -notmatch 'arena_master_sign_up_tournament' -or
+    $agentHostLiveModelLoopSource -notmatch 'mno_tournament_event_' -or
+    $agentHostLiveModelLoopSource -notmatch 'TournamentSetup.json' -or
+    $agentHostTournamentLoopSource -notmatch 'isCurrentMatchActive' -or
+    $agentHostTournamentLoopSource -notmatch 'tournament-active-match-skips-even-when-can-join-remains-true' -or
+    $agentHostCampaignLoopSource -notmatch 'tournamentProfileOnly && requestedActions.SetEquals\(TournamentActions\)') {
     throw 'Contract 7.721 requires a tournament-only goal classification opt-in and a real-model bounded tournament observation slice that verifies one resolved Native result with only original Arena handlers and no unverified victory or reward.'
 }
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or

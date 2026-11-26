@@ -580,6 +580,17 @@ internal static class AgentHostCampaignLoop
                 throw new AgentHostException("native-parent-process-mismatch", "The Native mailbox answered from a different Bannerlord process than the Host owner.");
             onReady?.Invoke(nativeProcessId);
 
+            // Original Arena tournament handlers run inside an Arena Mission, not on the Campaign map;
+            // the general loop below stops outside MapState. An exact tournament-profile request is
+            // therefore handed straight to the bounded tournament observation loop, which runs its own
+            // handler-scoped provider prompt and never needs a map decision.
+            if (tournamentProfileOnly && requestedActions.SetEquals(TournamentActions))
+            {
+                if (client is not IAgentHostTournamentNativeClient tournamentClient)
+                    throw new AgentHostException("tournament-native-client-unavailable", "The Native transport does not implement the original bounded Arena tournament protocol.");
+                return await AgentHostTournamentLoop.RunAsync(request, client, tournamentClient, provider, ledger, elapsed.Token);
+            }
+
             var priorDecisions = ledger.Decisions;
             for (var iteration = priorDecisions + 1; iteration <= maxDecisions; iteration++)
             {

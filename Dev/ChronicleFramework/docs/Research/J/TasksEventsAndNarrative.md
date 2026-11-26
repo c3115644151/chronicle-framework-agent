@@ -4,7 +4,7 @@
 
 ## J00 竞技场锦标赛（契约 7.721 前置事实）
 
-本机 Bannerlord 1.4.8 的 ArenaMaster 对话可给出当前赛事并打开 TournamentVM：初始画面 available=true、isTournamentIncomplete=true、canPlayerJoin=false；原版 SkipAll/SkipRound handler 可推进状态机，NativeTournamentWinnerFollowup 收据记录 SkipRound→SkipAll 后 isOver=true、result.resolved=true、winner=lord_1_3/曼忒俄斯、playerWon=false、Renown31→31。handler receipt 只证明 TournamentVM 执行，不证明玩家胜利、奖金或 Renown；真实赛事胜利需 3D 格斗输入，当前未覆盖。普通 arena_empire_a 进场时 TournamentVM 不一定激活，live-model tournament profile 要求当前 MissionState 且 context.tournament.available=true。
+本机 Bannerlord 1.4.8 的 ArenaMaster 对话可给出当前赛事并打开 TournamentVM：初始画面 available=true、isTournamentIncomplete=true、canPlayerJoin=false；原版 SkipAll/SkipRound handler 可推进状态机，NativeTournamentWinnerFollowup 收据记录 SkipRound→SkipAll 后 isOver=true、result.resolved=true、winner=lord_1_3/曼忒俄斯、playerWon=false、Renown31→31。handler receipt 只证明 TournamentVM 执行，不证明玩家胜利、奖金或 Renown；真实赛事胜利需 3D 格斗输入，当前未覆盖。普通 arena_empire_a 进场时 TournamentVM 不一定激活，live-model tournament profile 要求当前 MissionState 且 context.tournament.available=true。 契约 7.721 补充：原生 `ExecuteJoinTournament` 后 `canPlayerJoin` 仍为 true，必须用 `isCurrentMatchActive` 区分是否已开赛；开赛后只走 Skip/Watch/Leave。`TestResults/20261127-tournament-live-catalogfix` 本地模型真机观测到 NPC 胜者 lord_1_48/约戎、playerWon=false、Renown 不变，玩家胜利与奖金仍未覆盖。
 
 ## J01 Issues：NPC委托与问题
 

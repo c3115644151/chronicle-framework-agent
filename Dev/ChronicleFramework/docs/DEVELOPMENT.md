@@ -4,6 +4,8 @@ Contract version: 7.721
 
 ## Contract 7.721 — tournament 分类入口与真机观察切片
 
+契约 7.721 真机还要满足：精确 tournament profile 在通用 MapState 检查前直接分派到独立 observation loop；`BuildActionCatalog` 只在 `!isCurrentMatchActive && canPlayerJoin` 时给 Join，否则原生激活后 canPlayerJoin 仍 true 会让模型死循环。`Test-AgentLiveModelLoop.ps1 -TournamentLoop` 在模型推理前用零模型 CLI 把游戏预置到可见 TournamentVM（TournamentSetup.json）。真机回执 `TestResults/20261127-tournament-live-catalogfix` 验证 NPC 胜者、playerWon=false、胜/奖不虚报、时间不变。
+
 契约 7.721 给 tournament profile 开放 supportedTournamentGoal 分类：AgentHostCampaignLoop 在请求动作集精确等于 TournamentActions 时把该分类加入首轮 classifier controls，通用 MCM 全范围与 safe-settlement arrival 看不到它，避免五个原版 Arena handler 泄漏进普通战役循环。Test-AgentLiveModelLoop.ps1 增加显式 opt-in -TournamentLoop，从 Host action catalog 的 tournament profile 取动作集（拒绝手抄与多 profile），用真实模型在当前可见 TournamentVM 上只走原版 handler，直到 Native 报 isOver=true 且 result.resolved=true；成功报告必须显示 playerVictoryVerified 与原生 playerWon 一致、rewardVerified/renownVerified 恒 false、只执行五个 handler 之一、Campaign 日/时钟不变。真实玩家入口（ArenaMaster 对话选择当前赛事）与可进入 TournamentVM 的夹具是真机前置，未验证前不宣称玩家获胜或奖励。
 
 ## Contract 7.720 — Harness 完整 Campaign 结果回执

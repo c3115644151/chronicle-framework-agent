@@ -205,7 +205,11 @@ internal static class AgentHostTournamentLoop
             return new JsonArray();
 
         var catalog = new JsonArray();
-        if (ReadBoolean(tournament, "canPlayerJoin"))
+        // Native keeps canPlayerJoin=true even after ExecuteJoinTournament starts the match;
+        // only isCurrentMatchActive flips. Offering Join again while a match is active leaves
+        // the bounded observation stuck in a loop that never advances to a resolved result.
+        var matchActive = ReadBoolean(tournament, "isCurrentMatchActive");
+        if (!matchActive && ReadBoolean(tournament, "canPlayerJoin"))
         {
             catalog.Add(new JsonObject { ["action"] = "tournamentJoin", ["arguments"] = new JsonArray() });
         }
@@ -433,6 +437,26 @@ internal static class AgentHostTournamentLoop
             !matchCatalog.OfType<JsonObject>().Any(a => ReadString(a, "action") == "tournamentJoin"),
             "tournament-self-test-match-catalog-wrong", "After joining, the bounded observation offers Native skip/leave handlers only.");
         results.Add(new { scenario = "tournament-catalog-offers-skip-and-leave-after-entry", passed = true });
+
+        var stateActivatedStillJoinable = new JsonObject
+        {
+            ["context"] = new JsonObject
+            {
+                ["gameState"] = "MissionState",
+                ["tournament"] = new JsonObject
+                {
+                    ["available"] = true, ["canPlayerJoin"] = true, ["isOver"] = false,
+                    ["isCurrentMatchActive"] = true, ["isTournamentIncomplete"] = true
+                }
+            }
+        };
+        var activatedCatalog = BuildActionCatalog(stateActivatedStillJoinable);
+        Expect(activatedCatalog.Count == 3 &&
+            !activatedCatalog.OfType<JsonObject>().Any(a => ReadString(a, "action") == "tournamentJoin") &&
+            activatedCatalog.OfType<JsonObject>().Any(a => ReadString(a, "action") == "tournamentSkipAllRounds") &&
+            activatedCatalog.OfType<JsonObject>().Any(a => ReadString(a, "action") == "tournamentSkipRound"),
+            "tournament-self-test-active-match-still-offers-join", "An active Native match must offer skip/leave handlers even when canPlayerJoin still reports true; re-joining would loop forever.");
+        results.Add(new { scenario = "tournament-active-match-skips-even-when-can-join-remains-true", passed = true });
 
         var stateOver = new JsonObject
         {

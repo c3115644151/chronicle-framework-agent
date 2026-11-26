@@ -1,8 +1,3 @@
-## 2026-11-26 tournament 分类入口与 live-model 观察切片（契约 7.721）
-
-- 实现：AgentHostCampaignLoop 新增 tournamentProfileOnly，仅当请求动作集精确等于 TournamentActions 时把 supportedTournamentGoal 加入首轮分类控制；自测覆盖 opt-in、通用与 safe-settlement 不泄漏。Test-AgentLiveModelLoop.ps1 新增 -TournamentLoop，从 Host catalog 读取唯一 tournament profile，要求真实模型在当前 TournamentVM 上只执行五个原版 handler，直到 Native 解析结果，再按 tournament 专用 receipt 验证胜/奖不虚报和时间不变。gate/05 增加 7.721 断言，Check-Docs/Run-Harness 契约升至 7.721。
-- 前置事实：旧收据 NativeTournamentWinnerFollowup.json 证明 tournamentSkipRound/SkipAll 可把 TournamentVM 推到 isOver=true 且解析 NPC 胜者（playerWon=false、Renown31→31）；普通 arena_empire_a 进入时 TournamentVM 未激活，旧 Amprela/Tyal 夹具已不在当前 saves 目录。真机观察仍需能进入当前赛事的 disposable 夹具。
-
 # Chronicle Framework 运行日志
 
 本文件是**每一次真实运行**（Harness 阶段、AgentHost 驱动、实机诊断、手动续跑）事实的权威来源，按时间顺序追加。
@@ -12,6 +7,19 @@
 
 
 关于收据留存：`TestResults/<runId>` 目录会被每次阶段运行末尾的 retention（`harness/Prune-TestResults.ps1`）清理，只保留最近若干个与 `DEVELOPMENT.md`、`MAINLINE.md`、`RUNLOG.md` 点名引用的运行。文档中点名的 run id 共 1,096 个，2026-11-26 盘上实际存在 148 个目录——差额主要是 `docs/Research/**` 与 `SYSTEM_INVENTORY.md` 引用的历史运行。所以本文件里的收据路径是**当时那次运行的证据指向，不保证今天还能打开**；要重跑同一观察，用同一条脚本与同一组参数（例如 `harness/Test-AgentIdlePressure.ps1 -LoadSaveName ChronicleEycDev-opening-20261126 -ChunkDays 1 -MaxChunks 1`）而不是指望旧目录。需要长期留盘的收据，必须在 `Prune-TestResults.ps1 -ReferenceDocumentPaths` 里被点名，或被写进上面三份默认文档。
+
+## 2026-11-27 tournament 真机收据与两处 Host 修复（契约 7.721）
+
+- 真机入口：`ChronicleTownTradeLive-20261126` 用零模型 CLI 预置到当前 TournamentVM（town_ES3 → town_arena → town_enter_arena → ArenaMaster sign_up → confirm → `mno_tournament_event_1`），`harness/Test-AgentLiveModelLoop.ps1 -TournamentLoop` 的确定性 setup 在模型推理前完成，记录在 `TournamentSetup.json`。
+- 修复一：通用 campaign-loop 在 `!MapState` 时以 `campaign-map-unavailable` 提前停止，而 Arena 锦标赛处在 `MissionState`。`AgentHostCampaignLoop` 在读状态与 parent 校验之后、通用循环之前，对精确 `tournamentProfileOnly && requestedActions.SetEquals(TournamentActions)` 直接分派到 `AgentHostTournamentLoop.RunAsync`；该独立 loop 用自己的 handler-scoped prompt，不需要地图决策。
+- 修复二：`BuildActionCatalog` 原来只看 `canPlayerJoin`，但原生 `ExecuteJoinTournament` 启动比赛后 `canPlayerJoin` 仍为 true、`isCurrentMatchActive=true`，导致 catalog 永远给 `tournamentJoin`，模型连续 24 次 Join 死循环到 `tournament-budget-exhausted-left-native-screen`。改为 `!isCurrentMatchActive && canPlayerJoin` 才给 Join，比赛激活后只给 Skip/Watch/Leave；`TournamentSystemPrompt` 同步写明激活后走 skip/watch。回归自测 `tournament-active-match-skips-even-when-can-join-remains-true` 覆盖。
+- 真机回执 `TestResults/20261127-tournament-live-catalogfix`：本地 Ollama llama3.2:3b + json_schema，`Passed=true`、`TournamentVerified=true`、`AcceptanceSlice=Real-model Native Arena tournament observation to a resolved result with no unverified victory or reward claim`、`HostTerminationReason=native-tournament-result-observed-without-player-victory-or-reward-claim`。7 个原版 handler、0 外来动作，Native 解析出 NPC 胜者 lord_1_48/约戎、playerWon=false、`playerVictoryVerified=false`、`rewardVerified=false`、`renownVerified=false`，Campaign 日/Stop 时钟不变，夹具 hash 前后一致、进程停止、视觉证据通过。这是 #141 首个真实本地模型 tournament 观察回执，不证明玩家胜利或奖金。
+
+## 2026-11-26 tournament 分类入口与 live-model 观察切片（契约 7.721）
+
+- 实现：AgentHostCampaignLoop 新增 tournamentProfileOnly，仅当请求动作集精确等于 TournamentActions 时把 supportedTournamentGoal 加入首轮分类控制；自测覆盖 opt-in、通用与 safe-settlement 不泄漏。Test-AgentLiveModelLoop.ps1 新增 -TournamentLoop，从 Host catalog 读取唯一 tournament profile，要求真实模型在当前 TournamentVM 上只执行五个原版 handler，直到 Native 解析结果，再按 tournament 专用 receipt 验证胜/奖不虚报和时间不变。gate/05 增加 7.721 断言，Check-Docs/Run-Harness 契约升至 7.721。
+- 前置事实：旧收据 NativeTournamentWinnerFollowup.json 证明 tournamentSkipRound/SkipAll 可把 TournamentVM 推到 isOver=true 且解析 NPC 胜者（playerWon=false、Renown31→31）；普通 arena_empire_a 进入时 TournamentVM 未激活，旧 Amprela/Tyal 夹具已不在当前 saves 目录。
+- 夹具探针 `harness/Test-AgentTournamentFixtureProbe.ps1` 零模型确认：`ChronicleTownTradeLive-20261126` 从地图 move 到 town_ES3（map menu 含 `town_arena`、arena menu 含 `join_tournament`），ArenaMaster `tournament_master_empire` 经 `arena_master_sign_up_tournament` → `arena_master_enter_tournament_confirm` → `mno_tournament_event_1` 进入 `MissionState` 且 `context.tournament.available=true`（isTournamentIncomplete=true、activeRoundIndex=0、prize=plumed_nomad_helmet），fixture hash 前后一致、进程正常停止。证据目录 `TestResults/tournament-fixture-probe-joinmenu`。
 
 ## 2026-11-21 … 2026-11-22 开发与 Harness 契约沿革（原 DEVELOPMENT.md 时间条目）
 
