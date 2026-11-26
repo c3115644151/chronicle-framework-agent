@@ -8,6 +8,13 @@
 
 关于收据留存：`TestResults/<runId>` 目录会被每次阶段运行末尾的 retention（`harness/Prune-TestResults.ps1`）清理，只保留最近若干个与 `DEVELOPMENT.md`、`MAINLINE.md`、`RUNLOG.md` 点名引用的运行。文档中点名的 run id 共 1,096 个，2026-11-26 盘上实际存在 148 个目录——差额主要是 `docs/Research/**` 与 `SYSTEM_INVENTORY.md` 引用的历史运行。所以本文件里的收据路径是**当时那次运行的证据指向，不保证今天还能打开**；要重跑同一观察，用同一条脚本与同一组参数（例如 `harness/Test-AgentIdlePressure.ps1 -LoadSaveName ChronicleEycDev-opening-20261126 -ChunkDays 1 -MaxChunks 1`）而不是指望旧目录。需要长期留盘的收据，必须在 `Prune-TestResults.ps1 -ReferenceDocumentPaths` 里被点名，或被写进上面三份默认文档。
 
+## 2026-11-27 EYC 60 决策自主闭环尝试（#130，真实边界）
+
+- 运行：`harness/Test-AgentLiveModelLoop.ps1 -EstablishYourClanAutonomyLoop -AgentHostRuntime -LoadSaveName ChronicleEycDev-freshB-20261123092350-d1a1805e -MaxProviderDecisions 60 -HostMaxElapsedSeconds 1800`，本地 llama3.2:3b + json_schema、loopback 零外部凭据，收据 `TestResults/20261127-eyc-autonomy60`。
+- 结果：`Passed=false`、`establish-clan-autonomy-budget-exhausted`，60 决策/236 原生动作/153,601 输入 token，10 个目标子流程，四目标仍未完成。夹具哈希前后一致、进程停止、视觉证据通过。
+- gold 目标反复失败，三种真实原因：`gold-loot-no-current-visible-bandit`（无可见劫匪可夺货）、`gold-sale-native-action-rejected`（原生拒绝当前动作且不重放）、`gold-sale-budget-exhausted-safe-map-recovered`（预算耗尽后原版 Cancel 安全回地图，Gold/时钟不变）。partySize 多次被匪徒打断或模型以安全动作停下；captivity 恢复子流程成功一次；nativeMapIncident 成功一次。
+- 判读：这是 1 人 0 金贫瘠起点 + 3B 本地模型 + 60 决策预算的综合边界，不是单一可修 bug；不同失败原因分属世界状态与预算，不按同类型再跑。不把预算耗尽写成通过，也不把它写成游戏代码缺陷。#130 自然开局完整四目标闭环仍未达成，外部模型/上游凭据条件未启用。
+
 ## 2026-11-27 同起点双跑与参数层分化（契约 7.722）
 
 - `harness/Get-AgentPathDivergence.ps1` 追加决策参数指纹（`Get-DecisionFingerprint`）：动作名路径可能收敛而参数选择分化，判据同时给 `actionShapeDiverged`（动作名序列）与 `argumentDiverged`（动作+参数序列），任一为真即 `diverged=true`。真实同起点双跑 `TestResults/20261127-divergence-towntrade-A/B`（同夹具 SHA、源提交 6628355、llama3.2:3b、2048 token、同一买入目标）：两跑都 Passed/TownTradeVerified=true，动作名序列同为 `mapSettlementTargets>move>menuSelect>tradeOptions>trade>tradeConfirm`（`actionShapeDiverged=false`），但买入商品 A=grain、B=tools，参数序列不同（`argumentDiverged=true`、整体 `diverged=true`）；判据收据 `TestResults/20261127-divergence-towntrade/DivergenceResult.json`。这是 #142 首个真实同起点分化证据：形状收敛、目标选择分化。
