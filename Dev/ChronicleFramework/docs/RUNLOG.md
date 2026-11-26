@@ -8,6 +8,12 @@
 
 关于收据留存：`TestResults/<runId>` 目录会被每次阶段运行末尾的 retention（`harness/Prune-TestResults.ps1`）清理，只保留最近若干个与 `DEVELOPMENT.md`、`MAINLINE.md`、`RUNLOG.md` 点名引用的运行。文档中点名的 run id 共 1,096 个，2026-11-26 盘上实际存在 148 个目录——差额主要是 `docs/Research/**` 与 `SYSTEM_INVENTORY.md` 引用的历史运行。所以本文件里的收据路径是**当时那次运行的证据指向，不保证今天还能打开**；要重跑同一观察，用同一条脚本与同一组参数（例如 `harness/Test-AgentIdlePressure.ps1 -LoadSaveName ChronicleEycDev-opening-20261126 -ChunkDays 1 -MaxChunks 1`）而不是指望旧目录。需要长期留盘的收据，必须在 `Prune-TestResults.ps1 -ReferenceDocumentPaths` 里被点名，或被写进上面三份默认文档。
 
+## 2026-11-27 Gold 无安全动作路线封锁修复（契约 7.725）
+
+- 根因：`TestResults/20261127-eyc-autonomy-opening-tuples3` 同一次真机里 gold 目标先完成一次原生出售、后以 `gold-sale-no-safe-native-action` 失败；该 termination 缺失于 `IsSafeObjectiveRouteUnavailable` 的 gold 分支，planner 因此反复重选当前不可达的 Gold 路线直到 49 决策预算耗尽。语义对称的 renown `no-safe-action` 与其余 gold 失败码均已封锁，属遗漏。
+- 修复：gold 分支纳入 `gold-sale-no-safe-native-action`，当前 route fingerprint 下只封锁 Gold、planner 推进其它 EYC 目标；fingerprint 变化后自动解除。新增自测 `establish-clan-autonomy-no-safe-gold-sale-action-blocks-only-gold-route-and-allows-replan`。
+- 真机复核 `TestResults/20261127-eyc-autonomy-goldblock-725`（同 opening 夹具、80 决策预算）：本次 gold 走另一条路径——原生出售完成后 → `gold-loot-no-current-visible-bandit` → partySize 中断（54 动作）→ 劫匪打断移动 → `incidentBattleSimulation` no-safe-action → 最终 `gold-sale-budget-exhausted`（80 决策全用尽）；trace 中 `gold-sale-no-safe-native-action` 出现 **0 次**。因此本次运行未走到修复路径，**不构成该修复的真机验证**；模型行为随机性使该 termination 难以按需复现。修复正确性由 467 场景自测（含新场景）、Docs 门与 tuples3 历史真机（该 termination 确会发生并令 gold 反复重选）支撑。本次运行仍属 #130 世界状态/小模型/预算综合边界的另一实例，不写为通过。FixtureUnchanged/ProcessStopped/VisualEvidence 全 true。
+
 ## 2026-11-27 招募合法三元组 schema 约束（契约 7.724）
 
 - 真机复核：健康 opening 检查点两次本地 llama3.2:3b 跑，第一次 `TestResults/20261127-eyc-autonomy-opening-tuples` 46 决策/63 动作、gold 目标完成一次后被 Ollama HTTP500 打断；第二次 `TestResults/20261127-eyc-autonomy-opening-tuples2` 仍以 `recruitment-rejection-limit` 停止，模型继续提交 1789+slot0。根因是 `BuildDecisionSchema` 的 ownerId/slot 独立 enum 允许笛卡尔组合，catalog/prompt 的 legalTuples 不足以约束 3B 输出。

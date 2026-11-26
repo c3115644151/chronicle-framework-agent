@@ -434,6 +434,10 @@ if ($providerHostSource -notmatch 'BuildExactValueSchema' -or
     $agentHostProviderSelfTestSource -notmatch 'provider-legal-tuples-schema-invalid') {
     throw 'Contract 7.724 requires the structured-output schema to constrain cross-field recruitment choices to complete legal tuples, so a small model cannot pick ownerId and slot from different offers.'
 }
+if ($agentHostEstablishClanAutonomySource -notmatch 'gold-sale-no-safe-native-action' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'establish-clan-autonomy-no-safe-gold-sale-action-blocks-only-gold-route-and-allows-replan') {
+    throw 'Contract 7.725 requires a current no-safe-native-action Gold outcome to block only the Gold route on a free Map so the planner can replan other EYC objectives instead of reselecting an unreachable Gold route until budget exhaustion.'
+}
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\-BattleSimulationLoop' -or

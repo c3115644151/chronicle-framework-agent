@@ -1,6 +1,10 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.724
+Contract version: 7.725
+
+## Contract 7.725 — Gold 无安全原生动作路线封锁
+
+真机 `TestResults/20261127-eyc-autonomy-opening-tuples3` 显示 gold 子流程以 `gold-sale-no-safe-native-action` 失败时，planner 会反复重选该当前不可达路线直到预算耗尽。根因：`IsSafeObjectiveRouteUnavailable` 的 gold 分支漏了这个 termination，而语义对称的 renown `no-safe-action` 和其余 gold 失败码都已封锁。修复：gold 分支纳入 `gold-sale-no-safe-native-action`，使当前 fingerprint 下仅封锁 gold 路线、planner 转去推进其它 EYC 目标；世界状态 fingerprint 变化后自动解除封锁，不永久隐藏 gold。自测 `establish-clan-autonomy-no-safe-gold-sale-action-blocks-only-gold-route-and-allows-replan` 钉住。
 
 ## Contract 7.724 — 结构化输出 schema 绑定招募合法三元组
 

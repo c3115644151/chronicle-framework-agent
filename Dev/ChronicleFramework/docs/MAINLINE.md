@@ -731,6 +731,9 @@ AgentHostRuntime 的切片动作集必须与 `AgentHostCampaignLoop.SupportedAct
 契约 7.724 schema 事实：本地 Ollama 的 json_schema 决策 schema 不能只给平行 argumentValues enum，否则 3B 模型仍会跨 offer 拼出 ownerId/slot 无效组合。`BuildDecisionSchema` 对带 `legalTuples` 的招募动作改出 arguments `anyOf`（每个分支固定一组 ownerId/troopId/slot/confirmPartySizeWarning 的具体值），让结构化输出本身只接受原生合法 offer；这是真机 legalTuples 两跑仍不稳定后的位置修复，不依赖模型阅读 catalog 能力。
 真机 `TestResults/20261127-eyc-autonomy-opening-tuples3` 验证：6/6 招募决策均落在合法 tuple，`partySize` 1→7，终止原因不再是 `recruitment-rejection-limit`；schema 层 tuple 约束是招募决策面缺陷的正确修复位置。整体四目标仍受 #130 世界状态/小模型/预算边界限制。
 
+契约 7.725 重规划事实：`gold-sale-no-safe-native-action`（GoldSaleLoop 在当前 catalog+controls 全空时抛出）与 renown 的 `no-safe-action` 语义对称，必须在 `IsSafeObjectiveRouteUnavailable` 的 gold 分支封锁该路线，让 planner 转去其它 EYC 目标；封锁按 Native route fingerprint 变化解除，不永久禁止 Gold。这修正真机里 planner 反复重选不可达 Gold 路线至预算耗尽的问题。
+真机边界说明：`TestResults/20261127-eyc-autonomy-goldblock-725` 复核未走到该 termination（改走劫匪打断+partySize 中断+预算耗尽），因此不把它写成修复的真机验证；该修复由自测/门和 tuples3 历史真机支撑。#130 完整闭环仍受世界状态/小模型/预算约束。
+
 #130 EYC 闭环边界（2026-11-27）：`TestResults/20261127-eyc-autonomy60`（1人0金 freshB 夹具、llama3.2:3b、60 决策）以 `establish-clan-autonomy-budget-exhausted` 结束，gold 目标三种失败分别是无可见劫匪、原生拒绝动作、预算耗尽安全回地图；四目标未完成。这是贫瘠起点+小模型+预算的综合边界，不作为游戏代码缺陷或产品通过证据。
 
 契约 7.722 登记 #142 同起点分化判据：只有夹具哈希、源提交、目标、模型与输出预算全部相同的 run 才可比较路径，且必须各自有完整 Host 收据；路径指纹来自完整 trace 的 Native 动作序列。可比 run 少于两个时不得声称分化。这是判定器而非模型能力，当前收据分属不同 commit/goal，按设计不产生分化结论。
