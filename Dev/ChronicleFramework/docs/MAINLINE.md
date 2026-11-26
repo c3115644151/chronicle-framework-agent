@@ -724,6 +724,8 @@ AgentHostRuntime 的切片动作集必须与 `AgentHostCampaignLoop.SupportedAct
 
 契约 7.721 真机补齐两处 Host 机制：① Arena 锦标赛在 `MissionState`，通用 campaign-loop 的 `!MapState` 前置会提前 `campaign-map-unavailable`，因此精确 tournament profile 在 parent 校验后、通用循环前直接分派到 `AgentHostTournamentLoop`（独立 handler-scoped prompt，不读地图）；② 原生 `ExecuteJoinTournament` 后 `canPlayerJoin` 仍为 true、`isCurrentMatchActive=true`，`BuildActionCatalog` 必须只在 `!isCurrentMatchActive && canPlayerJoin` 时给 Join，比赛激活后只给 Skip/Watch/Leave，否则模型反复 Join 死循环。真机 `TestResults/20261127-tournament-live-catalogfix`：本地 llama3.2:3b 解析出 NPC 胜者 lord_1_48/约戎、playerWon=false、胜/奖不虚报、7 个原版 handler、0 外来动作、Campaign 日/Stop 时钟不变，TournamentVerified=true；这是 #141 本地模型观察回执，不证明玩家胜利或奖金。
 
+契约 7.722 同起点双跑实证：`TestResults/20261127-divergence-towntrade-A/B` 在完全相同的可观测起点上两跑都完成一次原生买入，动作名路径一致但买入商品分为 grain 与 tools，构成目标选择层的真实分化。判据据此区分 `actionShapeDiverged`（动作名）与 `argumentDiverged`（动作+参数）：前者假、后者真、整体 `diverged=true`。这证明「同起点是否分化」要连决策参数一起看，只看动作名会把不同选择误判为收敛。
+
 契约 7.722 登记 #142 同起点分化判据：只有夹具哈希、源提交、目标、模型与输出预算全部相同的 run 才可比较路径，且必须各自有完整 Host 收据；路径指纹来自完整 trace 的 Native 动作序列。可比 run 少于两个时不得声称分化。这是判定器而非模型能力，当前收据分属不同 commit/goal，按设计不产生分化结论。
 
 契约 7.721 把 tournament 分类控制作为 profile-only opt-in：只有请求动作集精确等于 TournamentActions 时才暴露 supportedTournamentGoal，通用 MCM 与 safe-settlement classifier 不含该分类。-TournamentLoop 从 Host catalog 读取 tournament profile 并要求当前 MissionState 已可见 available=true 的 TournamentVM；模型只能使用五个原版 handler，成功必须由 resultKind=tournament-observation、Native isOver+result.resolved、playerVictoryVerified 与原生 playerWon 一致、rewardVerified/renownVerified=false、无外来动作与 Campaign 时间不变共同证明。handler 完成不等于玩家胜利或奖励；旧 NativeTournamentWinnerFollowup 仅证明 NPC 胜者观察（playerWon=false、Renown31→31）。真实玩家入口与夹具仍待真机核实。

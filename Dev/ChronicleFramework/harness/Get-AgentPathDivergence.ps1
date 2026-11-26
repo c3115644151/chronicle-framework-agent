@@ -33,6 +33,22 @@ function Get-ActionPath($HostResult) {
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 }
 
+function Get-DecisionFingerprint($HostResult) {
+    # Action names alone can converge while argument choices diverge (e.g. which item is bought).
+    # Record each Native action together with its decision arguments so both shapes are visible.
+    if (-not $HostResult -or -not $HostResult.trace) { return @() }
+    return @($HostResult.trace | ForEach-Object {
+        $action = [string]$_.decision.action
+        if ([string]::IsNullOrWhiteSpace($action)) { return $null }
+        $argObject = $_.decision.arguments
+        if ($argObject) {
+            $argPairs = @($argObject.PSObject.Properties | Where-Object { $_.Name -notin @('done','observeAgain','waitSeconds','control','goalClassification') } | ForEach-Object { '{0}={1}' -f $_.Name, $_.Value } | Sort-Object)
+            if ($argPairs.Count -gt 0) { return ($action + '(' + ($argPairs -join ',') + ')') }
+        }
+        return $action
+    } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
+
 $runs = @()
 foreach ($directory in $RunDirectories) {
     if (-not (Test-Path -LiteralPath $directory -PathType Container)) { throw "Run directory not found: $directory" }
@@ -54,6 +70,7 @@ foreach ($directory in $RunDirectories) {
         outputBudgetTokens = [int]$trace.ModelMaxOutputTokens
         actionsExecuted = if ($hostResult) { [int]$hostResult.actionsExecuted } else { [int]$trace.ActionsExecuted }
         actionPath = $path
+        decisionFingerprint = ((@(Get-DecisionFingerprint $hostResult)) -join '>')
         actionFingerprint = ($path -join '>')
         hasFullHostReceipt = [bool]$hostResult
     }
@@ -68,6 +85,7 @@ $comparable = @($runs | Where-Object {
     $key -ceq $startKey[0]
 })
 $fingerprints = @($comparable | ForEach-Object { $_.actionFingerprint } | Sort-Object -Unique)
+$decisionFingerprints = @($comparable | ForEach-Object { $_.decisionFingerprint } | Sort-Object -Unique)
 $fullReceiptComparable = @($comparable | Where-Object { $_.hasFullHostReceipt })
 $diverged = ($fingerprints.Count -gt 1)
 $result = [ordered]@{
@@ -78,7 +96,10 @@ $result = [ordered]@{
     comparableStartCount = $comparable.Count
     comparableHasFullHostReceipt = ($fullReceiptComparable.Count -eq $comparable.Count)
     distinctActionFingerprints = $fingerprints.Count
-    diverged = $diverged
+    distinctDecisionFingerprints = $decisionFingerprints.Count
+    actionShapeDiverged = $diverged
+    argumentDiverged = ($decisionFingerprints.Count -gt 1)
+    diverged = ($diverged -or $decisionFingerprints.Count -gt 1)
     comparableRunIds = @($comparable | ForEach-Object { Split-Path -Leaf $_.runDirectory })
     runs = $runs
 }

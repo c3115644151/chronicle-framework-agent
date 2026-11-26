@@ -416,7 +416,9 @@ if ($agentPathDivergenceSource -notmatch 'RunDirectories' -or
     $agentPathDivergenceSource -notmatch 'sourceCommit' -or
     $agentPathDivergenceSource -notmatch 'actionFingerprint' -or
     $agentPathDivergenceSource -notmatch 'diverged' -or
-    $agentPathDivergenceSource -notmatch 'Fewer than two runs share the same observable start') {
+    $agentPathDivergenceSource -notmatch 'Fewer than two runs share the same observable start' -or
+    $agentPathDivergenceSource -notmatch 'argumentDiverged' -or
+    $agentPathDivergenceSource -notmatch 'Get-DecisionFingerprint') {
     throw 'Contract 7.722 requires divergence to be judged only across runs sharing fixture hash, commit, goal, model and budget, with a full Host receipt, and to refuse a claim when fewer than two comparable runs exist.'
 }
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or

@@ -8,6 +8,10 @@
 
 关于收据留存：`TestResults/<runId>` 目录会被每次阶段运行末尾的 retention（`harness/Prune-TestResults.ps1`）清理，只保留最近若干个与 `DEVELOPMENT.md`、`MAINLINE.md`、`RUNLOG.md` 点名引用的运行。文档中点名的 run id 共 1,096 个，2026-11-26 盘上实际存在 148 个目录——差额主要是 `docs/Research/**` 与 `SYSTEM_INVENTORY.md` 引用的历史运行。所以本文件里的收据路径是**当时那次运行的证据指向，不保证今天还能打开**；要重跑同一观察，用同一条脚本与同一组参数（例如 `harness/Test-AgentIdlePressure.ps1 -LoadSaveName ChronicleEycDev-opening-20261126 -ChunkDays 1 -MaxChunks 1`）而不是指望旧目录。需要长期留盘的收据，必须在 `Prune-TestResults.ps1 -ReferenceDocumentPaths` 里被点名，或被写进上面三份默认文档。
 
+## 2026-11-27 同起点双跑与参数层分化（契约 7.722）
+
+- `harness/Get-AgentPathDivergence.ps1` 追加决策参数指纹（`Get-DecisionFingerprint`）：动作名路径可能收敛而参数选择分化，判据同时给 `actionShapeDiverged`（动作名序列）与 `argumentDiverged`（动作+参数序列），任一为真即 `diverged=true`。真实同起点双跑 `TestResults/20261127-divergence-towntrade-A/B`（同夹具 SHA、源提交 6628355、llama3.2:3b、2048 token、同一买入目标）：两跑都 Passed/TownTradeVerified=true，动作名序列同为 `mapSettlementTargets>move>menuSelect>tradeOptions>trade>tradeConfirm`（`actionShapeDiverged=false`），但买入商品 A=grain、B=tools，参数序列不同（`argumentDiverged=true`、整体 `diverged=true`）；判据收据 `TestResults/20261127-divergence-towntrade/DivergenceResult.json`。这是 #142 首个真实同起点分化证据：形状收敛、目标选择分化。
+
 ## 2026-11-27 同起点路径分化判据（契约 7.722）
 
 - 新增 `harness/Get-AgentPathDivergence.ps1`（零模型）：按夹具 SHA、源提交、目标、模型、输出预算对齐起点，从 `AgentHostCampaignLoopResult.json` 提取 Native 动作路径指纹；只有共享同一可观测起点且都有完整 Host 收据才判 `diverged`，可比 run < 2 或缺收据则给 limitation 而不声称分化。

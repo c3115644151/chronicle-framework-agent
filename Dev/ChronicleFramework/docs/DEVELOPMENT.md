@@ -4,6 +4,8 @@ Contract version: 7.722
 
 ## Contract 7.722 — 同起点路径分化判据
 
+契约 7.722 增强：判据除动作名序列外还记录决策参数指纹，区分 `actionShapeDiverged` 与 `argumentDiverged`；真实同起点双跑 `20261127-divergence-towntrade-A/B` 得到动作形状收敛、买入商品 grain/tools 分化（`argumentDiverged=true`），证明分化判定必须看参数。
+
 `harness/Get-AgentPathDivergence.ps1` 是 #142 的零模型判据：给定多个已完成 LiveModel run 目录，它按夹具哈希、源提交、目标、模型与输出预算对齐「可观测起点」，从完整 Host 收据提取每个 run 的 Native 动作路径指纹，只有共享同一可观测起点且都有完整 Host 收据时才判定路径是否分化；不足两个可比 run 或缺少完整收据时明确 `diverged=false` 并给出 limitation，不用精简 terminal receipt 猜路径。现有收据（不同 commit/goal）按设计不产生分化声明。
 
 ## Contract 7.721 — tournament 分类入口与真机观察切片
