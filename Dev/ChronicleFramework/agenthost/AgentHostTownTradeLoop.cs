@@ -276,7 +276,7 @@ internal static class AgentHostTownTradeLoop
                 if (action == "tradeConfirm")
                 {
                     var data = receipt["data"] as JsonObject ?? new JsonObject();
-                    if (!VerifyBuyReceipt(data, ReadInt(arguments, "amount", 0)))
+                    if (!VerifyBuyConfirmReceipt(previousReceipt, data))
                         throw new AgentHostException("town-trade-native-commit-unverified", "Native Trade did not confirm one buy with exact Gold inverse, OtherInventory and market count changes and unchanged Campaign time.");
                     buyReceipt = data.DeepClone() as JsonObject;
                     buyActionCount++;
@@ -769,6 +769,22 @@ internal static class AgentHostTownTradeLoop
         return false;
     }
 
+    private static bool VerifyBuyConfirmReceipt(JsonObject? tradeDraftReceipt, JsonObject commitData)
+    {
+        if (ReadString(tradeDraftReceipt, "action") != "trade" || ReadString(tradeDraftReceipt, "status") != "completed" ||
+            ReadString(tradeDraftReceipt, "direction") != "buy")
+            return false;
+        var expectedAmount = ReadInt(tradeDraftReceipt, "amount", 0);
+        var expectedItemId = ReadString(tradeDraftReceipt, "itemViewModelId");
+        var expectedSide = ReadString(tradeDraftReceipt, "inventorySide") ?? ReadString(tradeDraftReceipt?["data"] as JsonObject, "inventorySide");
+        if (expectedAmount < 1 || string.IsNullOrWhiteSpace(expectedItemId) || expectedSide != "OtherInventory" ||
+            ReadInt(commitData, "amount", 0) != expectedAmount ||
+            ReadString(commitData, "itemViewModelId") != expectedItemId ||
+            ReadString(commitData, "inventorySide") != expectedSide)
+            return false;
+        return VerifyBuyReceipt(commitData, expectedAmount);
+    }
+
     private static bool VerifyBuyReceipt(JsonObject data, int expectedAmount)
     {
         var amount = ReadInt(data, "amount", 0);
@@ -1161,6 +1177,27 @@ internal static class AgentHostTownTradeLoop
         if (!VerifyBuyReceipt(validCommit, 3) || VerifyBuyReceipt(invalidCommit, 3))
             throw new AgentHostException("town-trade-self-test-commit-verification", "One buy must verify exact Gold inverse, player/market count deltas and unchanged Campaign time.");
 
+        var confirmCatalog = new JsonArray(new JsonObject { ["action"] = "tradeConfirm", ["arguments"] = new JsonArray() });
+        var tradeDraftReceipt = new JsonObject
+        {
+            ["action"] = "trade", ["status"] = "completed", ["direction"] = "buy",
+            ["itemViewModelId"] = "grain", ["inventorySide"] = "OtherInventory", ["amount"] = 3
+        };
+        if (!TryResolveAction(tradeState["state"] as JsonObject ?? tradeState, tradeDraftReceipt, confirmCatalog,
+                new JsonObject { ["action"] = "tradeConfirm", ["arguments"] = new JsonObject() },
+                null, MaxPurchaseUnitsDefault, out var confirmAction, out var confirmResolvedArguments, out _) ||
+            confirmAction != "tradeConfirm" || confirmResolvedArguments is null || confirmResolvedArguments.Count != 0)
+            throw new AgentHostException("town-trade-self-test-confirm-empty-arguments", "tradeConfirm must be resolvable with empty provider arguments.");
+        var commitData = validCommit.DeepClone().AsObject();
+        commitData["itemViewModelId"] = "grain";
+        if (!VerifyBuyConfirmReceipt(tradeDraftReceipt, commitData) ||
+            VerifyBuyConfirmReceipt(tradeDraftReceipt, invalidCommit))
+            throw new AgentHostException("town-trade-self-test-confirm-draft-binding", "An empty tradeConfirm must verify the commit against the preceding completed buy draft, never an argument-supplied amount.");
+        var mismatchedDraft = tradeDraftReceipt.DeepClone().AsObject();
+        mismatchedDraft["amount"] = 4;
+        if (VerifyBuyConfirmReceipt(mismatchedDraft, commitData))
+            throw new AgentHostException("town-trade-self-test-confirm-draft-mismatch", "A Native commit with a different amount than the preceding buy draft must be rejected.");
+
         return
         [
             new { scenario = "town-trade-prompt-bound-to-one-current-otherinventory-buy-and-never-sell", passed = true },
@@ -1169,7 +1206,7 @@ internal static class AgentHostTownTradeLoop
             new { scenario = "town-trade-rejects-sell-playerinventory-stale-and-malformed-arguments", passed = true },
             new { scenario = "town-trade-native-settlement-trade-is-not-a-hostile-encounter", passed = true },
             new { scenario = "town-trade-empty-market-exits-through-current-town-leave", passed = true },
-            new { scenario = "town-trade-confirm-verifies-gold-inverse-and-item-count-deltas", passed = true }
+            new { scenario = "town-trade-confirm-verifies-gold-inverse-and-item-count-deltas-and-binds-empty-arguments-to-draft", passed = true }
         ];
 
         static bool ResolveSellAttemptRejected(JsonObject tradeState, JsonObject quote, JsonArray catalog)

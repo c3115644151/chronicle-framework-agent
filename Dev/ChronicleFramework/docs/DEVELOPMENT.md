@@ -5,6 +5,7 @@ Contract version: 7.719
 ## Contract 7.719 — town-trade 分类入口与真机买入切片
 
 Contract 7.719 只给 town-trade profile 开放 supportedTownTradeGoal 分类：AgentHostCampaignLoop 在请求动作集精确等于 TownTradeActions 时把该分类加入首轮 classifier controls，通用 MCM 全范围和 safe-settlement arrival 看不到它，避免买入能力污染普通战役循环。Test-AgentLiveModelLoop.ps1 增加显式 opt-in -TownTradeLoop，从当前 action catalog 的 town-trade profile 取动作集（拒绝手抄与多 profile），使用本地 OpenAI-compatible 模型自主完成一次 bounded Native buy，并在报告里用买入专用 receipt 验证：Gold 反向、玩家物品数增加、市场物品数减少、Campaign day/time-control 不变、无额外 clock 动词。这是模型能力切片，不等于证明跨城套利闭环。
+第一次真实本地模型有界运行证明模型能完成分类与整条导航/买入动作链，但 `tradeConfirm` 的空 provider 参数暴露了 Host 验证 bug：期望 amount 必须来自前一条 completed `trade` draft receipt，不能从 `tradeConfirm` arguments 读取。`VerifyBuyConfirmReceipt` 绑定 draft 的 amount、itemViewModelId、inventorySide 与 commitData 后再调用原来的 Gold/物品/时间后置检查；零模型自测覆盖空参数解析、draft/commit 绑定与 mismatch 拒绝。
 
 ## Contract 7.718 — 独立 tournament observation slice 可运行
 

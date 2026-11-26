@@ -294,6 +294,7 @@ EYC 产品路线的金币动词最窄：`agenthost/AgentHostEstablishClanGoldSal
 `TestResults/20261126-market-probe-3/4` 用零模型证明了 Native 买入可行：`town_ES3` 的 flax 9/件、`town_EW2` 收 15、单程毛利上限 426，扣 78 日工资净 348；但当时的动作目录只暴露地图动作，Gold 切片又只允许 sell，所以模型看不到这条收益。
 
 本轮在 Host 侧建立独立 `town-trade` profile 与 `IAgentHostTownTradeNativeClient`：交易参数仅 `direction=buy`、`inventorySide=OtherInventory`、当前报价的小写 `itemViewModelId` 和正整数 `amount`；`tradeConfirm` 是唯一等待 completed 回执的动作。边界本身仍不等于玩家会买。契约 7.717 已提供独立可跑的有界买入 loop：触发条件是 classification 的 `supportedTownTradeGoal`、精确 `TownTradeActions` profile 和 `IAgentHostTownTradeNativeClient`；动作链为安全 Town 目标定位、地图/菜单导航、`buyOffers/tradeOptions`、买入 `trade`、确认或取消与 `inventoryDone`；成功后验是 Gold 下降与对应物品数量上升的反向变化。它显式拒绝 sale/`PlayerInventory`、零数量、`Ransom`、clock 动词与容量/Journal 查询，不推断自动套利、异地净收益或完整经济 AI。零模型 self-test 与门禁代表机制已落代码，真实模型运行证据另行记录。
+`TestResults/20261126-towntrade-live-llama32` 的第一次真实本地模型运行把 `tradeConfirm` 的验证契约钉得更细：模型提交的 `tradeConfirm {}` 是合法空参数，期望成交数量必须由前一条 completed `trade` draft receipt 提供；commitData 还要与 draft 的 itemViewModelId、inventorySide、amount 一致，之后才验证 Gold 反向、玩家/市场物品增减和 Campaign 时间不变。不能从 `tradeConfirm` arguments 读取 amount，否则合法空参数总会被当成 0，把未提交交易误报成 Native 回执失败。这个调用点约束已由零模型 self-test 覆盖，真实模型重跑前不算真机通过。
 
 ### 货物、负重、动物与战后物资
 
