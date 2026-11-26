@@ -19,6 +19,7 @@ param(
     [switch]$EstablishYourClanGoalPlanner,
     [switch]$EstablishYourClanAutonomyLoop,
     [switch]$EstablishClanGoldSaleLoop,
+    [switch]$TownTradeLoop,
     [switch]$AgentHostRuntime,
     [switch]$FixtureOpponent
 )
@@ -114,12 +115,13 @@ if ($CheckpointSaveName) {
     if ($CheckpointSaveName -notmatch '^[A-Za-z0-9_-]{1,48}$' -or $CheckpointSaveName -ceq $LoadSaveName) { throw 'A Native EYC checkpoint requires a unique 1-48 character save name distinct from its source.' }
     if (Test-Path -LiteralPath $checkpointSavePath) { throw 'The Native EYC checkpoint name already exists; refusing to overwrite it.' }
 }
-if (@($ArrivalLoop, $RecruitmentLoop, $RoadsideBanditNegotiationLoop, $SupplyManagementLoop, $VillageToolsQuestLoop, $BattleSimulationLoop, $BattleAndCaptivityLoop, $CaptivityRecoveryLoop, $EstablishYourClanGoalPlanner, $EstablishYourClanAutonomyLoop, $EstablishClanGoldSaleLoop | Where-Object { $_ }).Count -gt 1) { throw 'Select only one LiveModel test goal per run.' }
-if ($AgentHostRuntime -and -not ($SupplyManagementLoop -or $ArrivalLoop -or $VillageToolsQuestLoop -or $BattleSimulationLoop -or $BattleAndCaptivityLoop -or $CaptivityRecoveryLoop -or $EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop -or $EstablishClanGoldSaleLoop)) { throw 'AgentHostRuntime supports only frozen Native supply, arrival, supported Quest, battle/captivity, StoryMode planner/autonomy/recovery, and Gold-sale slices.' }
+if (@($ArrivalLoop, $RecruitmentLoop, $RoadsideBanditNegotiationLoop, $SupplyManagementLoop, $VillageToolsQuestLoop, $BattleSimulationLoop, $BattleAndCaptivityLoop, $CaptivityRecoveryLoop, $EstablishYourClanGoalPlanner, $EstablishYourClanAutonomyLoop, $EstablishClanGoldSaleLoop, $TownTradeLoop | Where-Object { $_ }).Count -gt 1) { throw 'Select only one LiveModel test goal per run.' }
+if ($AgentHostRuntime -and -not ($SupplyManagementLoop -or $ArrivalLoop -or $VillageToolsQuestLoop -or $BattleSimulationLoop -or $BattleAndCaptivityLoop -or $CaptivityRecoveryLoop -or $EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop -or $EstablishClanGoldSaleLoop -or $TownTradeLoop)) { throw 'AgentHostRuntime supports only frozen Native supply, arrival, supported Quest, battle/captivity, StoryMode planner/autonomy/recovery, Gold-sale, and Town-trade slices.' }
 if ($VillageToolsQuestLoop -and -not $AgentHostRuntime) { throw 'VillageToolsQuestLoop requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
 if ($EstablishYourClanGoalPlanner -and -not $AgentHostRuntime) { throw 'EstablishYourClanGoalPlanner requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
 if ($EstablishYourClanAutonomyLoop -and -not $AgentHostRuntime) { throw 'EstablishYourClanAutonomyLoop requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
 if ($EstablishClanGoldSaleLoop -and -not $AgentHostRuntime) { throw 'EstablishClanGoldSaleLoop requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
+if ($TownTradeLoop -and -not $AgentHostRuntime) { throw 'TownTradeLoop requires the in-game .NET Agent Host route; the older PowerShell decision loop is not product evidence.' }
 # The Local Agent Host accepts one exact approved Campaign action set per run and
 # rejects anything else before the first Native command. Read the Host's own
 # catalog and profile table once here so a slice that cannot possibly be accepted
@@ -275,6 +277,9 @@ $battleTargetPreflight = $null
 $goldSaleBaseline = $null
 $goldSaleVerification = $null
 $goldSaleVerified = $false
+$townTradeBaseline = $null
+$townTradeVerification = $null
+$townTradeVerified = $false
 $completionContractBase64 = $null
 $chosenSettlementId = ''
 $chosenSettlementName = ''
@@ -348,7 +353,7 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
     $harnessInputLockRequired = $true
     $env:CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION = [string]$MaxHttpRequestsPerDecision
     $loadArguments = @('-SaveName', $LoadSaveName)
-    if ($EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop -or $CaptivityRecoveryLoop -or $EstablishClanGoldSaleLoop) { $loadArguments += '-IncludeChronicleFramework' }
+    if ($EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop -or $CaptivityRecoveryLoop -or $EstablishClanGoldSaleLoop -or $TownTradeLoop) { $loadArguments += '-IncludeChronicleFramework' }
     $start = Invoke-AgentCli 'load' $loadArguments
     $sessionStarted = $true
     $baseline = Invoke-AgentCli 'state'
@@ -578,6 +583,19 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
         $goldSaleProfile = @($catalog.profiles | Where-Object { [string]$_.name -ceq 'gold-sale' })
         if ($goldSaleProfile.Count -ne 1) { throw 'The current Agent Host action catalog published no single gold-sale profile; no game was launched.' }
         $allowedActions = [string]::Join(',', @($goldSaleProfile[0].actions | ForEach-Object { [string]$_ }))
+        Set-LiveModelProviderTimeout 360
+        $env:CHRONICLE_LLM_MAX_TOKENS = '2048'
+    }
+    elseif ($TownTradeLoop) {
+        $goal = 'Reach a currently observed safe Town and make exactly one bounded Native market purchase of a currently buyable OtherInventory Goods offer from the current buyOffers. Read current mapSettlementTargets before moving and move only to a safe non-hostile and non-besieged Town; when already at a Town, use its current trade option. Inspect current buy offers, choose one transferable Goods offer with enough stock and enough Gold, draft one positive buy with its exact lowercase itemViewModelId and the OtherInventory side, then commit it with tradeConfirm. Verify the Native receipt shows Gold decreased, the player item count increased, the market item count decreased, and the Campaign day and time-control mode are unchanged. Stop after that single verified purchase. Never sell, never use PlayerInventory for the buy, no Ransom or clock verbs, do not alter resources directly, and do not hardcode a threshold or write game state.'
+        $maxDecisions = 120
+        $maxElapsedSeconds = 3600
+        # The buy slice is the Host's own town-trade profile, not a hand-copied subset: the Host
+        # accepts exactly one published action set per slice, so a stale copy is rejected before
+        # the first Native command.
+        $townTradeProfile = @($catalog.profiles | Where-Object { [string]$_.name -ceq 'town-trade' })
+        if ($townTradeProfile.Count -ne 1) { throw 'The current Agent Host action catalog published no single town-trade profile; no game was launched.' }
+        $allowedActions = [string]::Join(',', @($townTradeProfile[0].actions | ForEach-Object { [string]$_ }))
         Set-LiveModelProviderTimeout 360
         $env:CHRONICLE_LLM_MAX_TOKENS = '2048'
     }
@@ -1002,6 +1020,102 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
             passed = [bool]$goldSaleVerified
         }
         if (-not $goldSaleVerified) { throw 'Native Gold sale did not produce one current transferable Goods transaction with positive Gold and matching Journal progress.' }
+    }
+    elseif ($TownTradeLoop) {
+        $buyReceipt = $loopTrace.buyReceipt
+        $confirmReceipt = if ($buyReceipt -and $buyReceipt.receipt) { $buyReceipt.receipt } else { $buyReceipt }
+        $draftStep = @($steps | Where-Object { $_.actionExecuted -and $_.decision.action -eq 'trade' -and $_.actionReceipt.status -eq 'completed' })
+        $confirmStep = @($steps | Where-Object { $_.actionExecuted -and $_.decision.action -eq 'tradeConfirm' -and $_.actionReceipt.status -eq 'completed' })
+        $tradeOptionsSteps = @($steps | Where-Object { $_.actionExecuted -and $_.decision.action -eq 'tradeOptions' -and $_.actionReceipt.status -eq 'completed' })
+        $mapTargetSteps = @($steps | Where-Object { $_.actionExecuted -and $_.decision.action -eq 'mapSettlementTargets' -and $_.actionReceipt.status -eq 'completed' })
+        $moveSteps = @($steps | Where-Object { $_.actionExecuted -and $_.decision.action -eq 'move' -and $_.actionReceipt.status -eq 'completed' })
+        $draftArguments = if ($draftStep.Count -eq 1) { $draftStep[0].decision.arguments } else { $null }
+        $buyOffer = @()
+        if ($draftArguments -and $tradeOptionsSteps.Count -eq 1) {
+            $buyOffer = @($tradeOptionsSteps[0].actionReceipt.data.buyOffers | Where-Object {
+                [string]$_.viewModelItemId -ceq [string]$draftArguments.ItemViewModelId -and
+                [string]$_.inventorySide -ceq 'OtherInventory' -and [string]$_.nativeTooltipType -ceq 'Goods' -and
+                [bool]$_.isTransferable -and [int]$_.stock -ge 1 -and [int]$_.inventoryLogicUnitPrice -gt 0
+            } | Select-Object -First 1)
+        }
+        $tradeActions = @($steps | Where-Object { $_.actionExecuted -and $_.decision.action -in @('trade','tradeConfirm') })
+        $tradeClockActions = @($tradeActions | Where-Object { $_.actionReceipt.data.timeControlModeBefore -ne $_.actionReceipt.data.timeControlModeAfter -or
+            [Math]::Abs([double]$_.actionReceipt.data.campaignDayBefore - [double]$_.actionReceipt.data.campaignDayAfter) -gt 0.000001 })
+        $buySettlementId = [string]$buyReceipt.settlementId
+        $buyTownObserved = if ($moveSteps.Count -eq 1 -and $mapTargetSteps.Count -eq 1) {
+            $moveTargetId = [string]$moveSteps[0].decision.arguments.SettlementId
+            $safeTown = @($mapTargetSteps[0].actionReceipt.data.mapSettlementTargets | Where-Object {
+                [string]$_.id -ceq $moveTargetId -and [string]$_.type -ceq 'town' -and -not [bool]$_.hostile -and -not [bool]$_.underSiege
+            } | Select-Object -First 1)
+            ($safeTown.Count -eq 1 -and $buySettlementId -ceq $moveTargetId)
+        } elseif ($moveSteps.Count -eq 0) {
+            ([string]$baseline.state.context.menuId -ceq 'town' -and [string]$baseline.state.location.currentSettlementId -ceq $buySettlementId)
+        } else { $false }
+        $chosenId = $buySettlementId
+        $chosenTarget = if ($moveSteps.Count -eq 1 -and $mapTargetSteps.Count -eq 1) {
+            @($mapTargetSteps[0].actionReceipt.data.mapSettlementTargets | Where-Object { [string]$_.id -ceq $buySettlementId } | Select-Object -First 1)
+        } else {
+            @($baseline.state.nearbySettlements | Where-Object { [string]$_.id -ceq $buySettlementId } | Select-Object -First 1)
+        }
+        $observedTargets = if ($moveSteps.Count -eq 1 -and $mapTargetSteps.Count -eq 1) { @($mapTargetSteps[0].actionReceipt.data.mapSettlementTargets) } else { @($baseline.state.nearbySettlements) }
+        $targetSource = 'current Native safe Town menu or current safe Town targets'
+        $nativeMovementObserved = ($moveSteps.Count -eq 1)
+        $arrivalConfirmed = $buyTownObserved
+        $campaignDayAdvancedDuringTravel = if ($moveSteps.Count -eq 1) { [double]$finalNativeState.campaignDay -gt [double]$moveSteps[0].actionReceipt.campaignDay } else { $null }
+        $targetQueries = $mapTargetSteps
+        $observeSteps = @($steps | Where-Object { $_.control.kind -eq 'bounded-host-observation' -and -not $_.actionExecuted })
+        $nativeReadObservationsAfterMove = @($steps | Where-Object { $_.observationAfter -and $_.observationAfter.state -and [string]$_.observationAfter.state.location.currentSettlementId -ceq $buySettlementId })
+        $preNativeTravelReobservations = @()
+        $purchasedAmount = if ($confirmReceipt) { [int]$confirmReceipt.amount } else { 0 }
+        $goldBefore = if ($confirmReceipt) { [int]$confirmReceipt.playerGoldBefore } else { 0 }
+        $goldAfter = if ($confirmReceipt) { [int]$confirmReceipt.playerGoldAfter } else { 0 }
+        $playerBefore = if ($confirmReceipt) { [int]$confirmReceipt.playerCountBefore } else { 0 }
+        $playerAfter = if ($confirmReceipt) { [int]$confirmReceipt.playerCountAfter } else { 0 }
+        $marketBefore = if ($confirmReceipt) { [int]$confirmReceipt.marketCountBefore } else { 0 }
+        $marketAfter = if ($confirmReceipt) { [int]$confirmReceipt.marketCountAfter } else { 0 }
+        $townTradeVerified = (
+            [string]$loopTrace.status -ceq 'completed' -and [string]$loopTrace.resultKind -ceq 'town-trade-buy' -and
+            [bool]$loopTrace.buyVerified -and [bool]$loopTrace.termination.goalVerified -and
+            [string]$loopTrace.termination.reason -ceq 'one-native-buy-otherinventory-goods-and-gold-inverse-verified' -and
+            [string]$loopTrace.finalNativeState.state.context.gameState -ceq 'MapState' -and
+            $loopTrace.finalNativeState.state.context.captivity -eq $null -and
+            $draftStep.Count -eq 1 -and $confirmStep.Count -eq 1 -and $tradeOptionsSteps.Count -eq 1 -and $buyOffer.Count -eq 1 -and
+            [string]$draftArguments.Direction -ceq 'buy' -and [string]$draftArguments.InventorySide -ceq 'OtherInventory' -and
+            $purchasedAmount -ge 1 -and [int]$draftArguments.Amount -eq $purchasedAmount -and
+            [string]$confirmReceipt.itemId -ceq [string]$buyOffer[0].itemId -and
+            [bool]$confirmReceipt.postconditionPassed -and [string]$confirmReceipt.direction -ceq 'buy' -and
+            [string]$confirmReceipt.inventorySide -ceq 'OtherInventory' -and
+            $goldAfter -lt $goldBefore -and $playerAfter -eq ($playerBefore + $purchasedAmount) -and
+            $marketAfter -eq ($marketBefore - $purchasedAmount) -and
+            ($goldBefore - $goldAfter) -eq [Math]::Abs([int]$confirmReceipt.nativeTransactionAmount) -and
+            [string]$confirmReceipt.timeControlModeBefore -ceq [string]$confirmReceipt.timeControlModeAfter -and
+            [Math]::Abs([double]$confirmReceipt.campaignDayBefore - [double]$confirmReceipt.campaignDayAfter) -le 0.000001 -and
+            $tradeClockActions.Count -eq 0 -and
+            @($tradeActions | Where-Object { $_.decision.action -notin @('trade','tradeConfirm') }).Count -eq 0 -and
+            $buyTownObserved -and $moveSteps.Count -le 1
+        )
+        $finalObservation = $loopTrace.finalNativeState
+        $providerStoppedAfterGoalAction = [bool]$townTradeVerified
+        $townTradeVerification = [ordered]@{
+            buyOffer = if ($buyOffer.Count -eq 1) { $buyOffer[0] } else { $null }
+            buyReceipt = $buyReceipt
+            marketEntryCount = $tradeOptionsSteps.Count
+            draftCount = $draftStep.Count
+            commitCount = $confirmStep.Count
+            purchasedAmount = $purchasedAmount
+            goldBefore = $goldBefore
+            goldAfter = $goldAfter
+            playerItemCountBefore = $playerBefore
+            playerItemCountAfter = $playerAfter
+            marketItemCountBefore = $marketBefore
+            marketItemCountAfter = $marketAfter
+            settlementId = $buySettlementId
+            moveCount = $moveSteps.Count
+            mapSettlementQueryCount = $mapTargetSteps.Count
+            nativeTradeTimeChanged = ($tradeClockActions.Count -gt 0)
+            passed = [bool]$townTradeVerified
+        }
+        if (-not $townTradeVerified) { throw 'Native town buy did not produce one current transferable OtherInventory Goods transaction with Gold inverse, player/market item deltas, and unchanged Campaign time.' }
     }
     elseif ($EstablishYourClanGoalPlanner) {
         $finalNativeState = Invoke-AgentCli 'state'
@@ -1432,13 +1546,13 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
         CampaignDayEnd = [double]$finalObservation.campaignDay
         StartupDialogReceipts = @($start.session.startupDialogReceipts)
         Goal = $goal
-        AcceptanceSlice = if ($EstablishYourClanAutonomyLoop) { 'Real-model Native autonomous pursuit of all four original Establish Your Clan objectives and original Quest completion (this fixture run is not the two-fresh-campaign product gate)' } elseif ($EstablishClanGoldSaleLoop) { 'Real-model Native StoryMode Gold objective progress through one market sale' } elseif ($CaptivityRecoveryLoop) { 'Real-model Native recovery from existing StoryMode MainHero captivity followed by objective replanning' } elseif ($EstablishYourClanGoalPlanner) { 'Real-model read-only selection of one unmet original StoryMode Establish Your Clan objective' } elseif ($BattleAndCaptivityLoop) { 'Real-model Native hostile Bandit BattleSimulation and MainHero captivity recovery to Campaign Map' } elseif ($BattleSimulationLoop) { 'Real-model Native hostile Bandit meeting/Fight, Send Troops BattleSimulation, aftermath and Renown verification' } elseif ($VillageToolsQuestLoop) { 'Real-model Native VillageNeedsTools quest acceptance, delivery and exact inventory delta' } elseif ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } elseif ($RoadsideBanditNegotiationLoop) { 'Native roadside Safe Passage, recovery, and volunteer recruitment' } elseif ($RecruitmentLoop) { 'Native movement plus volunteer recruitment' } elseif ($ArrivalLoop) { 'Native movement arrival' } else { 'Native movement order accepted' }
+        AcceptanceSlice = if ($EstablishYourClanAutonomyLoop) { 'Real-model Native autonomous pursuit of all four original Establish Your Clan objectives and original Quest completion (this fixture run is not the two-fresh-campaign product gate)' } elseif ($TownTradeLoop) { 'Real-model Native bounded town market purchase verified by Native buy receipt' } elseif ($EstablishClanGoldSaleLoop) { 'Real-model Native StoryMode Gold objective progress through one market sale' } elseif ($CaptivityRecoveryLoop) { 'Real-model Native recovery from existing StoryMode MainHero captivity followed by objective replanning' } elseif ($EstablishYourClanGoalPlanner) { 'Real-model read-only selection of one unmet original StoryMode Establish Your Clan objective' } elseif ($BattleAndCaptivityLoop) { 'Real-model Native hostile Bandit BattleSimulation and MainHero captivity recovery to Campaign Map' } elseif ($BattleSimulationLoop) { 'Real-model Native hostile Bandit meeting/Fight, Send Troops BattleSimulation, aftermath and Renown verification' } elseif ($VillageToolsQuestLoop) { 'Real-model Native VillageNeedsTools quest acceptance, delivery and exact inventory delta' } elseif ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } elseif ($RoadsideBanditNegotiationLoop) { 'Native roadside Safe Passage, recovery, and volunteer recruitment' } elseif ($RecruitmentLoop) { 'Native movement plus volunteer recruitment' } elseif ($ArrivalLoop) { 'Native movement arrival' } else { 'Native movement order accepted' }
         SafePassageRoute = $safePassageRoute
         HarnessWorldEvents = @($loopTrace.harnessEvents)
         ChosenSettlementId = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) { $null } else { $chosenId }
         ChosenSettlementName = if ($BattleSimulationLoop -or $BattleAndCaptivityLoop -or -not $chosenTarget -or @($chosenTarget).Count -eq 0) { $null } else { [string]$chosenTarget[0].name }
         ObservedTargetCount = $observedTargets.Count
-        QueryThenNativeMoveVerified = if ($EstablishClanGoldSaleLoop) { $goldSaleVerified -and ($moveSteps.Count -eq 0 -or $nativeMovementObserved) } else { (-not ($SupplyManagementLoop -or $VillageToolsQuestLoop -or $BattleSimulationLoop -or $BattleAndCaptivityLoop -or $CaptivityRecoveryLoop -or $EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop)) }
+        QueryThenNativeMoveVerified = if ($TownTradeLoop) { $townTradeVerified -and ($moveSteps.Count -eq 0 -or $nativeMovementObserved) } elseif ($EstablishClanGoldSaleLoop) { $goldSaleVerified -and ($moveSteps.Count -eq 0 -or $nativeMovementObserved) } else { (-not ($SupplyManagementLoop -or $VillageToolsQuestLoop -or $BattleSimulationLoop -or $BattleAndCaptivityLoop -or $CaptivityRecoveryLoop -or $EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop)) }
         EstablishYourClanAutonomyLoopVerified = if ($EstablishYourClanAutonomyLoop) { [bool]$autonomyVerified } else { $null }
         EstablishYourClanAutonomyVerification = if ($EstablishYourClanAutonomyLoop) { $autonomyVerification } else { $null }
         ChosenTargetSource = $targetSource
@@ -1461,6 +1575,8 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
         EstablishYourClanQuestStatusBefore = if ($EstablishYourClanGoalPlanner) { [string]$baseline.state.storyModeEstablishClanStatus.status } else { $null }
         EstablishYourClanQuestStatusAfter = if ($EstablishYourClanGoalPlanner -and $finalObservation) { [string]$finalObservation.state.storyModeEstablishClanStatus.status } else { $null }
         EstablishYourClanGoalVerified = if ($EstablishYourClanGoalPlanner) { [bool]$loopTrace.termination.goalVerified } else { $null }
+        TownTradeVerified = if ($TownTradeLoop) { [bool]$townTradeVerified } else { $null }
+        TownTradeVerification = $townTradeVerification
         EstablishClanGoldSaleVerified = if ($EstablishClanGoldSaleLoop) { [bool]$goldSaleVerified } else { $null }
         EstablishClanGoldSaleVerification = $goldSaleVerification
         EstablishClanGoldSaleBaseline = if ($EstablishClanGoldSaleLoop) { $goldSaleBaseline } else { $null }
@@ -1551,7 +1667,9 @@ catch {
             CampaignDayStart = if ($baseline) { [double]$baseline.campaignDay } else { $null }
             CampaignDayEnd = if ($loopTrace.lastObservation) { [double]$loopTrace.lastObservation.campaignDay } else { $null }
             Goal = $goal
-            AcceptanceSlice = if ($EstablishYourClanAutonomyLoop) { 'Real-model Native autonomous EYC objective loop did not reach verified original Quest completion on this fixture' } elseif ($EstablishClanGoldSaleLoop) { 'Real-model Native StoryMode Gold objective sale' } elseif ($CaptivityRecoveryLoop) { 'Real-model Native recovery from existing StoryMode MainHero captivity followed by objective replanning' } elseif ($EstablishYourClanGoalPlanner) { 'Real-model read-only selection of one unmet original StoryMode Establish Your Clan objective' } elseif ($BattleAndCaptivityLoop) { 'Failed real-model Native BattleSimulation/captivity recovery' } elseif ($BattleSimulationLoop) { 'Failed real-model Native Bandit BattleSimulation' } elseif ($VillageToolsQuestLoop) { 'Failed real-model Native VillageNeedsTools Quest' } elseif ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } else { 'Failed live-model decision loop' }
+            AcceptanceSlice = if ($EstablishYourClanAutonomyLoop) { 'Real-model Native autonomous EYC objective loop did not reach verified original Quest completion on this fixture' } elseif ($TownTradeLoop) { 'Real-model Native bounded town market purchase did not reach a verified Native buy receipt' } elseif ($EstablishClanGoldSaleLoop) { 'Real-model Native StoryMode Gold objective sale' } elseif ($CaptivityRecoveryLoop) { 'Real-model Native recovery from existing StoryMode MainHero captivity followed by objective replanning' } elseif ($EstablishYourClanGoalPlanner) { 'Real-model read-only selection of one unmet original StoryMode Establish Your Clan objective' } elseif ($BattleAndCaptivityLoop) { 'Failed real-model Native BattleSimulation/captivity recovery' } elseif ($BattleSimulationLoop) { 'Failed real-model Native Bandit BattleSimulation' } elseif ($VillageToolsQuestLoop) { 'Failed real-model Native VillageNeedsTools Quest' } elseif ($SupplyManagementLoop) { 'Real-model Native food purchase and three-day Town Wait' } else { 'Failed live-model decision loop' }
+            TownTradeVerified = if ($TownTradeLoop) { [bool]$townTradeVerified } else { $null }
+            TownTradeVerification = $townTradeVerification
             EstablishClanGoldSaleVerified = if ($EstablishClanGoldSaleLoop) { [bool]$goldSaleVerified } else { $null }
             EstablishClanGoldSaleVerification = $goldSaleVerification
             EstablishClanGoldSaleBaseline = if ($EstablishClanGoldSaleLoop -and $goldSaleBaseline) { $goldSaleBaseline } else { $null }

@@ -1,6 +1,10 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.718
+Contract version: 7.719
+
+## Contract 7.719 — town-trade 分类入口与真机买入切片
+
+Contract 7.719 只给 town-trade profile 开放 supportedTownTradeGoal 分类：AgentHostCampaignLoop 在请求动作集精确等于 TownTradeActions 时把该分类加入首轮 classifier controls，通用 MCM 全范围和 safe-settlement arrival 看不到它，避免买入能力污染普通战役循环。Test-AgentLiveModelLoop.ps1 增加显式 opt-in -TownTradeLoop，从当前 action catalog 的 town-trade profile 取动作集（拒绝手抄与多 profile），使用本地 OpenAI-compatible 模型自主完成一次 bounded Native buy，并在报告里用买入专用 receipt 验证：Gold 反向、玩家物品数增加、市场物品数减少、Campaign day/time-control 不变、无额外 clock 动词。这是模型能力切片，不等于证明跨城套利闭环。
 
 ## Contract 7.718 — 独立 tournament observation slice 可运行
 

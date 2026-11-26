@@ -358,6 +358,19 @@ if ($agentHostTournamentLoopSource -notmatch 'DecideTournamentAsync' -or
     $agentHostTournamentLoopSource -notmatch 'RunContractSelfTests') {
     throw 'Contract 7.718 requires a runnable bounded tournament observation loop with its own provider prompt, exact action-profile dispatch, postcondition that never claims player victory or reward from a skip handler, and zero-model self-tests.'
 }
+$agentHostLiveModelLoopSource = Get-Content -LiteralPath (Join-Path $stageRoot 'Test-AgentLiveModelLoop.ps1') -Raw -Encoding UTF8
+if ($agentHostCampaignLoopSource -notmatch 'townTradeProfileOnly' -or
+    $agentHostCampaignLoopSource -notmatch 'townTradeProfileOnly: townTradeProfileOnly' -or
+    $agentHostCampaignLoopSource -notmatch 'supportedTownTradeGoal' -or
+    $agentHostLiveModelLoopSource -notmatch '\[switch\]\$TownTradeLoop' -or
+    $agentHostLiveModelLoopSource -notmatch "name -ceq 'town-trade'" -or
+    $agentHostLiveModelLoopSource -notmatch '\$townTradeVerified' -or
+    $agentHostLiveModelLoopSource -notmatch 'town-trade-buy' -or
+    $agentHostLiveModelLoopSource -notmatch 'Native town buy did not produce' -or
+    $agentHostLiveModelLoopSource -notmatch 'TownTradeVerified' -or
+    $agentHostLiveModelLoopSource -notmatch 'TownTradeVerification') {
+    throw 'Contract 7.719 requires a town-trade-only goal classification opt-in and a real-model bounded buy slice with Native buy receipt verification, not a hand-copied action set or sell-side assertions.'
+}
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\-BattleSimulationLoop' -or
