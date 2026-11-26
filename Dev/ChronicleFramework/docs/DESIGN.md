@@ -361,9 +361,31 @@ EYC/Autonomy 的 BattleSimulation 调用点都带 `recoverPlayerCaptivity: true`
 #141 的场景价值不是给模型一个“跳过就赢”的按钮，而是让它在 Arena Mission 内只使用当前 TournamentVM 暴露的原版 handler，完成报名/观战/跳过轮次并确认真实结算。契约 7.718 的独立 `tournament` profile 只含五个原版动词，不并入 AllSupportedActions；模型只能在可见锦标赛里行动，不能凭 handler 回执宣称玩家胜利、Gold/Renown 入账或下注奖品。
 
 场景判据因此分成两层：`tournament-observation` 收据只在 `isOver=true` 且 `result.resolved=true` 后报告 winner/playerWon，且 playerVictoryVerified 只在原生 playerWon=true 时为真、rewardVerified/renownVerified 恒 false；真机已有证据只证明 NPC 胜者被原生确认、玩家未获胜、Renown 31→31 不变，不能当作一次胜利或收入腿。真人赛事胜利、三维格斗输入与奖金结算仍未覆盖，需要另立真机验收。
+## 9.9 两阶段路线：先闭环深度，再全量触及（2026-11-27 用户确认）
+
+用户明确了本 Mod 的阶段路线，取代此前"只做基底、广度靠后"的默认解读：**最小范围是阶段①闭环深度，最终范围是阶段②全量交互触及**。这不是把动作条数当 KPI，而是明确"当前这些有界切片"不是终点。
+
+**阶段①——最小闭环**：把 EYC 四目标（Gold / PartySize / Renown / Companion）从零到原版 Quest 完成，跑通一次完整自主闭环。**真实模型不是必要条件**：自跑、确定性 provider、脚本化决策只要驱动真实 Host→Native 链走到原生 `storyModeEstablishClanStatus=completed` 即算通过。已有的 completion 自测用假 executor 直接改状态，只验证父循环壳，不算阶段①通过。当前未通过的真实根因是贫瘠世界状态（无可见劫匪使 renown 路线被屏蔽、planner 可选目标只剩 gold/partySize/companions）、小模型规划能力与决策预算的综合边界，不是单点 bug，因此不再堆一次性修补。
+
+**阶段②——全量触及**：把当前未触及的玩家交互类别逐步铺开，每一类做有界真机或零模型验证，直到全量覆盖。下表是 2026-11-27 核实的覆盖差距地图（事实来源：`SYSTEM_INVENTORY.md` 的 241 条 A–L 系统、目录 126 系统 ACT 183/OBS 74/N/A 23；`--campaign-action-catalog` 实测 42 个动作、7 个 profile）。目录映射不等于已实现：ACT 有目录不代表模型能调用，动作在 catalog 不代表真机验证过。
+
+| 系统类 | 当前触及 | 阶段②待补的玩家交互 |
+| --- | --- | --- |
+| A 战役运行 | 时间/等待、读档、检查点 | 难度选项、教程提示、周期事件入口 |
+| B/C 英雄与王国 | 家族/声望基础 | 宣战媾和、政策、领地分配、叛乱、贡金、王国创建 |
+| D 聚落 | 城镇/村庄访问、市场菜单 | 城镇发展、建筑/项目、总督、犯罪帮派 |
+| E 经济 | 城镇/村庄买卖、战利品出售、俘虏赎回 | Workshop、商队、Clan/Kingdom 财政、Trade Skill、Barter 全链 |
+| F/G 军事战斗 | battle skip/finish、战后处理、俘虏恢复 | 阵型、命令、战术 AI、攻城 Mission、战斗奖励细节 |
+| H 玩家成长 | 招募、队伍、装备、技能观察 | Crafting、技能专注投资、Player Clan 完整经营 |
+| I 关系社会 | 基础 settlement hero 交谈 | 婚姻、家庭、教育、特质、说服 |
+| J 任务叙事 | Issues、Journal、Incident、Tournament 部分 | 谣言、通知、棋盘游戏、完整 Quest 任务树 |
+| K 地图探索 | 可见目标查询、普通移动、地图遭遇 | 天气、海港、匪徒巢穴、追踪 |
+| L 运行时 | Observer、协议、Harness 基础设施 | 百科、本地化、玩家可见诊断界面 |
+
+阶段②按"真实玩家入口 → 原版副作用 → 时间行为 → handler 与直接 API 差别"逐个核实后再实现，不为凑覆盖面添加没有玩家 affordance 的动词。每个新增交互沿用现有独立 profile + 有界 loop + 自测 + 真机/零模型收据的交付形态。
 ## 10. 明确不做
 
-- **不把动作广度当 KPI**：动作目录有多少条不是体验，四条判据才是。
+- **不把动作广度当 KPI**：动作目录有多少条不是体验，四条判据才是；但阶段②的"全量交互触及"是明确的产品范围目标（§9.9），两者不矛盾——前者反对用目录条数冒充体验，后者要求每个触及的动作都有真实入口与判据。
 - **不拿 Harness 通过代替游戏结果**：命令成功、脚本退出 0、自测全绿都不能证明游戏里发生了什么。
 - **不为凑验收加玩家可见的功能**：验证夹具保持是夹具。
 - **不预建当前没有消费者的抽象**：结构等需求出现再做。

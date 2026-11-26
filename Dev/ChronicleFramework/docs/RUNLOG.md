@@ -8,6 +8,13 @@
 
 关于收据留存：`TestResults/<runId>` 目录会被每次阶段运行末尾的 retention（`harness/Prune-TestResults.ps1`）清理，只保留最近若干个与 `DEVELOPMENT.md`、`MAINLINE.md`、`RUNLOG.md` 点名引用的运行。文档中点名的 run id 共 1,096 个，2026-11-26 盘上实际存在 148 个目录——差额主要是 `docs/Research/**` 与 `SYSTEM_INVENTORY.md` 引用的历史运行。所以本文件里的收据路径是**当时那次运行的证据指向，不保证今天还能打开**；要重跑同一观察，用同一条脚本与同一组参数（例如 `harness/Test-AgentIdlePressure.ps1 -LoadSaveName ChronicleEycDev-opening-20261126 -ChunkDays 1 -MaxChunks 1`）而不是指望旧目录。需要长期留盘的收据，必须在 `Prune-TestResults.ps1 -ReferenceDocumentPaths` 里被点名，或被写进上面三份默认文档。
 
+## 2026-11-27 方向变更：两阶段路线取代"仅基底"解读
+
+- 用户 m13656 逐字："如果说最小范围的话，那么就是1，这一点不一定需要真实模型来验证，你如果自己能跑通，同样可以算通过，但最终范围一定是要达成全量触及，不应该只有当前这一些"；随后 m13756「继续，你没必要停下汇报，你直接创建长期目标持续推进即可」授权继续。
+- 旧目标 goal-909f7bc0 因"真实模型/凭据"条件判定为 blocked 后，重建 goal-e16cd042：阶段①用确定性/自跑方式把 EYC 四目标从零到原生 Quest 完成跑通一次（真实模型非必需）；阶段②把王国政治、关系社会、任务叙事、战斗指挥、经济广度、地图探索等未触及交互逐步铺开，每类做有界真机/零模型验证。
+- 已核实环境事实（本轮）：游戏进程未运行；存档根在 `C:\Users\32800\Documents\Mount and Blade II Bannerlord\Game Saves`（名称无 & 符号），存在 `ChronicleEycDev-opening-20261126`、`ChronicleEycDev-freshB-20261123092350-d1a1805e`、`ChronicleW7P-manual-20261101-eyc-complete`、`ChronicleW7P-manual-20261101-renown-47153` 等夹具；本地 Ollama 在线，llama3.2:3b 可用；上游 `CHRONICLE_LLM_API_KEY` 仍为空。
+- 关键判据：现有 completion 自测（`establish-clan-autonomy-dispatches-selected-route-and-requires-native-quest-success`）用假 executor 调用 `native.CompleteSuccessfully()` 直接改状态，**不算阶段①闭环**；阶段①要求真实 Host→Native 链执行四个子目标直到原生 lifecycle=completed。
+- 设计文档 DESIGN §9.9 已写入两阶段路线与覆盖差距地图，并澄清 §10"不把动作广度当 KPI"与阶段②全量触及的关系。
 ## L0 开放项工程交接状态（2026-11-27，工程事实；产品验收归 owner）
 
 | 项 | 工程交付 | 关键证据 | 未清零原因 | 再开启条件 |
