@@ -8,6 +8,10 @@
 
 关于收据留存：`TestResults/<runId>` 目录会被每次阶段运行末尾的 retention（`harness/Prune-TestResults.ps1`）清理，只保留最近若干个与 `DEVELOPMENT.md`、`MAINLINE.md`、`RUNLOG.md` 点名引用的运行。文档中点名的 run id 共 1,096 个，2026-11-26 盘上实际存在 148 个目录——差额主要是 `docs/Research/**` 与 `SYSTEM_INVENTORY.md` 引用的历史运行。所以本文件里的收据路径是**当时那次运行的证据指向，不保证今天还能打开**；要重跑同一观察，用同一条脚本与同一组参数（例如 `harness/Test-AgentIdlePressure.ps1 -LoadSaveName ChronicleEycDev-opening-20261126 -ChunkDays 1 -MaxChunks 1`）而不是指望旧目录。需要长期留盘的收据，必须在 `Prune-TestResults.ps1 -ReferenceDocumentPaths` 里被点名，或被写进上面三份默认文档。
 
+## 2026-11-27 同起点路径分化判据（契约 7.722）
+
+- 新增 `harness/Get-AgentPathDivergence.ps1`（零模型）：按夹具 SHA、源提交、目标、模型、输出预算对齐起点，从 `AgentHostCampaignLoopResult.json` 提取 Native 动作路径指纹；只有共享同一可观测起点且都有完整 Host 收据才判 `diverged`，可比 run < 2 或缺收据则给 limitation 而不声称分化。
+- 自检：`TestResults/20261126-towntrade-live-llama32-720c` 与 `20261126-towntrade-live-llama32-fix2` 共有 1 个可比起点，按设计输出 `diverged=false` + `Fewer than two runs share the same observable start`；三个不同 commit/goal 的 run 被分成两个 startKey，也未声称分化。这是判据仪器登记，不是模型对照结论。
 ## 2026-11-27 tournament 真机收据与两处 Host 修复（契约 7.721）
 
 - 真机入口：`ChronicleTownTradeLive-20261126` 用零模型 CLI 预置到当前 TournamentVM（town_ES3 → town_arena → town_enter_arena → ArenaMaster sign_up → confirm → `mno_tournament_event_1`），`harness/Test-AgentLiveModelLoop.ps1 -TournamentLoop` 的确定性 setup 在模型推理前完成，记录在 `TournamentSetup.json`。

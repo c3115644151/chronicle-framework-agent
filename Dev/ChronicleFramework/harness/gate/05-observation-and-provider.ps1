@@ -406,6 +406,19 @@ if ($agentHostCampaignLoopSource -notmatch 'tournamentProfileOnly' -or
     $agentHostCampaignLoopSource -notmatch 'tournamentProfileOnly && requestedActions.SetEquals\(TournamentActions\)') {
     throw 'Contract 7.721 requires a tournament-only goal classification opt-in and a real-model bounded tournament observation slice that verifies one resolved Native result with only original Arena handlers and no unverified victory or reward.'
 }
+$agentPathDivergencePath = Join-Path $stageRoot 'Get-AgentPathDivergence.ps1'
+if (-not (Test-Path -LiteralPath $agentPathDivergencePath)) {
+    throw 'Contract 7.722 requires a zero-model same-start path divergence criterion at harness/Get-AgentPathDivergence.ps1.'
+}
+$agentPathDivergenceSource = Get-Content -LiteralPath $agentPathDivergencePath -Raw -Encoding UTF8
+if ($agentPathDivergenceSource -notmatch 'RunDirectories' -or
+    $agentPathDivergenceSource -notmatch 'fixtureHash' -or
+    $agentPathDivergenceSource -notmatch 'sourceCommit' -or
+    $agentPathDivergenceSource -notmatch 'actionFingerprint' -or
+    $agentPathDivergenceSource -notmatch 'diverged' -or
+    $agentPathDivergenceSource -notmatch 'Fewer than two runs share the same observable start') {
+    throw 'Contract 7.722 requires divergence to be judged only across runs sharing fixture hash, commit, goal, model and budget, with a full Host receipt, and to refuse a claim when fewer than two comparable runs exist.'
+}
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\-BattleSimulationLoop' -or

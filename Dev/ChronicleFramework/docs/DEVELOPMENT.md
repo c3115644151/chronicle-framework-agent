@@ -1,6 +1,10 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.721
+Contract version: 7.722
+
+## Contract 7.722 — 同起点路径分化判据
+
+`harness/Get-AgentPathDivergence.ps1` 是 #142 的零模型判据：给定多个已完成 LiveModel run 目录，它按夹具哈希、源提交、目标、模型与输出预算对齐「可观测起点」，从完整 Host 收据提取每个 run 的 Native 动作路径指纹，只有共享同一可观测起点且都有完整 Host 收据时才判定路径是否分化；不足两个可比 run 或缺少完整收据时明确 `diverged=false` 并给出 limitation，不用精简 terminal receipt 猜路径。现有收据（不同 commit/goal）按设计不产生分化声明。
 
 ## Contract 7.721 — tournament 分类入口与真机观察切片
 
