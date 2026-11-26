@@ -24,6 +24,13 @@
 | #130 EYC 完整闭环 | 三个真实单点决策面缺陷已逐一闭环：招募合法 tuple（7.724 / 764b207，真机 6/6 合法 tuple、partySize 1→7）、gold 无安全动作路线封锁（7.725 / 9197918，自测+门）、60 决策边界记录（b3b7bc4） | `TestResults/20261127-eyc-autonomy-opening-tuples3`、`-goldblock-725`；provider self-test 467 场景；Docs 126/126/183/74/23；issue #130 comment 7200885139/7202537159 | 四目标未全部完成；真机反复证实为贫瘠世界状态（无可见劫匪→renown 屏蔽、planner 可选目标只剩 gold/partySize/companions）+ 3B 小模型 + 决策预算的综合边界；上游 `CHRONICLE_LLM_API_KEY` 为空且指向 api.deepseek.com | 真实外部模型或更强本地模型 + 更充足世界状态夹具 + 明确验收预算；此前不堆一次性修补，按 AGENTS「认识先于方案」 |
 
 判读纪律：工程交付完成 ≠ 产品验收通过；#141/#142 不因工程证据齐全而由 Agent 单方标 Done；#130 的失败按世界状态/模型/预算归因，不写成游戏代码缺陷，也不把预算耗尽写成通过。下一轮接手先读本段与 `Focus/MAINLINE.md`，不要重复探索已闭合的单点缺陷。
+## 2026-11-27 共享 ledger trace 节点克隆修复（契约 7.726）
+
+- 真机 `TestResults/20261127-eyc-closedloop-renownfixture`（renown 夹具、llama3.2:3b、40 决策）跑到 `establish-clan-autonomy-unexpected-error` / `InvalidOperationException: ThrowHelper.ThrowInvalidOperationException_NodeAlreadyHasParent`，堆栈定位 `AgentHostCampaignLoop.cs:1142`。renown 路线本次真正被选中（`renown:failed:no-safe-action`），但返回时抛异常。
+- 根因：该行是唯一直接挂 `ledger.Trace` live 节点的回执；EYC 父循环跨嵌套子流程复用 ledger，第一个回执被 `AdoptDelegated` 消费 trace 后，第二次挂同一节点抛异常。其它 loop 都用 `.DeepClone()`。
+- 修复：`["trace"] = ledger.Trace.DeepClone()`；新增自测 `campaign-loop-reused-ledger-returns-independent-trace-clone`。build 0/0、self-test 468 场景全绿。
+- 真机复核 `TestResults/20261127-eyc-closedloop-renownfixture2`（同 renown 夹具、40 决策）：`NodeAlreadyHasParent` 出现 **0 次**，异常消失；`renown` 子流程本轮首次真正 `completed:battle-and-captivity-resolved-and-verified`（阶段①四目标中 Renown 首次达成）。整体最终以 `safeSettlementRefresh:failed campaign-loop-failed` 与 `establish-clan-objective-routes-currently-unavailable` 结束（19 决策/127 动作），属另一边界，非本次 trace 修复范围。这证明该修复消除了确定性崩溃，让闭环得以推进到 Renown 完成。
+
 ## 2026-11-27 Gold 无安全动作路线封锁修复（契约 7.725）
 
 - 根因：`TestResults/20261127-eyc-autonomy-opening-tuples3` 同一次真机里 gold 目标先完成一次原生出售、后以 `gold-sale-no-safe-native-action` 失败；该 termination 缺失于 `IsSafeObjectiveRouteUnavailable` 的 gold 分支，planner 因此反复重选当前不可达的 Gold 路线直到 49 决策预算耗尽。语义对称的 renown `no-safe-action` 与其余 gold 失败码均已封锁，属遗漏。

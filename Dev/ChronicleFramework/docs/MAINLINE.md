@@ -734,6 +734,8 @@ AgentHostRuntime 的切片动作集必须与 `AgentHostCampaignLoop.SupportedAct
 契约 7.725 重规划事实：`gold-sale-no-safe-native-action`（GoldSaleLoop 在当前 catalog+controls 全空时抛出）与 renown 的 `no-safe-action` 语义对称，必须在 `IsSafeObjectiveRouteUnavailable` 的 gold 分支封锁该路线，让 planner 转去其它 EYC 目标；封锁按 Native route fingerprint 变化解除，不永久禁止 Gold。这修正真机里 planner 反复重选不可达 Gold 路线至预算耗尽的问题。
 真机边界说明：`TestResults/20261127-eyc-autonomy-goldblock-725` 复核未走到该 termination（改走劫匪打断+partySize 中断+预算耗尽），因此不把它写成修复的真机验证；该修复由自测/门和 tuples3 历史真机支撑。#130 完整闭环仍受世界状态/小模型/预算约束。
 
+契约 7.726 共享 ledger 事实：EYC 父循环跨嵌套子流程复用一个 `DecisionRunLedger`；`AgentHostCampaignLoop` 回执必须把 `ledger.Trace.DeepClone()` 后挂出，不能挂 live 节点，否则第一个回执被 `AdoptDelegated` 消费后第二次调用抛 `NodeAlreadyHasParent`。renown 夹具真机复现了此异常（与模型/世界无关），已修并加自测。
+
 #130 EYC 闭环边界（2026-11-27）：`TestResults/20261127-eyc-autonomy60`（1人0金 freshB 夹具、llama3.2:3b、60 决策）以 `establish-clan-autonomy-budget-exhausted` 结束，gold 目标三种失败分别是无可见劫匪、原生拒绝动作、预算耗尽安全回地图；四目标未完成。这是贫瘠起点+小模型+预算的综合边界，不作为游戏代码缺陷或产品通过证据。
 
 契约 7.722 登记 #142 同起点分化判据：只有夹具哈希、源提交、目标、模型与输出预算全部相同的 run 才可比较路径，且必须各自有完整 Host 收据；路径指纹来自完整 trace 的 Native 动作序列。可比 run 少于两个时不得声称分化。这是判定器而非模型能力，当前收据分属不同 commit/goal，按设计不产生分化结论。

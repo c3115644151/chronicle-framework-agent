@@ -432,6 +432,17 @@ internal static class AgentHostCampaignLoop
         sharedProvider.Dispose();
         results.Add(new { scenario = "campaign-loop-nested-map-arrival-shares-provider-budget-and-trace", passed = true });
 
+        // A shared ledger is reused by the EYC parent across nested Native loops. Adopting the first
+        // receipt consumes its trace; a second nested call must attach a fresh trace node instead of
+        // re-parenting the ledger's live node (NodeAlreadyHasParent in real EYC renown runs).
+        sharedArrivalLedger.AdoptDelegated(sharedArrival);
+        var sharedArrivalAgain = await RunAsync(refreshRequest.RootElement, sharedArrivalClient, sharedProvider, sharedArrivalLedger, CancellationToken.None,
+            disposeProvider: false);
+        // The prior bug threw NodeAlreadyHasParent here; a normal return with its own trace array is the contract.
+        if (sharedArrivalAgain["trace"] is not JsonArray adoptedTrace || adoptedTrace.Count <= 5)
+            throw new AgentHostException("campaign-loop-self-test-shared-ledger-trace-reparent-failed", "A reused ledger must return an independently parented trace clone after its prior receipt was adopted by the parent EYC loop.");
+        results.Add(new { scenario = "campaign-loop-reused-ledger-returns-independent-trace-clone", passed = true });
+
         var timeoutClient = new FakeCampaignNativeClient(timeoutOnMove: true);
         var timeoutProvider = new FakeCampaignDecisionProvider(timeoutOnMove: true);
         var timeout = await RunAsync(request.RootElement, timeoutClient, timeoutProvider, new DecisionRunLedger(timeoutProvider, null), CancellationToken.None);
@@ -1139,7 +1150,7 @@ internal static class AgentHostCampaignLoop
             ["failureCode"] = failureCode,
             ["failureExceptionType"] = failureExceptionType,
             ["hostFailureStack"] = hostFailureStack,
-            ["trace"] = ledger.Trace
+            ["trace"] = ledger.Trace.DeepClone()
         };
         }
     }
