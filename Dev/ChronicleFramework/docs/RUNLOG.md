@@ -1205,6 +1205,9 @@ $env:CHRONICLE_LLM_MAX_TOKENS='1000'
 
 机制收据：`AgentHostTownTradeLoop` 在 `supported-town-trade` 分类、`TownTradeActions` 精确匹配与 `IAgentHostTownTradeNativeClient` 下运行；使用当前 `buyOffers/OtherInventory`，成功终止写作 `resultKind=town-trade-buy`，原因 `one native buy verified by Gold/item-count inverse changes`。本机零模型验证已通过：`dotnet build Dev/ChronicleFramework/agenthost/ChronicleAgentHost.csproj -c Release` 为 0 警告/0 错误；`ChronicleAgentHost.dll --provider-self-test` 收据 `TestResults/_selftest-towntrade-717-final.json` 为 `passed=true`、`scenarios=449`、`failed=0`、`modelCalls=0`、`nativeCommands=0`，其中 town-trade 场景 14 条（两处注册各 7 条）；`harness/Check-Docs.ps1` 通过且 Docs 数字不变（Catalog 126/126、ACT 183、OBS 74、NA 23）。这些是受控零模型自测，不构成真实模型或游戏运行通过证据。
 
+## 2026-11-26 独立 tournament observation slice（契约 7.718）
+
+机制收据：新增 `agenthost/AgentHostTournamentLoop.cs`，由 `supported-tournament` 分类、`TournamentActions` 精确动作集与 `IAgentHostTournamentNativeClient` 触发；只使用当前可见 TournamentVM 的五个原版 handler，成功结果为 `resultKind=tournament-observation`，不把跳过 handler 或 NPC 胜者写成玩家胜利、奖金或 Renown 入账。本机零模型验证：`dotnet build agenthost/ChronicleAgentHost.csproj -c Release --nologo` 为 0 警告/0 错误；`ChronicleAgentHost.dll --provider-self-test` 收据 `TestResults/_selftest-tournament-718.json` 为 `passed=true`、`scenarios=458`、`failed=0`、`modelCalls=0`、`nativeCommands=0`，其中 10 条 tournament 场景全绿。该收据是受控自测，不代表真人赛事或模型自主运行通过。
 ## 2026-11-26 自主运行里的可见对手夹具（契约 7.715）
 
 为了回答“没有可见敌人时战斗兜底是否只是无米之炊”，`Test-AgentLiveModelLoop.ps1` 新增 `-FixtureOpponent`，启动 `visual-opponent-fixture`。该模式只生成一个 3 人 `chronicle_harness_looters` 敌队，不补玩家兵、不播种战利品、敌方 AI 保持运行；模型看到什么、是否交战，都来自它自己的决策。

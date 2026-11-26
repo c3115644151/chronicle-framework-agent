@@ -66,6 +66,7 @@ internal static class ProviderContractSelfTest
         results.AddRange(NativeMailboxClient.RunBattleSimulationActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunGoldSaleActionContractSelfTests());
         results.AddRange(NativeMailboxClient.RunTownTradeActionContractSelfTests());
+        results.AddRange(NativeMailboxClient.RunTournamentActionContractSelfTests());
         try { results.AddRange(await NativeMailboxClient.RunGoldSaleAcceptedResponseTransportSelfTestsAsync()); }
         catch (Exception exception) { throw new AgentHostException("gold-sale-accepted-response-transport-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         results.AddRange(NativeMailboxClient.RunRecruitmentActionContractSelfTests());
@@ -81,6 +82,7 @@ internal static class ProviderContractSelfTest
         catch (Exception exception) { throw new AgentHostException("storymode-setup-loop-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
         results.AddRange(AgentHostEstablishClanGoldSaleLoop.RunContractSelfTests());
         results.AddRange(AgentHostTownTradeLoop.RunContractSelfTests());
+        results.AddRange(AgentHostTournamentLoop.RunContractSelfTests());
         results.AddRange(AgentHostEstablishClanTrainingIssueLoop.RunContractSelfTests());
         try { results.AddRange(await AgentHostEstablishClanTrainingIssueLoop.RunMapDialogueTransportSelfTestsAsync()); }
         catch (Exception exception) { throw new AgentHostException("training-issue-map-dialogue-transport-self-test-failed", exception.GetType().Name + ": " + exception.Message, exception); }
@@ -1517,6 +1519,7 @@ internal static class ProviderContractSelfTest
         await VerifyGoalClassificationAsync(settings, "supportedCaptivityRecoveryGoal", "supported-captivity-recovery", ["supportedCaptivityRecoveryGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedEstablishClanGoldSaleGoal", "supported-establish-clan-gold-sale", ["supportedEstablishYourClanGoal", "supportedEstablishClanGoldSaleGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedTownTradeGoal", "supported-town-trade", ["supportedEstablishYourClanGoal", "supportedTownTradeGoal", "unsupportedGoal"], results);
+        await VerifyGoalClassificationAsync(settings, "supportedTournamentGoal", "supported-tournament", ["supportedTournamentGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "unsupportedGoal", "unsupported", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedMapArrivalGoal", "provider-goal-classification-unavailable", ["unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedVillageToolsQuestGoal", "provider-goal-classification-unavailable", ["supportedMapArrivalGoal", "unsupportedGoal"], results);
@@ -1526,6 +1529,7 @@ internal static class ProviderContractSelfTest
         await VerifyGoalClassificationAsync(settings, "supportedCaptivityRecoveryGoal", "provider-goal-classification-unavailable", ["unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedEstablishClanGoldSaleGoal", "provider-goal-classification-unavailable", ["supportedEstablishYourClanGoal", "unsupportedGoal"], results);
         await VerifyGoalClassificationAsync(settings, "supportedTownTradeGoal", "provider-goal-classification-unavailable", ["supportedEstablishYourClanGoal", "unsupportedGoal"], results);
+        await VerifyGoalClassificationAsync(settings, "supportedTournamentGoal", "provider-goal-classification-unavailable", ["unsupportedGoal"], results);
         VerifyProductionGoalClassificationCatalogNormalization(results);
         VerifyDecisionSchemaBindsCurrentArgumentValues(results);
 
@@ -2362,6 +2366,7 @@ internal static class ProviderContractSelfTest
                 "supportedCaptivityRecoveryGoal" => "Recover from the current Native captivity state, then replan one unmet active Establish Your Clan objective.",
                 "supportedEstablishClanGoldSaleGoal" => "Sell one currently sellable item through Native Trade to increase the active Establish Your Clan Gold Journal progress.",
                 "supportedTownTradeGoal" => "Buy one currently buyable OtherInventory goods item through Native Trade from a safe Town and verify Gold and item count changes.",
+                "supportedTournamentGoal" => "Observe or join one currently visible Arena tournament and confirm its real Native result without claiming unverified player victory or reward.",
                 _ => "Move to any visible safe settlement."
             },
             goalScopeClassificationRequired = expectedClassification != "provider-goal-classification-unavailable",
@@ -2421,6 +2426,7 @@ internal static class ProviderContractSelfTest
                 ("supportedCaptivityRecoveryGoal", "MainHero already captive and the original Establish Your Clan quest active"),
                 ("supportedEstablishClanGoldSaleGoal", "currently sellable Goods item"),
                 ("supportedTownTradeGoal", "currently buyable OtherInventory Goods"),
+                ("supportedTournamentGoal", "isOver with a resolved result"),
                 ("unsupportedGoal", "named destinations, other quests, fixed reward amounts")
             };
             var listedControlSet = new HashSet<string>(allowedControls, StringComparer.Ordinal);

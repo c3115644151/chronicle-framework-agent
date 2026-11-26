@@ -356,6 +356,11 @@ EYC/Autonomy 的 BattleSimulation 调用点都带 `recoverPlayerCaptivity: true`
 
 场景层面的买低卖高要同时满足三件事：当前报价决定可买数量，旅行工资与载重进入成本，第二座城镇的同货报价决定净收益。零模型 `MarketProbe` 只证明世界给得出这样的价差；有界 loop 与真机收据才证明模型能把三件事串成一次收入腿。
 
+### 9.8 竞技场锦标赛是观察子流程，不是收入保证
+
+#141 的场景价值不是给模型一个“跳过就赢”的按钮，而是让它在 Arena Mission 内只使用当前 TournamentVM 暴露的原版 handler，完成报名/观战/跳过轮次并确认真实结算。契约 7.718 的独立 `tournament` profile 只含五个原版动词，不并入 AllSupportedActions；模型只能在可见锦标赛里行动，不能凭 handler 回执宣称玩家胜利、Gold/Renown 入账或下注奖品。
+
+场景判据因此分成两层：`tournament-observation` 收据只在 `isOver=true` 且 `result.resolved=true` 后报告 winner/playerWon，且 playerVictoryVerified 只在原生 playerWon=true 时为真、rewardVerified/renownVerified 恒 false；真机已有证据只证明 NPC 胜者被原生确认、玩家未获胜、Renown 31→31 不变，不能当作一次胜利或收入腿。真人赛事胜利、三维格斗输入与奖金结算仍未覆盖，需要另立真机验收。
 ## 10. 明确不做
 
 - **不把动作广度当 KPI**：动作目录有多少条不是体验，四条判据才是。

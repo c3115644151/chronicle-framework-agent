@@ -330,6 +330,34 @@ if ($agentHostTownTradeLoopSource -notmatch 'DecideTownTradeAsync' -or
     $agentHostTownTradeLoopSource -notmatch 'RunContractSelfTests') {
     throw 'Contract 7.717 requires a runnable bounded town-trade buy loop with its own provider prompt, exact action-profile dispatch, buy-side postconditions, and zero-model self-tests.'
 }
+if ($agentHostCampaignLoopSource -notmatch 'TournamentActions' -or
+    $agentHostCampaignLoopSource -notmatch 'campaign-loop-tournament-is-a-separate-opt-in-profile' -or
+    $agentHostDecisionCycleSource -notmatch 'IAgentHostTournamentNativeClient' -or
+    $agentHostDecisionCycleSource -notmatch 'supportedTournamentGoal' -or
+    $agentHostMailboxSource -notmatch 'ExecuteTournamentActionAsync' -or
+    $agentHostMailboxSource -notmatch 'ValidateTournamentAction' -or
+    $agentHostMailboxSource -notmatch 'native-tournament-mailbox-allows-only-original-handlers-without-arguments' -or
+    $agentHostProviderSelfTestSource -notmatch 'RunTournamentActionContractSelfTests' -or
+    $agentHostProviderSelfTestSource -notmatch 'supportedTournamentGoal') {
+    throw 'The Arena tournament surface must be a separate opt-in Host profile with a bounded original-handler mailbox and zero-model self-tests; it must never leak into all-supported actions.'
+}
+
+$agentHostTournamentLoopPath = Join-Path $agentHostRoot 'AgentHostTournamentLoop.cs'
+if (-not (Test-Path -LiteralPath $agentHostTournamentLoopPath)) {
+    throw 'The tournament observation loop must live in agenthost/AgentHostTournamentLoop.cs.'
+}
+$agentHostTournamentLoopSource = Get-Content -LiteralPath $agentHostTournamentLoopPath -Raw
+if ($agentHostTournamentLoopSource -notmatch 'DecideTournamentAsync' -or
+    $agentHostDecisionCycleSource -notmatch 'TournamentSystemPrompt' -or
+    $agentHostTournamentLoopSource -notmatch 'TryReadSettledResult' -or
+    $agentHostTournamentLoopSource -notmatch 'playerVictoryVerified' -or
+    $agentHostTournamentLoopSource -notmatch 'rewardVerified' -or
+    $agentHostCampaignLoopSource -notmatch 'supported-tournament' -or
+    $agentHostCampaignLoopSource -notmatch 'SetEquals\(TournamentActions\)' -or
+    $agentHostTournamentLoopSource -notmatch 'IAgentHostTournamentNativeClient' -or
+    $agentHostTournamentLoopSource -notmatch 'RunContractSelfTests') {
+    throw 'Contract 7.718 requires a runnable bounded tournament observation loop with its own provider prompt, exact action-profile dispatch, postcondition that never claims player victory or reward from a skip handler, and zero-model self-tests.'
+}
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\-BattleSimulationLoop' -or

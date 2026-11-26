@@ -35,6 +35,11 @@ internal static class AgentHostCampaignLoop
         "mapSettlementTargets", "move", "menuSelect", "tradeOptions", "trade", "tradeConfirm",
         "tradeCancel", "tradeCancelChanges", "inventoryDone"
     };
+
+    internal static readonly HashSet<string> TournamentActions = new(StringComparer.Ordinal)
+    {
+        "tournamentJoin", "tournamentSkipRound", "tournamentSkipAllRounds", "tournamentWatchRound", "tournamentLeave"
+    };
     internal static readonly HashSet<string> AllSupportedActions = new(ApprovedActions.Concat(BattleSimulationActions).Concat(GoldSaleActions).Concat(RecruitmentActions).Concat(CompanionHiringActions).Concat(TrainingIssueActions), StringComparer.Ordinal);
 
     internal readonly record struct ActionProfile(string Name, IReadOnlyCollection<string> Actions);
@@ -46,6 +51,7 @@ internal static class AgentHostCampaignLoop
         new("captivity", CaptivityRecoveryActions),
         new("gold-sale", GoldSaleActions),
         new("town-trade", TownTradeActions),
+        new("tournament", TournamentActions),
         new("all-supported", AllSupportedActions)
     };
 
@@ -68,6 +74,14 @@ internal static class AgentHostCampaignLoop
             !IsSupportedRequestedActionSet(new HashSet<string>(TownTradeActions, StringComparer.Ordinal)))
             throw new AgentHostException("campaign-loop-town-trade-profile-missing", "The bounded Native town market purchase set must be an accepted Host profile of its own.");
         results.Add(new { scenario = "campaign-loop-town-trade-is-a-separate-accepted-buy-profile", passed = true });
+        if (TournamentActions.Count != 5 ||
+            !TournamentActions.SetEquals(new[] { "tournamentJoin", "tournamentSkipRound", "tournamentSkipAllRounds", "tournamentWatchRound", "tournamentLeave" }) ||
+            AllSupportedActions.Overlaps(TournamentActions) || TownTradeActions.Overlaps(TournamentActions) ||
+            TournamentActions.Contains("trade") || TournamentActions.Contains("pause") || TournamentActions.Contains("battle") ||
+            SupportedActionProfiles.Count(profile => profile.Name == "tournament") != 1 ||
+            !IsSupportedRequestedActionSet(new HashSet<string>(TournamentActions, StringComparer.Ordinal)))
+            throw new AgentHostException("campaign-loop-tournament-profile-invalid", "The tournament profile must contain only the five original Arena handlers and stay separate from all other action slices.");
+        results.Add(new { scenario = "campaign-loop-tournament-is-a-separate-opt-in-profile", passed = true });
         results.AddRange(AgentHostMapIncidentLoop.RunContractSelfTestsAsync().GetAwaiter().GetResult());
         results.AddRange(AgentHostStoryModeBootstrapLoop.RunContractSelfTests());
         if (new[] { 0, 30, 80, 159, MaxCumulativeDecisions - 1 }.Any(prior => prior >= GetCumulativeDecisionLimit(MaxCumulativeDecisions)) ||
@@ -885,6 +899,18 @@ internal static class AgentHostCampaignLoop
                         throw new AgentHostException("town-trade-native-client-unavailable", "The Native transport does not implement the original bounded Town trade protocol.");
                     return await AgentHostTownTradeLoop.RunAsync(
                         request, client, townTradeClient, provider, ledger, elapsed.Token);
+                }
+
+                if (goalClassification == "supported-tournament")
+                {
+                    ledger.Trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                        providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
+                    if (!requestedActions.SetEquals(TournamentActions))
+                        throw new AgentHostException("tournament-action-set-unavailable", "The Campaign request must include exactly the bounded original Arena tournament action set.");
+                    if (client is not IAgentHostTournamentNativeClient tournamentClient)
+                        throw new AgentHostException("tournament-native-client-unavailable", "The Native transport does not implement the original bounded Arena tournament protocol.");
+                    return await AgentHostTournamentLoop.RunAsync(
+                        request, client, tournamentClient, provider, ledger, elapsed.Token);
                 }
                 if (!goalScopeClassified)
                 {

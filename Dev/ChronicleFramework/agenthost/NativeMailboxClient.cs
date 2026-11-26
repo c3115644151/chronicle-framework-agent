@@ -10,7 +10,8 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
     IAgentHostQuestDetailsNativeClient, IAgentHostCaptivityRecoveryNativeClient, IAgentHostGoldSaleNativeClient,
     IAgentHostRecruitmentNativeClient, IAgentHostSupplyNativeClient, IAgentHostCompanionHiringNativeClient, IAgentHostStoryModeBootstrapNativeClient,
     IAgentHostNativeInquiryClient, IAgentHostStoryModeBannerEditorNativeClient, IAgentHostEstablishClanTrainingIssueNativeClient,
-    IAgentHostQuestTroopScreenNativeClient, IAgentHostCampaignCheckpointNativeClient, IAgentHostTownTradeNativeClient
+    IAgentHostQuestTroopScreenNativeClient, IAgentHostCampaignCheckpointNativeClient, IAgentHostTownTradeNativeClient,
+    IAgentHostTournamentNativeClient
 {
     private static readonly HashSet<string> SupplySliceActions = new(StringComparer.Ordinal)
     {
@@ -160,6 +161,12 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
     {
         ValidateTownTradeAction(action, arguments);
         return SendAsync(action, arguments, acceptedResponseExpected: action == "tradeConfirm", cancellationToken);
+    }
+
+    public Task<JsonDocument> ExecuteTournamentActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
+    {
+        ValidateTournamentAction(action, arguments);
+        return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
     }
 
     public Task<JsonDocument> ExecuteRecruitmentActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
@@ -352,6 +359,44 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             catch (AgentHostException exception) when (exception.Code == "native-action-not-in-town-trade-scope") { }
         }
         return [new { scenario = "native-town-trade-mailbox-allows-only-buy-quotes-and-bounded-market-navigation", validCases = validCases.Length, invalidCases = invalidCases.Length, passed = true }];
+    }
+
+    private static readonly HashSet<string> TournamentSliceActions = new(StringComparer.Ordinal)
+    {
+        "tournamentJoin", "tournamentSkipRound", "tournamentSkipAllRounds", "tournamentWatchRound", "tournamentLeave"
+    };
+
+    internal static void ValidateTournamentAction(string action, JsonObject arguments)
+    {
+        if (!TournamentSliceActions.Contains(action) || arguments.Count != 0)
+            throw new AgentHostException("native-action-not-in-tournament-scope", "The tournament adapter accepts only the five original Arena TournamentVM handlers with no arguments; it never accepts movement, market, clock or combat verbs.");
+    }
+
+    internal static IReadOnlyList<object> RunTournamentActionContractSelfTests()
+    {
+        foreach (var action in TournamentSliceActions)
+            ValidateTournamentAction(action, new JsonObject());
+        var invalidCases = new (string Action, string Json)[]
+        {
+            ("pause", "{}"),
+            ("move", "{\"settlementId\":\"arena-town\"}"),
+            ("menuSelect", "{\"menuId\":\"town\",\"optionId\":\"town_arena\"}"),
+            ("trade", "{\"direction\":\"buy\",\"itemViewModelId\":\"goods\",\"inventorySide\":\"OtherInventory\",\"amount\":1}"),
+            ("tradeConfirm", "{}"),
+            ("sellPrisonerOne", "{\"troopId\":\"looter\"}"),
+            ("battle", "{}"),
+            ("tournamentJoin", "{\"wager\":100}")
+        };
+        foreach (var item in invalidCases)
+        {
+            try
+            {
+                ValidateTournamentAction(item.Action, JsonNode.Parse(item.Json)!.AsObject());
+                throw new AgentHostException("native-tournament-invalid-action-accepted", "The tournament adapter accepted a borrowed verb or an argument that the original TournamentVM handlers do not take.");
+            }
+            catch (AgentHostException exception) when (exception.Code == "native-action-not-in-tournament-scope") { }
+        }
+        return [new { scenario = "native-tournament-mailbox-allows-only-original-handlers-without-arguments", validCases = TournamentSliceActions.Count, invalidCases = invalidCases.Length, passed = true }];
     }
 
     internal static void ValidateGoldSaleAction(string action, JsonObject arguments)
