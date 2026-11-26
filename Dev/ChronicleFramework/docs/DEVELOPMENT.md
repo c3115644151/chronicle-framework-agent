@@ -1,6 +1,10 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.720
+Contract version: 7.721
+
+## Contract 7.721 — tournament 分类入口与真机观察切片
+
+契约 7.721 给 tournament profile 开放 supportedTournamentGoal 分类：AgentHostCampaignLoop 在请求动作集精确等于 TournamentActions 时把该分类加入首轮 classifier controls，通用 MCM 全范围与 safe-settlement arrival 看不到它，避免五个原版 Arena handler 泄漏进普通战役循环。Test-AgentLiveModelLoop.ps1 增加显式 opt-in -TournamentLoop，从 Host action catalog 的 tournament profile 取动作集（拒绝手抄与多 profile），用真实模型在当前可见 TournamentVM 上只走原版 handler，直到 Native 报 isOver=true 且 result.resolved=true；成功报告必须显示 playerVictoryVerified 与原生 playerWon 一致、rewardVerified/renownVerified 恒 false、只执行五个 handler 之一、Campaign 日/时钟不变。真实玩家入口（ArenaMaster 对话选择当前赛事）与可进入 TournamentVM 的夹具是真机前置，未验证前不宣称玩家获胜或奖励。
 
 ## Contract 7.720 — Harness 完整 Campaign 结果回执
 

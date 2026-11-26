@@ -2,6 +2,10 @@
 
 适用本体：Bannerlord v1.4.8.119303。本文是 J 域唯一研究资料，按 SYSTEM_INVENTORY 的 J01-J12 次序记录。关系数据机制归 B/C/I；此处只研究任务、事件、对话、日志等消费者与玩家入口，不复制个人关系模型。
 
+## J00 竞技场锦标赛（契约 7.721 前置事实）
+
+本机 Bannerlord 1.4.8 的 ArenaMaster 对话可给出当前赛事并打开 TournamentVM：初始画面 available=true、isTournamentIncomplete=true、canPlayerJoin=false；原版 SkipAll/SkipRound handler 可推进状态机，NativeTournamentWinnerFollowup 收据记录 SkipRound→SkipAll 后 isOver=true、result.resolved=true、winner=lord_1_3/曼忒俄斯、playerWon=false、Renown31→31。handler receipt 只证明 TournamentVM 执行，不证明玩家胜利、奖金或 Renown；真实赛事胜利需 3D 格斗输入，当前未覆盖。普通 arena_empire_a 进场时 TournamentVM 不一定激活，live-model tournament profile 要求当前 MissionState 且 context.tournament.available=true。
+
 ## J01 Issues：NPC委托与问题
 
 ### 真实入口、生成与接取

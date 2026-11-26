@@ -1,3 +1,8 @@
+## 2026-11-26 tournament 分类入口与 live-model 观察切片（契约 7.721）
+
+- 实现：AgentHostCampaignLoop 新增 tournamentProfileOnly，仅当请求动作集精确等于 TournamentActions 时把 supportedTournamentGoal 加入首轮分类控制；自测覆盖 opt-in、通用与 safe-settlement 不泄漏。Test-AgentLiveModelLoop.ps1 新增 -TournamentLoop，从 Host catalog 读取唯一 tournament profile，要求真实模型在当前 TournamentVM 上只执行五个原版 handler，直到 Native 解析结果，再按 tournament 专用 receipt 验证胜/奖不虚报和时间不变。gate/05 增加 7.721 断言，Check-Docs/Run-Harness 契约升至 7.721。
+- 前置事实：旧收据 NativeTournamentWinnerFollowup.json 证明 tournamentSkipRound/SkipAll 可把 TournamentVM 推到 isOver=true 且解析 NPC 胜者（playerWon=false、Renown31→31）；普通 arena_empire_a 进入时 TournamentVM 未激活，旧 Amprela/Tyal 夹具已不在当前 saves 目录。真机观察仍需能进入当前赛事的 disposable 夹具。
+
 # Chronicle Framework 运行日志
 
 本文件是**每一次真实运行**（Harness 阶段、AgentHost 驱动、实机诊断、手动续跑）事实的权威来源，按时间顺序追加。

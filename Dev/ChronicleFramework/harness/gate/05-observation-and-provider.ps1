@@ -388,6 +388,18 @@ if ($agentHostProgramSource -notmatch 'RecordAuthorizedHarnessCampaignLoopResult
     $agentHostLiveModelLoopSource -notmatch 'CHRONICLE_REPOSITORY_ROOT = Split-Path -Parent \$PSScriptRoot[\r\n\s]+\$hostStartInfo') {
     throw 'Contract 7.720 requires a Harness-only full Campaign result file, bound by runId and terminal outcome, so real-model receipt verification sees the complete Native buy trace without weakening the game-facing compact terminal receipt.'
 }
+if ($agentHostCampaignLoopSource -notmatch 'tournamentProfileOnly' -or
+    $agentHostCampaignLoopSource -notmatch 'tournamentProfileOnly: tournamentProfileOnly' -or
+    $agentHostCampaignLoopSource -notmatch 'supportedTournamentGoal' -or
+    $agentHostLiveModelLoopSource -notmatch '\[switch\]\$TournamentLoop' -or
+    $agentHostLiveModelLoopSource -notmatch 'name -ceq ''tournament''' -or
+    $agentHostLiveModelLoopSource -notmatch '\$tournamentVerified' -or
+    $agentHostLiveModelLoopSource -notmatch 'tournament-observation' -or
+    $agentHostLiveModelLoopSource -notmatch 'Real-model tournament observation did not reach' -or
+    $agentHostLiveModelLoopSource -notmatch 'TournamentVerified' -or
+    $agentHostLiveModelLoopSource -notmatch 'TournamentVerification') {
+    throw 'Contract 7.721 requires a tournament-only goal classification opt-in and a real-model bounded tournament observation slice that verifies one resolved Native result with only original Arena handlers and no unverified victory or reward.'
+}
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
     $agentHostCampaignLoopEvaluationSource -notmatch '\-BattleSimulationLoop' -or

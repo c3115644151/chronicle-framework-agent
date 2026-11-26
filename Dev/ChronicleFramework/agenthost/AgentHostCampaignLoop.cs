@@ -107,6 +107,14 @@ internal static class AgentHostCampaignLoop
                 .Any(control => control?.GetValue<string>() == "supportedTownTradeGoal"))
             throw new AgentHostException("campaign-loop-self-test-town-trade-scope-gate-failed", "The town-trade classification control must be opt-in for the exact town-trade action profile and never leak into the general or safe-settlement classifier scopes.");
         results.Add(new { scenario = "campaign-loop-offers-town-trade-classification-only-for-town-trade-profile", passed = true });
+        var tournamentProfileControls = BuildGoalScopeClassificationControls(tournamentProfileOnly: true);
+        if (tournamentProfileControls.Count != initialControls.Count + 1 ||
+            !tournamentProfileControls.Any(control => control?.GetValue<string>() == "supportedTournamentGoal") ||
+            initialControls.Any(control => control?.GetValue<string>() == "supportedTournamentGoal") ||
+            BuildGoalScopeClassificationControls(safeSettlementArrivalOnly: true, tournamentProfileOnly: true)
+                .Any(control => control?.GetValue<string>() == "supportedTournamentGoal"))
+            throw new AgentHostException("campaign-loop-self-test-tournament-scope-gate-failed", "The tournament classification control must be opt-in for the exact tournament action profile and never leak into the general or safe-settlement classifier scopes.");
+        results.Add(new { scenario = "campaign-loop-offers-tournament-classification-only-for-tournament-profile", passed = true });
         var stalledMoveForClassification = JsonNode.Parse("""
             {"timeControlMode":"Stop","state":{"context":{"gameState":"MapState","menuId":null,"escapeMenuOpen":false,"inquiryOpen":false,"encounterActive":false,"isWaitMenu":false,"isWaitActive":false,"captivity":{"isCaptive":false}},"location":{"currentSettlementId":null,"targetSettlementId":"town-a","targetPartyId":null},"party":{"isMoving":true},"quests":[{"id":"rebuild_player_clan_storymode_quest"}]}}
             """)?.AsObject() ?? throw new AgentHostException("campaign-loop-self-test-stalled-move-fixture-invalid", "The stalled Native movement classifier fixture could not be created.");
@@ -528,6 +536,7 @@ internal static class AgentHostCampaignLoop
 
         var safeSettlementArrivalOnly = string.Equals(ReadString(request, "scopeRestriction"), "safe-settlement-arrival", StringComparison.Ordinal);
         var townTradeProfileOnly = requestedActions.SetEquals(TownTradeActions);
+        var tournamentProfileOnly = requestedActions.SetEquals(TournamentActions);
         var excludedSettlementIds = new HashSet<string>(StringComparer.Ordinal);
         if (safeSettlementArrivalOnly && request.TryGetProperty("excludedSettlementIds", out var excludedSettlementArray) && excludedSettlementArray.ValueKind == JsonValueKind.Array)
         {
@@ -615,7 +624,8 @@ internal static class AgentHostCampaignLoop
                     ? BuildControlCatalog(movingToTarget, targetReached, before["state"] as JsonObject)
                     : BuildGoalScopeClassificationControls(before["state"] as JsonObject,
                         safeSettlementArrivalOnly: ReadString(request, "scopeRestriction") == "safe-settlement-arrival",
-                        townTradeProfileOnly: townTradeProfileOnly);
+                        townTradeProfileOnly: townTradeProfileOnly,
+                        tournamentProfileOnly: tournamentProfileOnly);
                 if (actionCatalog.Count == 0 && controls.Count == 0)
                 {
                     failure = "No safe map query, movement action or waiting control is available in the current Native state.";
@@ -1183,11 +1193,12 @@ internal static class AgentHostCampaignLoop
         return controls;
     }
 
-    internal static JsonArray BuildGoalScopeClassificationControls(JsonObject? currentState = null, bool safeSettlementArrivalOnly = false, bool townTradeProfileOnly = false)
+    internal static JsonArray BuildGoalScopeClassificationControls(JsonObject? currentState = null, bool safeSettlementArrivalOnly = false, bool townTradeProfileOnly = false, bool tournamentProfileOnly = false)
     {
         if (safeSettlementArrivalOnly) return new JsonArray("supportedMapArrivalGoal", "unsupportedGoal");
         var controls = new JsonArray("supportedMapArrivalGoal", "supportedVillageToolsQuestGoal", "supportedBattleSimulationGoal", "supportedBattleAndCaptivityGoal");
         if (townTradeProfileOnly) controls.Add("supportedTownTradeGoal");
+        if (tournamentProfileOnly) controls.Add("supportedTournamentGoal");
         var activeEycQuest = HasObservedEstablishYourClanQuest(currentState);
         if (activeEycQuest || HasPostTutorialTrainingFieldMap(currentState))
             controls.Add("supportedEstablishYourClanGoal");
