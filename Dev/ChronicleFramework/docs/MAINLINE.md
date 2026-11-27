@@ -2306,5 +2306,7 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 真实模型证据：`TestResults/20261126-live-host-opponent3` 看见并进入两次战斗，但 1 对 3 时自动驾驶撤退，40 决策后仍未形成可卖战利品；`20261126-live-host-opponent4` 的 1 敌夹具没有战斗事件。这些是决策层缺口，不是 Native 拾取/出售链缺口（后者由 `BattleLootSale` 17/17 证明）。
 
 
+契约 7.729 工具链事实：确定性 provider 是零外部凭据的规则化 OpenAI-compatible 端点，只在 loopback 提供 /v1/models 与 /v1/chat/completions。它返回与真实 provider-decision 一致的 decision JSON（目标分类 goalClassification、规划 selectEstablishYourClanObjective+ObjectiveId、动作 action+arguments；招募用完整 legalTuples）。它用于阶段①"自己能跑通"的真实 Host→Native 自跑验收，不改变 Host 决策校验、原生动作门禁或成本优先产品契约，也不代表真实模型能力。
+
 契约 7.728 工具链事实：决策时间线面板收敛为唯一持久入口 `TestResults/DecisionTimeline.html`，默认扫描已有 run 的 `Temp/AgentHostProgress.jsonl` 并内置 run 切换器与 hash 深链；刷新命令 `pwsh -File harness/Run-Harness.ps1 -Phase DecisionTimeline`（无 run 参数）或 `pwsh -File harness/Export-AgentDecisionTimeline.ps1`。该面板只回放 Host 已经产出的观察/决策/子流程收据，不修改游戏状态、不代替产品界面。
 契约 7.727 可见性事实：Harness 每次真实运行都写 `Temp/AgentHostProgress.jsonl`（逐条 provider-decision 含 observation/decision/allowedActions/token，以及 objective-subflow-result）。`Export-AgentDecisionTimeline.ps1` 把它导出为自包含 HTML 时间线，让模型和用户都能逐条看到"当时看到什么→决定做什么→原生后果"，不依赖浏览器 CLI 或外部服务；这是观察/测试入口，不改变游戏内玩家可见界面。

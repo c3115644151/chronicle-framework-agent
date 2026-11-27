@@ -459,6 +459,21 @@ if ($decisionTimelineExporterBody -notmatch '\-AllRuns' -or
     $decisionTimelineExporterBody -notmatch 'history\.replaceState' -or
     $decisionTimelineStageBody -notmatch 'No run specified') {
     throw 'Contract 7.728 requires the decision timeline to be one persistent frontend: a fixed TestResults/DecisionTimeline.html panel that scans every run, offers a run switcher with deep links, and can be refreshed by the DecisionTimeline phase without -DecisionTimelineRunDirectory.'
+
+$deterministicProviderPath = Join-Path $stageRoot 'Test-AgentDeterministicProvider.ps1'
+if (-not (Test-Path -LiteralPath $deterministicProviderPath -PathType Leaf)) {
+    throw 'Contract 7.729 requires a deterministic, zero-credential provider stub harness script.'
+}
+$deterministicProviderBody = Get-Content -LiteralPath $deterministicProviderPath -Raw -Encoding UTF8
+if ($deterministicProviderBody -notmatch '\[switch\]\$SelfTest' -or
+    $deterministicProviderBody -notmatch 'deterministic-provider-self-test-failed' -or
+    $deterministicProviderBody -notmatch '/v1/models' -or
+    $deterministicProviderBody -notmatch '/v1/chat/completions' -or
+    $deterministicProviderBody -notmatch 'legalTuples' -or
+    $deterministicProviderBody -notmatch 'supported-establish-your-clan' -or
+    $deterministicProviderBody -notmatch 'selectEstablishYourClanObjective') {
+    throw 'Contract 7.729 requires the deterministic provider to self-test its goal classification, objective planner, legal-tuple argument binding, and OpenAI-compatible HTTP endpoints before driving the real Host.'
+}
 }
 }
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
