@@ -1,6 +1,9 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.727
+Contract version: 7.728
+
+## Contract 7.728 — 持久决策面板（唯一前端）
+用户要求把决策时间线作为唯一持久前端，而非每次 run 生成一份散落 HTML。`Export-AgentDecisionTimeline.ps1` 现在默认扫描 `TestResults/*/Temp/AgentHostProgress.jsonl`，把所有 run 的决策/分类/控制/子流程数据写入固定路径 `TestResults/DecisionTimeline.html`，页面内置 run 切换器、URL hash 深链、搜索/scope 筛选、类型开关、完整观察与可用动作目录；语义色蓝=动作/紫=分类/黄=控制/绿=成功/红=失败，键盘可达。单 run `-RunDirectory` 向下兼容。`DecisionTimeline` 阶段不带参数时刷新持久面板，显式 run 时导出单 run。此面板是观察/测试工具，不改变游戏内界面，也不代表产品玩家验收。
 
 ## Contract 7.725 — Gold 无安全原生动作路线封锁
 

@@ -449,6 +449,17 @@ if (-not (Test-Path -LiteralPath $decisionTimelineExporterPath -PathType Leaf) -
     $harnessScript -notmatch "'DecisionTimeline' \{ @\('DecisionTimeline'\) \}" -or
     $harnessScript -notmatch 'DecisionTimelineRunDirectory') {
     throw 'Contract 7.727 requires a discoverable, reproducible model-decision timeline viewer: a self-contained dark HTML export of the run progress log, registered as the DecisionTimeline Harness phase and driven by -DecisionTimelineRunDirectory.'
+
+$decisionTimelineExporterBody = Get-Content -LiteralPath $decisionTimelineExporterPath -Raw -Encoding UTF8
+$decisionTimelineStageBody = Get-Content -LiteralPath $decisionTimelineStagePath -Raw -Encoding UTF8
+if ($decisionTimelineExporterBody -notmatch '\-AllRuns' -or
+    $decisionTimelineExporterBody -notmatch 'TestResults/DecisionTimeline\.html|TestResults.*DecisionTimeline\.html' -or
+    $decisionTimelineExporterBody -notmatch 'runSelect' -or
+    $decisionTimelineExporterBody -notmatch 'SetRun' -or
+    $decisionTimelineExporterBody -notmatch 'history\.replaceState' -or
+    $decisionTimelineStageBody -notmatch 'No run specified') {
+    throw 'Contract 7.728 requires the decision timeline to be one persistent frontend: a fixed TestResults/DecisionTimeline.html panel that scans every run, offers a run switcher with deep links, and can be refreshed by the DecisionTimeline phase without -DecisionTimelineRunDirectory.'
+}
 }
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or

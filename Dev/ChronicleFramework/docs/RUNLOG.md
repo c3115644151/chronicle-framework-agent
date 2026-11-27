@@ -1,5 +1,8 @@
 # Chronicle Framework 运行日志
 
+## 2026-11-27 持久决策面板（契约 7.728）
+触发：用户要求把决策时间线作为唯一持久前端、长期打磨为测试工具。命令：`pwsh -File harness/Run-Harness.ps1 -Phase DecisionTimeline`（无 run 参数）刷新固定 `TestResults/DecisionTimeline.html`。观察：扫描 29 个含 AgentHostProgress.jsonl 的 run，单文件 1.5MB，run 切换器与 hash 深链存在，29 run 合计 848 个模型决策；收据显示 Persistent=true、RunCount=29、TotalDecisions=848。证明：持久面板可作为唯一可切换入口，无需每次 run 换文件。未覆盖：浏览器运行时交互截图（本会话无可用浏览器 CLI），仅静态结构验证。
+
 本文件是**每一次真实运行**（Harness 阶段、AgentHost 驱动、实机诊断、手动续跑）事实的权威来源，按时间顺序追加。
 持久的技术事实、机制契约、未知、分母与验收规则在 [MAINLINE.md](MAINLINE.md)；工程契约与验收阶梯在 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
