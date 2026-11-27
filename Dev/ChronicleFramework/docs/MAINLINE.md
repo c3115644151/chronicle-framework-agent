@@ -2306,6 +2306,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 真实模型证据：`TestResults/20261126-live-host-opponent3` 看见并进入两次战斗，但 1 对 3 时自动驾驶撤退，40 决策后仍未形成可卖战利品；`20261126-live-host-opponent4` 的 1 敌夹具没有战斗事件。这些是决策层缺口，不是 Native 拾取/出售链缺口（后者由 `BattleLootSale` 17/17 证明）。
 
 
+契约 7.731 修正与边界：move 的 SettlementId 与 pursue 的 PartyId 实际在 decision request 的 observation.state.nearbySettlements / nearbyParties 中，无需跨步骤记忆；此前"目标不在 request"的结论已作废。确定性 provider 从当前 Native 观察推导目标后，真机首次完成原生城镇到达验证（safeSettlementRefresh completed native-settlement-arrival-verified）并处理途中劫匪中断。四目标闭环仍未达成的剩余原因是真实世界死锁：renown 停在 47-49/50、可见劫匪消耗完后反复 no-safe-action，partySize 容量锁需家族等级提升而家族等级需 renown 50。这是世界状态与 3B 小模型能力边界，确定性 provider 已完整驱动 Host→Native 链，不虚报闭环通过。
+
 契约 7.730 闭环边界事实：确定性 provider 只接收当前决策请求的 observation/allowedActions/allowedControls，不含跨步骤原生回执。move 动作的 SettlementId 必须来自上一步 mapSettlementTargets 的原生 receipt（含 safe visible target ID），该数据只在完整 Host result 的 trace、不在 provider decision request 里。无状态规则 provider 因此无法选择 move 目标，会反复提交空参数动作直到预算耗尽。要完成四目标闭环，provider 需要跨步骤记忆（读取 previousActionReceipt 或 Host 在 decision request 暴露候选 ID），这不是简单启发式能覆盖；当前记为阶段①的确定性自跑边界，不虚报闭环通过。
 
 契约 7.729 工具链事实：确定性 provider 是零外部凭据的规则化 OpenAI-compatible 端点，只在 loopback 提供 /v1/models 与 /v1/chat/completions。它返回与真实 provider-decision 一致的 decision JSON（目标分类 goalClassification、规划 selectEstablishYourClanObjective+ObjectiveId、动作 action+arguments；招募用完整 legalTuples）。它用于阶段①"自己能跑通"的真实 Host→Native 自跑验收，不改变 Host 决策校验、原生动作门禁或成本优先产品契约，也不代表真实模型能力。

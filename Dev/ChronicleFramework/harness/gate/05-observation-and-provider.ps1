@@ -480,6 +480,14 @@ if ($deterministicProviderBody -notmatch 'supportedMapArrivalGoal' -or
     $deterministicProviderBody -notmatch 'objective-planner-skips-met-goal' -or
     $deterministicProviderBody -notmatch 'state.*objectiveSnapshot') {
     throw 'Contract 7.730 requires the deterministic provider to select only currently listed goal controls (including safe-settlement arrival), skip already-met EYC objectives, and choose safe menu options, so it can drive the real Host across classification, bootstrap, planner and campaign phases.'
+
+if ($deterministicProviderBody -notmatch 'nearbySettlements' -or
+    $deterministicProviderBody -notmatch 'nearbyParties' -or
+    $deterministicProviderBody -notmatch 'Get-ObserveWaitSeconds' -or
+    $deterministicProviderBody -notmatch 'SettlementId' -or
+    $deterministicProviderBody -notmatch 'PartyId') {
+    throw 'Contract 7.731 requires the deterministic provider to derive move SettlementId from nearbySettlements, pursue PartyId from nearbyParties, and read observeAgain wait bounds from controlArguments, so it can drive real Native map movement and battle pursuit without empty-argument loops.'
+}
 }
 }
 }

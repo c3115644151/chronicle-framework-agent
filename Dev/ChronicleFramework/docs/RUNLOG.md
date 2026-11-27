@@ -1,5 +1,8 @@
 # Chronicle Framework 运行日志
 
+## 2026-11-27 确定性 provider 驱动真实地图移动与遭遇（契约 7.731）
+触发：阶段①自跑闭环。基于 det-trace（162 个真实 decision payload）核实 move/pursue 目标来源在 observation.state.nearbySettlements/nearbyParties。修复 stub 三处：move 选安全 town 作 SettlementId、pursue 选最弱敌对 bandit 作 PartyId、observeAgain.waitSeconds 从 controlArguments 动态读边界。HTTP 验证：move→town_ES4、pursue→looters_4179（较弱）、wait 边界 10→waitSeconds 10。真机 `TestResults/20261127-200642-deterministic-eyc`：120 决策、340 原生动作，首次 `safeSettlementRefresh: completed native-settlement-arrival-verified`，途中劫匪触发战斗中断子流程；最终 failureCode=provider-control-arguments-invalid（修复前旧 run）/ establish-clan-objective-routes-currently-unavailable，snapshot gold 1918/2000 partySize 22/25 renown 47/50 companions✓。结论：确定性 provider 已完整驱动 Host→Native 移动/遭遇/城镇到达，剩余为真实世界死锁。Docs 126/126/183/74/23。
+
 ## 2026-11-27 确定性 provider 真机驱动 EYC 多阶段（契约 7.730）
 触发：阶段①自跑闭环。用 orchestrator 起 stub（port 18770）+ 直调 AgentHostEstablishClanAutonomyEvaluation（绕过挂掉的 7890 代理所阻塞的 AgentHostPackage stage）+ renown 夹具 ChronicleW7P-manual-20261101-renown-47153。多轮真机修复 stub：分类控制误用（返回 goalClassification 而非原始 control）、bootstrap 选 enter 而非 leave、planner 选已 met 的 gold、safe-settlement 分类控制不匹配、inquiry 误选 done。最终 run `TestResults/20261127-182201-deterministic-eyc`：162 决策、3 子流程、进入真实 campaign-agent-loop，gold✓ companions✓ partySize 22/25 renown 47/50；卡在 move 空参数死循环（158 次）至 decision-limit-reached，failureCode=establish-clan-objective-routes-currently-unavailable。诊断：move 需 SettlementId，来自 mapSettlementTargets receipt 的 safe target ID，不在 decision request 中；无状态 stub 无法取得。结论：确定性 provider 已能驱动真实 Host 多阶段，但四目标完整闭环需要跨步骤记忆，记为阶段①边界。Docs 126/126/183/74/23。
 

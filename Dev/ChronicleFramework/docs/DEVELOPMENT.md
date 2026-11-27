@@ -1,6 +1,9 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.730
+Contract version: 7.731
+
+## Contract 7.731 — 确定性 provider 驱动真实地图移动与遭遇
+真机驱动发现 move 的 SettlementId 与 pursue 的 PartyId 就藏在 decision request 的 observation.state 里（nearbySettlements / nearbyParties），上一轮"目标不在 request 中"的判断有误。stub 现在当 catalog 未收窄参数时从附近实体推导目标：move 选安全 town（非敌对/非围城，town 优先），pursue 选最弱敌对 bandit（strength 最小）；observeAgain 的 waitSeconds 从 controlArguments 动态读边界（某阶段固定为 10）。真机 `TestResults/20261127-200642-deterministic-eyc`：首次出现 `safeSettlementRefresh: completed native-settlement-arrival-verified`，确定性 provider 驱动真实 Host 完成城镇到达验证，途中遇劫匪触发战斗中断子流程并处理。剩余为真实世界死锁：renown no-safe-action、partySize 容量锁需 renown 50；四目标完整闭环仍未达成，这是世界状态边界而非工具缺陷。
 
 ## Contract 7.730 — 确定性 provider 真机驱动 EYC 多阶段
 确定性 provider stub 经真机驱动修复到可跨分类/bootstrap/planner/campaign 多阶段：目标分类只从当前列出的 goal controls 选（全战役 supportedEstablishYourClanGoal，safe-settlement 刷新只有 supportedMapArrivalGoal/unsupportedGoal）；EYC planner 跳过已 met 目标、从 argumentValues 与 state.objectiveSnapshot 交叉选择当前可选未达成目标；menuSelect 优先 leave/exit/back/done 安全选项（过 tutorial 训练场）；inquiry 阶段优先 respondInquiry action 而非 done control；动作按固定优先级推进。SelfTest 覆盖分类、跳过已 met 目标、单动作、优先级与合法三元组。真机 `TestResults/20261127-182201-deterministic-eyc`：160+ 决策进入真实 campaign-agent-loop。闭环仍未完成：move 需要跨步骤的 mapSettlementTargets receipt 目标 ID，当前无状态 stub 无法从 decision request 取得，158 次空参数 move 被原生拒绝至预算耗尽；这是无状态 provider 的边界，非单点缺陷。

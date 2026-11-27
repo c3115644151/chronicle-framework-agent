@@ -29,11 +29,41 @@ function Choose-ArgValue($action, [string]$name) {
     }
     return $values[0]
 }
-function Build-Arguments($action) {
+function Build-Arguments($action, $obs = $null) {
     $argsObj = [ordered]@{}
     foreach ($n in @(Get-Arg $action 'arguments')) {
         $v = Choose-ArgValue $action ([string]$n)
         if ($null -ne $v) { $argsObj[[string]$n] = $v }
+    }
+    # move needs a SettlementId; when the catalog does not narrow it, derive a safe
+    # target from the current Native nearbySettlements observation (town > village,
+    # non-hostile, not under siege).
+    $argNames0 = @(Get-Arg $action 'arguments' | ForEach-Object { [string]$_ })
+    if (($argNames0 -ccontains 'SettlementId') -and [string]$argsObj['SettlementId'] -eq '') {
+        $state = Get-Arg $obs 'state'
+        $nearby = @(Get-Arg $state 'nearbySettlements')
+        $safe = @($nearby | Where-Object {
+            (Get-Arg $_ 'hostile') -ne $true -and (Get-Arg $_ 'underSiege') -ne $true -and
+            -not [string]::IsNullOrWhiteSpace([string](Get-Arg $_ 'id'))
+        })
+        $towns = @($safe | Where-Object { [string](Get-Arg $_ 'type') -ceq 'town' })
+        $pick = $null
+        if ($towns.Count -gt 0) { $pick = $towns[0] } elseif ($safe.Count -gt 0) { $pick = $safe[0] }
+        if ($null -ne $pick) { $argsObj['SettlementId'] = [string](Get-Arg $pick 'id') }
+    }
+    # pursue needs a PartyId; derive the weakest currently visible hostile bandit
+    # from the current Native nearbyParties observation (lowest strength improves odds).
+    if (($argNames0 -ccontains 'PartyId') -and [string]$argsObj['PartyId'] -eq '') {
+        $state = Get-Arg $obs 'state'
+        $parties = @(Get-Arg $state 'nearbyParties')
+        $hostile = @($parties | Where-Object {
+            (Get-Arg $_ 'hostile') -eq $true -and
+            -not [string]::IsNullOrWhiteSpace([string](Get-Arg $_ 'id'))
+        })
+        if ($hostile.Count -gt 0) {
+            $weakest = @($hostile | Sort-Object { [double](Get-Arg $_ 'strength') } | Select-Object -First 1)[0]
+            $argsObj['PartyId'] = [string](Get-Arg $weakest 'id')
+        }
     }
     # Prefer a complete legal tuple for cross-field-constrained actions (recruit).
     $tuples = Get-Arg $action 'legalTuples'
@@ -42,6 +72,17 @@ function Build-Arguments($action) {
         foreach ($prop in $t.PSObject.Properties) { $argsObj[$prop.Name] = $prop.Value }
     }
     return $argsObj
+}
+function Get-ObserveWaitSeconds($decisionInput) {
+    $ca = Get-Arg $decisionInput 'controlArguments'
+    $oa = Get-Arg $ca 'observeAgain'
+    $ws = Get-Arg $oa 'waitSeconds'
+    $max = 10
+    $min = 1
+    $mx = Get-Arg $ws 'maximum'; if ($null -ne $mx) { $max = [int]$mx }
+    $mn = Get-Arg $ws 'minimum'; if ($null -ne $mn) { $min = [int]$mn }
+    if ($min -gt $max) { $min = $max }
+    return $max
 }
 function Pick-Decision($decisionInput) {
     if ($env:CHRONICLE_DETERMINISTIC_TRACE) {
@@ -65,7 +106,7 @@ function Pick-Decision($decisionInput) {
     }
     # Bounded observe-again control: wait 1-10 seconds, Host-side only.
     if ($controls -ccontains 'observeAgain' -and ($actions.Count -eq 0 -or $actions.Count -eq 1)) {
-        return @{ control = 'observeAgain'; waitSeconds = 5; rationale = 'deterministic: wait for fresh Native observation' }
+        return @{ control = 'observeAgain'; waitSeconds = (Get-ObserveWaitSeconds $decisionInput); rationale = 'deterministic: wait for fresh Native observation' }
     }
     # Objective planner: choose the first unmet objective from the current Journal snapshot.
     $hasPlanner = @($actions | Where-Object { (Get-Arg $_ 'action') -ceq 'selectEstablishYourClanObjective' }).Count -gt 0
@@ -100,19 +141,19 @@ function Pick-Decision($decisionInput) {
         $name = [string](Get-Arg $a 'action')
         if (-not $name) {
             $c = [string](Get-Arg $a 'control')
-            if ($c -ceq 'observeAgain') { return @{ control = 'observeAgain'; waitSeconds = 5; rationale = 'deterministic: wait for fresh Native observation' } }
+            if ($c -ceq 'observeAgain') { return @{ control = 'observeAgain'; waitSeconds = (Get-ObserveWaitSeconds $decisionInput); rationale = 'deterministic: wait for fresh Native observation' } }
             if ($c) { return @{ control = $c; rationale = 'deterministic: sole control' } }
         }
-        return @{ action = $name; arguments = Build-Arguments $a; rationale = 'deterministic: sole current action' }
+        return @{ action = $name; arguments = Build-Arguments $a $obs; rationale = 'deterministic: sole current action' }
     }
     # Multiple actions: prefer a state-advancing Native action by fixed priority.
     $priority = @('recruitOptions','recruit','tradeOptions','trade','tradeConfirm','partyTakeAll','inventoryTakeAll','partyScreenDone','inventoryDone','mapSettlementTargets','menuSelect','move','mapPartyTargets','pursue','dialogueSelect','dialogueContinue','battleSkip','battleFinish','incidentSelect')
     foreach ($want in $priority) {
         $a = @($actions | Where-Object { (Get-Arg $_ 'action') -ceq $want } | Select-Object -First 1)
-        if ($a.Count -eq 1) { return @{ action = $want; arguments = Build-Arguments $a[0]; rationale = 'deterministic: priority action' } }
+        if ($a.Count -eq 1) { return @{ action = $want; arguments = Build-Arguments $a[0] $obs; rationale = 'deterministic: priority action' } }
     }
     $a0 = $actions[0]
-    return @{ action = [string](Get-Arg $a0 'action'); arguments = Build-Arguments $a0; rationale = 'deterministic: fallback first action' }
+    return @{ action = [string](Get-Arg $a0 'action'); arguments = Build-Arguments $a0 $obs; rationale = 'deterministic: fallback first action' }
 }
 
 if ($SelfTest) {
