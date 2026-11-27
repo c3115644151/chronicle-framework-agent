@@ -1,7 +1,9 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.735
+Contract version: 7.736
 
+## Contract 7.736 — 一次空跑不足以认定路线耗尽
+`TestResults/20261128-060255-deterministic-eyc` 在同一起点只跑了 55 决策就报 `no-current-integrated-route-available`：renown `no-safe-action`、partySize 容量锁，唯一一次 safe-settlement 刷新在途中被可见劫匪打断（`native-visible-hostile-bandit-interrupted-settlement-move`），父循环没有路由进战斗，随后直接判定"每条整合路线都不可用"。一次刷新到达一个没有新机会的城镇并不能证明地图上没有招募/商品/劫匪，契约改为有界重试：`MaxSafeSettlementRefreshAttempts=3`，失败的刷新目的地记入已访问集合并按 `ShouldRetrySafeSettlementRefresh` 判定是否再换一个当前可见安全城镇；只有重试用尽才报 `no-current-integrated-route-available`。已到达或已路由进战斗都不再重试。
 ## Contract 7.735 — EYC 验收按完成证据判定，不再套用单次到达预算
 真机 `TestResults/20261128-054224-deterministic-eyc`：Host 已给出 `status=completed`、`termination.reason=native-establish-your-clan-quest-success-verified`、`termination.goalVerified=true`，最后一帧原生观测是 `storyModeEstablishClanStatus.status=completed`（source `native-old-quest-journal`）、原任务不再 ongoing、gold 2319 / members 25 / renown 76.3。但 `Test-AgentLiveModelLoop.ps1` 的共享到达断言仍把它当"单次移动到达"验收：先以"4 次成功 move > 1"抛出，随后还会因成功回执刻意省略 `objectiveSnapshot`、以及 `providerStoppedAfterGoalAction` 只认 provider done 而误判。契约改为：①`EstablishYourClanAutonomyLoop` 允许任意次成功 move（仍要求每次目标来自当前可见安全列表），单次预算只属于到达切片；②`autonomyVerified = nativeQuestSucceeded && (四目标快照全达成 || completionEvidence 含 storyModeEstablishClanStatus=completed)`；③该切片的停手条件取 `autonomyVerified`，不要求 provider 输出 done。
 ## Contract 7.734 — 售出即完成原版任务也算成功

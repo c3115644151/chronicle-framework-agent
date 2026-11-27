@@ -2312,6 +2312,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.735 验收事实：确定性 provider 真机在 `TestResults/20261128-054224-deterministic-eyc` 达成 `native-establish-your-clan-quest-success-verified`，收尾原生观测为 `storyModeEstablishClanStatus={status:completed, source:native-old-quest-journal, title:建立你的家族}`、quests 只剩两条支线任务、gold 2319 / members 25 / renown 76.3。因此 EYC 切片的验收不能套用"单次到达"预算（该 run 有 4 次成功 move），也不能要求 provider 输出 done，并且必须在 `objectiveSnapshot` 缺失时接受 `completionEvidence`。
 
+契约 7.736 路线耗尽事实：一次 safe-settlement 刷新到达一个没有新机会的定居点，不能证明 `renown`/`partySize` 路线在地图上不存在；`TestResults/20261128-060255-deterministic-eyc` 就是单次刷新被打断后立即报 `no-current-integrated-route-available`。父循环现在保有 `MaxSafeSettlementRefreshAttempts=3` 次有界刷新，失败的目的地进入 `excludedSettlementIds` 以免原地重试，已到达或已路由战斗时不重试。
+
 契约 7.732 修正：EYC Renown 停滞的真因不是世界死锁，而是确定性 provider 的"leave 优先"启发式在遭遇菜单每次选逃跑；原生遭遇菜单提供 `str_order_attack`（Send Troops/BattleSimulation）时该选项才是推进 Renown 的正当路径。修正后真机完成原生战斗全链并达成 renown 50/50。招募动作 legalTuples 中 `confirmPartySizeWarning` 可能编码为 `[0]`（单元素数组），provider 必须展开为标量 0 才能通过 Host schema。四目标闭环剩余 partySize 招募未达，属招募子流程选择逻辑，不虚报通过。
 
 契约 7.731 修正与边界：move 的 SettlementId 与 pursue 的 PartyId 实际在 decision request 的 observation.state.nearbySettlements / nearbyParties 中，无需跨步骤记忆；此前"目标不在 request"的结论已作废。确定性 provider 从当前 Native 观察推导目标后，真机首次完成原生城镇到达验证（safeSettlementRefresh completed native-settlement-arrival-verified）并处理途中劫匪中断。四目标闭环仍未达成的剩余原因是真实世界死锁：renown 停在 47-49/50、可见劫匪消耗完后反复 no-safe-action，partySize 容量锁需家族等级提升而家族等级需 renown 50。这是世界状态与 3B 小模型能力边界，确定性 provider 已完整驱动 Host→Native 链，不虚报闭环通过。

@@ -8,6 +8,8 @@
 
 再跑 `TestResults/20261128-054224-deterministic-eyc`（约 46 分钟，35 决策 / 180 动作）：**阶段①的玩法闭环在此 run 达成**——四目标全部 met，Host 回执 `status=completed`、`termination.reason=native-establish-your-clan-quest-success-verified`、`goalVerified=true`，收尾原生观测 `storyModeEstablishClanStatus=completed`（source native-old-quest-journal）、原任务不再 ongoing、gold 2319 / members 25 / renown 76.3。失败原因只剩 harness 验收口径：共享到达断言先报"4 次成功 move > 1"，随后还会因成功回执省略 `objectiveSnapshot` 与要求 provider done 而失败。契约 7.735 改为按完成证据判定、EYC 不再套用单次到达预算。这是 Host/游戏层闭环，harness 绿灯仍需再跑一次取证。
 
+同日再跑 `TestResults/20261128-060255-deterministic-eyc`，同一起点 55 决策即报 `no-current-integrated-route-available`：renown `no-safe-action`、partySize 容量锁，唯一一次刷新被可见劫匪打断后父循环直接判定全路线不可用。这不是世界死锁，而是"一次空跑当结论"。契约 7.736 给刷新加有界重试（最多 3 次，失败目的地入排除集），到货或进战斗都不重试。验证：build 0/0；provider self-test 475 场景 0 失败（`TestResults/_selftest-736.json`）。
+
 ## 2026-11-27 确定性 provider 招募换城镇优先级尝试（未达目标，已回退）
 
 在 7.732 达成 3/4 目标后，尝试让 stub 在没有 offer 时优先 move/mapSettlementTargets 换城镇、而非反复 recruitOptions。SelfTest 通过（priority-move-over-options），但真机 `TestResults/20261127-222219-deterministic-eyc`：recruit 决策 0、move 5、partySize 仍 22/25、renown 从 50 退到 49、failureCode=recruitment-decision-budget-exhausted。判断该改动未达成目标，用 `git stash push` 回退到已验证的 8b30352（stash@{0}: revert-unverified-recruit-priority-20261127 保留副本），不堆未验证改动。结论：partySize 招募是 EYC 四目标的最后边界；反复 recruitOptions 未进 recruit 的真因仍需单独核实（可能是当前城镇容量/offer 状态的另一层 Host 逻辑），不是简单优先级可解。

@@ -693,6 +693,13 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             resumedAllowedObjectives.Contains("companions", StringComparer.Ordinal) || !resumedAllowedObjectives.Contains("gold", StringComparer.Ordinal))
             throw new AgentHostException("establish-clan-attempt-memory-blocked-route-reoffered", "A same-state no-progress objective must remain out of the model catalog after a same-Campaign Host restart, leaving other unmet routes available.");
         results.Add(new { scenario = "establish-clan-objective-pending-resumes-without-reselection-and-no-progress-route-is-blocked-across-same-campaign-host-restart", pendingPlannerCalls = pendingAttemptResumeProvider.CallCount, blockedAllowedObjectiveIds = resumedAllowedObjectives, passed = true });
+        if (!ShouldRetrySafeSettlementRefresh(1, MaxSafeSettlementRefreshAttempts, verifiedArrival: false, routedToBattle: false) ||
+            !ShouldRetrySafeSettlementRefresh(2, MaxSafeSettlementRefreshAttempts, verifiedArrival: false, routedToBattle: false) ||
+            ShouldRetrySafeSettlementRefresh(MaxSafeSettlementRefreshAttempts, MaxSafeSettlementRefreshAttempts, verifiedArrival: false, routedToBattle: false) ||
+            ShouldRetrySafeSettlementRefresh(1, MaxSafeSettlementRefreshAttempts, verifiedArrival: true, routedToBattle: false) ||
+            ShouldRetrySafeSettlementRefresh(1, MaxSafeSettlementRefreshAttempts, verifiedArrival: false, routedToBattle: true))
+            throw new AgentHostException("establish-clan-autonomy-safe-settlement-retry-gate-failed", "A refresh that reached nothing new must stay bounded but may try another currently visible safe settlement; a verified arrival or a routed bandit battle must end the retry loop.");
+        results.Add(new { scenario = "establish-clan-autonomy-retries-other-safe-settlements-before-declaring-no-route", maxAttempts = MaxSafeSettlementRefreshAttempts, passed = true });
         return results;
     }
 
@@ -854,7 +861,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             // Each ordinary pass consumes at least one planner decision. Reuse the
             // shared cumulative decision limit instead of imposing a second 20-cycle
             // ceiling that can stop a healthy long campaign before its budget ends.
-            for (var cycle = 0; cycle < maxDecisions && ledger.Decisions < maxDecisions; cycle++)
+            var safeSettlementRefreshAttempts = 0;
+        for (var cycle = 0; cycle < maxDecisions && ledger.Decisions < maxDecisions; cycle++)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
                 using var current = await client.ReadStateAsync(elapsed.Token);
@@ -1234,8 +1242,10 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         .Where(id => !InitiallyIntegratedObjectives.Contains(id))
                         .Select(id => (JsonNode?)JsonValue.Create(id)).ToArray());
                     var allIntegratedRoutesBlocked = unimplemented.Count == 0 && unavailableObjectives.Count > 0;
-                    if (allIntegratedRoutesBlocked && ledger.Decisions < maxDecisions)
+                    if (allIntegratedRoutesBlocked && ledger.Decisions < maxDecisions &&
+                        safeSettlementRefreshAttempts < MaxSafeSettlementRefreshAttempts)
                     {
+                        safeSettlementRefreshAttempts++;
                         using var beforeRefresh = await client.ReadStateAsync(elapsed.Token);
                         var beforeRefreshState = beforeRefresh.RootElement.TryGetProperty("state", out var beforeStateElement) && beforeStateElement.ValueKind == JsonValueKind.Object
                             ? JsonNode.Parse(beforeStateElement.GetRawText())?.AsObject() ?? new JsonObject()
@@ -1329,6 +1339,22 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             ["decisions"] = ledger.Decisions
                         });
                         if (verifiedArrival) continue;
+                        if (ShouldRetrySafeSettlementRefresh(safeSettlementRefreshAttempts, MaxSafeSettlementRefreshAttempts, verifiedArrival: false, routedToBattle: false))
+                        {
+                            // A settlement that offered nothing new is not proof that every route is gone: the
+                            // next currently visible safe settlement may still hold recruits, goods or bandits.
+                            if (!string.IsNullOrWhiteSpace(afterRefreshSettlementId))
+                                safeSettlementRefreshVisitedIds.Add(afterRefreshSettlementId!);
+                            ledger.Trace.Add(new JsonObject
+                            {
+                                ["stage"] = "no-integrated-route-safe-settlement-refresh-retry",
+                                ["attempt"] = safeSettlementRefreshAttempts,
+                                ["maxAttempts"] = MaxSafeSettlementRefreshAttempts,
+                                ["failedDestinationId"] = afterRefreshSettlementId,
+                                ["refreshFailureCode"] = refreshFailureCode
+                            });
+                            continue;
+                        }
                     }
                     return BuildResult("failed", allIntegratedRoutesBlocked ? "no-current-integrated-route-available" : "objective-route-not-yet-integrated", false,
                         allIntegratedRoutesBlocked
@@ -2096,6 +2122,11 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                (state?["availableMenuOptions"] as JsonArray)?.OfType<JsonObject>().Any(option =>
                    ReadString(option, "id") == "join_encounter_leave" && ReadBoolean(option, "available") && ReadBoolean(option, "enabled")) == true;
     }
+
+    internal const int MaxSafeSettlementRefreshAttempts = 3;
+
+    internal static bool ShouldRetrySafeSettlementRefresh(int attempts, int maxAttempts, bool verifiedArrival, bool routedToBattle) =>
+        !verifiedArrival && !routedToBattle && attempts < maxAttempts;
 
     internal static bool ShouldReplanAfterIncidentBattleNoSafeAction(JsonObject? battleResult, JsonElement nativeAfter) =>
         ReadString(battleResult, "status") == "failed" && ReadString(battleResult, "termination") == "no-safe-action" &&

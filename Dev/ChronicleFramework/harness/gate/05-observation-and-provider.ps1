@@ -515,8 +515,14 @@ if ($agentHostLiveModelLoopSource -notmatch 'completionEvidenceProvesQuestEnd' -
     $agentHostLiveModelLoopSource -notmatch 'nativeCompletionEvidence' -or
     $agentHostLiveModelLoopSource -notmatch 'elseif \(\$EstablishYourClanAutonomyLoop\) \{ \[int\]::MaxValue \}' -or
     $agentHostLiveModelLoopSource -notmatch 'A Native-verified quest completion is the EYC stop condition') {
-    throw 'Contract 7.735 requires the EYC autonomy acceptance to judge the Native completion evidence (lifecycle completed or all four objectives met) instead of the single-arrival move budget and a provider done decision.'
 }
+if ($agentHostEstablishClanAutonomySource -notmatch 'MaxSafeSettlementRefreshAttempts = 3' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'ShouldRetrySafeSettlementRefresh' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'no-integrated-route-safe-settlement-refresh-retry' -or
+    $agentHostEstablishClanAutonomySource -notmatch 'establish-clan-autonomy-retries-other-safe-settlements-before-declaring-no-route') {
+    throw 'Contract 7.736 requires the EYC parent to retry bounded safe-settlement refreshes to other currently visible settlements before declaring that every integrated route is unavailable; one empty arrival is not proof.'
+}
+
 
 
 }
