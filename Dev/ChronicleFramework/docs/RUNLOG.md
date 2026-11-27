@@ -1,5 +1,8 @@
 # Chronicle Framework 运行日志
 
+## 2026-11-27 确定性 provider 真机驱动 EYC 多阶段（契约 7.730）
+触发：阶段①自跑闭环。用 orchestrator 起 stub（port 18770）+ 直调 AgentHostEstablishClanAutonomyEvaluation（绕过挂掉的 7890 代理所阻塞的 AgentHostPackage stage）+ renown 夹具 ChronicleW7P-manual-20261101-renown-47153。多轮真机修复 stub：分类控制误用（返回 goalClassification 而非原始 control）、bootstrap 选 enter 而非 leave、planner 选已 met 的 gold、safe-settlement 分类控制不匹配、inquiry 误选 done。最终 run `TestResults/20261127-182201-deterministic-eyc`：162 决策、3 子流程、进入真实 campaign-agent-loop，gold✓ companions✓ partySize 22/25 renown 47/50；卡在 move 空参数死循环（158 次）至 decision-limit-reached，failureCode=establish-clan-objective-routes-currently-unavailable。诊断：move 需 SettlementId，来自 mapSettlementTargets receipt 的 safe target ID，不在 decision request 中；无状态 stub 无法取得。结论：确定性 provider 已能驱动真实 Host 多阶段，但四目标完整闭环需要跨步骤记忆，记为阶段①边界。Docs 126/126/183/74/23。
+
 ## 2026-11-27 确定性 provider stub 自测与 HTTP 端到端（契约 7.729）
 触发：阶段①自跑前置。命令：`pwsh -File harness/Test-AgentDeterministicProvider.ps1 -SelfTest` 得 5/5 PASS；Start-Process 起 `-Port 18766` 后 `/v1/models` 返回 deterministic-eyc-provider，`/v1/chat/completions` 对分类 payload 返回 `goalClassification`、对规划 payload 返回 `selectEstablishYourClanObjective`。证明 stub 可为真实 Host 提供合法 decision 格式。未覆盖：接入 live-model 阶段跑完整 EYC 闭环（下一步）。
 

@@ -13,54 +13,95 @@ function Get-Arg($obj, [string]$name) {
     if ($null -eq $p) { return $null }
     return $p.Value
 }
-function First-ArgValue($action, [string]$name) {
+function Arg-Values($action, [string]$name) {
     $av = Get-Arg $action 'argumentValues'
     $v = Get-Arg $av $name
-    if ($null -ne $v -and @($v).Count -gt 0) { return @($v)[0] }
-    return $null
+    if ($null -eq $v) { return @() }
+    return @($v)
+}
+function Choose-ArgValue($action, [string]$name) {
+    $values = @(Arg-Values $action $name)
+    if ($values.Count -eq 0) { return $null }
+    # Menu/choice values: prefer a safe exit/leave/back/done option over enter/start.
+    if ($name -match 'OptionId|Choice|choice') {
+        $safe = @($values | Where-Object { [string]$_ -match '(?i)leave|exit|back|done|finish|decline|reject' })
+        if ($safe.Count -gt 0) { return $safe[0] }
+    }
+    return $values[0]
 }
 function Build-Arguments($action) {
     $argsObj = [ordered]@{}
     foreach ($n in @(Get-Arg $action 'arguments')) {
-        $v = First-ArgValue $action ([string]$n)
+        $v = Choose-ArgValue $action ([string]$n)
         if ($null -ne $v) { $argsObj[[string]$n] = $v }
     }
     # Prefer a complete legal tuple for cross-field-constrained actions (recruit).
     $tuples = Get-Arg $action 'legalTuples'
     if ($null -ne $tuples -and @($tuples).Count -gt 0) {
         $t = @($tuples)[0]
-        foreach ($p in $t.PSObject.Properties) { $argsObj[$p.Name] = $p.Value }
+        foreach ($prop in $t.PSObject.Properties) { $argsObj[$prop.Name] = $prop.Value }
     }
     return $argsObj
 }
 function Pick-Decision($decisionInput) {
+    if ($env:CHRONICLE_DETERMINISTIC_TRACE) {
+        $decisionInput | ConvertTo-Json -Depth 20 -Compress | Add-Content -LiteralPath $env:CHRONICLE_DETERMINISTIC_TRACE -Encoding UTF8
+    }
     $actions = @(Get-Arg $decisionInput 'allowedActions')
     $controls = @(Get-Arg $decisionInput 'allowedControls')
     $obs = Get-Arg $decisionInput 'observation'
-    # Goal classification phase: no actions, supported controls listed.
-    if ($actions.Count -eq 0 -and $controls.Count -gt 0) {
-        return @{ goalClassification = 'supported-establish-your-clan' }
+    $goalNames = @('supportedMapArrivalGoal','supportedVillageToolsQuestGoal','supportedBattleSimulationGoal','supportedBattleAndCaptivityGoal','supportedEstablishYourClanGoal','supportedCaptivityRecoveryGoal','supportedEstablishClanGoldSaleGoal','supportedTownTradeGoal','supportedTournamentGoal','unsupportedGoal')
+    $listedGoals = @($controls | Where-Object { $goalNames -ccontains [string]$_ })
+    # Classification phase: goal controls are listed and the Host asks for scope classification.
+    if ($listedGoals.Count -gt 0) {
+        # Choose a goal control that is actually listed in this phase. Full campaign
+        # classification lists supportedEstablishYourClanGoal; safe-settlement refresh
+        # only lists supportedMapArrivalGoal/unsupportedGoal.
+        $chosen = $null
+        if ($listedGoals -ccontains 'supportedEstablishYourClanGoal') { $chosen = 'supportedEstablishYourClanGoal' }
+        elseif ($listedGoals -ccontains 'supportedMapArrivalGoal') { $chosen = 'supportedMapArrivalGoal' }
+        else { $chosen = [string]$listedGoals[0] }
+        return @{ control = $chosen; rationale = 'deterministic: first listed supported goal control' }
+    }
+    # Bounded observe-again control: wait 1-10 seconds, Host-side only.
+    if ($controls -ccontains 'observeAgain' -and ($actions.Count -eq 0 -or $actions.Count -eq 1)) {
+        return @{ control = 'observeAgain'; waitSeconds = 5; rationale = 'deterministic: wait for fresh Native observation' }
     }
     # Objective planner: choose the first unmet objective from the current Journal snapshot.
     $hasPlanner = @($actions | Where-Object { (Get-Arg $_ 'action') -ceq 'selectEstablishYourClanObjective' }).Count -gt 0
     if ($hasPlanner) {
-        $snap = Get-Arg $obs 'objectiveSnapshot'
+        $planner = @($actions | Where-Object { (Get-Arg $_ 'action') -ceq 'selectEstablishYourClanObjective' } | Select-Object -First 1)[0]
+        # argumentValues may be narrowed by the Host to selectable goals, or still list all four.
+        $values = @(Arg-Values $planner 'ObjectiveId')
+        $snap = Get-Arg (Get-Arg $obs 'state') 'objectiveSnapshot'
         $pick = $null
-        foreach ($o in @('gold','partySize','renown','companions')) {
-            $node = Get-Arg $snap $o
-            if ($null -ne $node -and (Get-Arg $node 'met') -ne $true) { $pick = $o; break }
+        # Prefer the first listed value whose current Journal objective is not yet met.
+        foreach ($v in $values) {
+            $node = Get-Arg $snap ([string]$v)
+            if ($null -ne $node -and (Get-Arg $node 'met') -ne $true) { $pick = [string]$v; break }
         }
-        if (-not $pick) { $pick = 'gold' }
-        return @{ action = 'selectEstablishYourClanObjective'; arguments = @{ ObjectiveId = $pick }; rationale = 'deterministic: first unmet EYC objective' }
+        # Fallback: first listed value, or a snapshot-derived unmet objective.
+        if (-not $pick -and $values.Count -gt 0) { $pick = [string]$values[0] }
+        if (-not $pick) {
+            foreach ($o in @('gold','partySize','renown','companions')) {
+                $node = Get-Arg $snap $o
+                if ($null -ne $node -and (Get-Arg $node 'met') -ne $true) { $pick = $o; break }
+            }
+        }
+        if (-not $pick) { $pick = 'partySize' }
+        return @{ action = 'selectEstablishYourClanObjective'; arguments = @{ ObjectiveId = $pick }; rationale = 'deterministic: first currently unmet selectable EYC objective' }
     }
-    if ($actions.Count -eq 0) { return @{ done = $true; reason = 'deterministic: no current action or control' } }
+    if ($actions.Count -eq 0) {
+        if ($controls -ccontains 'done') { return @{ control = 'done'; rationale = 'deterministic: no further safe action' } }
+        return @{ control = 'done'; rationale = 'deterministic: no current action or control' }
+    }
     if ($actions.Count -eq 1) {
         $a = $actions[0]
         $name = [string](Get-Arg $a 'action')
         if (-not $name) {
             $c = [string](Get-Arg $a 'control')
-            if ($c -ceq 'observeAgain') { return @{ observeAgain = $true; waitSeconds = 10 } }
-            if ($c) { return @{ control = $c } }
+            if ($c -ceq 'observeAgain') { return @{ control = 'observeAgain'; waitSeconds = 5; rationale = 'deterministic: wait for fresh Native observation' } }
+            if ($c) { return @{ control = $c; rationale = 'deterministic: sole control' } }
         }
         return @{ action = $name; arguments = Build-Arguments $a; rationale = 'deterministic: sole current action' }
     }
@@ -81,10 +122,10 @@ if ($SelfTest) {
         if (-not (& $assert $d)) { throw "deterministic-provider-self-test-failed: $name -> $($d | ConvertTo-Json -Compress -Depth 8)" }
         "PASS $name"
     }
-    T 'goal-classification' '{"allowedActions":[],"allowedControls":["supportedEstablishYourClanGoal","unsupportedGoal"],"observation":{}}' {
-        param($d) $d.goalClassification -ceq 'supported-establish-your-clan'
+    T 'goal-classification' '{"allowedActions":[],"allowedControls":["supportedEstablishYourClanGoal","unsupportedGoal"],"goalScopeClassificationRequired":true,"observation":{}}' {
+        param($d) $d.control -ceq 'supportedEstablishYourClanGoal'
     }
-    T 'objective-planner-first-unmet' '{"allowedActions":[{"action":"selectEstablishYourClanObjective","arguments":["ObjectiveId"],"argumentValues":{"ObjectiveId":["gold","partySize","renown","companions"]}}],"allowedControls":[],"observation":{"objectiveSnapshot":{"gold":{"met":true},"partySize":{"met":false},"renown":{"met":false},"companions":{"met":true}}}}' {
+    T 'objective-planner-skips-met-goal' '{"allowedActions":[{"action":"selectEstablishYourClanObjective","arguments":["ObjectiveId"],"argumentValues":{"ObjectiveId":["gold","partySize","renown","companions"]}}],"allowedControls":[],"observation":{"state":{"objectiveSnapshot":{"gold":{"met":true},"partySize":{"met":false},"renown":{"met":false},"companions":{"met":true}}}}}' {
         param($d) $d.action -ceq 'selectEstablishYourClanObjective' -and $d.arguments.ObjectiveId -ceq 'partySize'
     }
     T 'sole-action' '{"allowedActions":[{"action":"mapSettlementTargets","arguments":[],"argumentValues":{}}],"allowedControls":[],"observation":{}}' {
@@ -118,7 +159,7 @@ try {
                 $userMsg = @($api.messages | Where-Object { (Get-Arg $_ 'role') -ceq 'user' } | Select-Object -First 1)
                 $input = $null
                 if ($userMsg.Count -eq 1) { $decisionInput = [string](Get-Arg $userMsg[0] 'content') | ConvertFrom-Json } else { $decisionInput = $null }
-                $decision = Pick-Decision $input
+                $decision = Pick-Decision $decisionInput
                 $content = $decision | ConvertTo-Json -Depth 10 -Compress
                 $body = @{
                     id='chatcmpl-deterministic'; object='chat.completion'; model=$modelId

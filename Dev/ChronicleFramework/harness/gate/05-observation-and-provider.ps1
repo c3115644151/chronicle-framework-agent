@@ -473,6 +473,14 @@ if ($deterministicProviderBody -notmatch '\[switch\]\$SelfTest' -or
     $deterministicProviderBody -notmatch 'supported-establish-your-clan' -or
     $deterministicProviderBody -notmatch 'selectEstablishYourClanObjective') {
     throw 'Contract 7.729 requires the deterministic provider to self-test its goal classification, objective planner, legal-tuple argument binding, and OpenAI-compatible HTTP endpoints before driving the real Host.'
+
+if ($deterministicProviderBody -notmatch 'supportedMapArrivalGoal' -or
+    $deterministicProviderBody -notmatch 'Arg-Values' -or
+    $deterministicProviderBody -notmatch 'Choose-ArgValue' -or
+    $deterministicProviderBody -notmatch 'objective-planner-skips-met-goal' -or
+    $deterministicProviderBody -notmatch 'state.*objectiveSnapshot') {
+    throw 'Contract 7.730 requires the deterministic provider to select only currently listed goal controls (including safe-settlement arrival), skip already-met EYC objectives, and choose safe menu options, so it can drive the real Host across classification, bootstrap, planner and campaign phases.'
+}
 }
 }
 }
