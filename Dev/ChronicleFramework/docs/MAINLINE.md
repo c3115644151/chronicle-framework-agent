@@ -2306,6 +2306,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 真实模型证据：`TestResults/20261126-live-host-opponent3` 看见并进入两次战斗，但 1 对 3 时自动驾驶撤退，40 决策后仍未形成可卖战利品；`20261126-live-host-opponent4` 的 1 敌夹具没有战斗事件。这些是决策层缺口，不是 Native 拾取/出售链缺口（后者由 `BattleLootSale` 17/17 证明）。
 
 
+契约 7.732 修正：EYC Renown 停滞的真因不是世界死锁，而是确定性 provider 的"leave 优先"启发式在遭遇菜单每次选逃跑；原生遭遇菜单提供 `str_order_attack`（Send Troops/BattleSimulation）时该选项才是推进 Renown 的正当路径。修正后真机完成原生战斗全链并达成 renown 50/50。招募动作 legalTuples 中 `confirmPartySizeWarning` 可能编码为 `[0]`（单元素数组），provider 必须展开为标量 0 才能通过 Host schema。四目标闭环剩余 partySize 招募未达，属招募子流程选择逻辑，不虚报通过。
+
 契约 7.731 修正与边界：move 的 SettlementId 与 pursue 的 PartyId 实际在 decision request 的 observation.state.nearbySettlements / nearbyParties 中，无需跨步骤记忆；此前"目标不在 request"的结论已作废。确定性 provider 从当前 Native 观察推导目标后，真机首次完成原生城镇到达验证（safeSettlementRefresh completed native-settlement-arrival-verified）并处理途中劫匪中断。四目标闭环仍未达成的剩余原因是真实世界死锁：renown 停在 47-49/50、可见劫匪消耗完后反复 no-safe-action，partySize 容量锁需家族等级提升而家族等级需 renown 50。这是世界状态与 3B 小模型能力边界，确定性 provider 已完整驱动 Host→Native 链，不虚报闭环通过。
 
 契约 7.730 闭环边界事实：确定性 provider 只接收当前决策请求的 observation/allowedActions/allowedControls，不含跨步骤原生回执。move 动作的 SettlementId 必须来自上一步 mapSettlementTargets 的原生 receipt（含 safe visible target ID），该数据只在完整 Host result 的 trace、不在 provider decision request 里。无状态规则 provider 因此无法选择 move 目标，会反复提交空参数动作直到预算耗尽。要完成四目标闭环，provider 需要跨步骤记忆（读取 previousActionReceipt 或 Host 在 decision request 暴露候选 ID），这不是简单启发式能覆盖；当前记为阶段①的确定性自跑边界，不虚报闭环通过。

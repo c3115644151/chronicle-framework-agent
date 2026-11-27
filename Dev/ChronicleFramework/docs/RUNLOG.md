@@ -1,5 +1,8 @@
 # Chronicle Framework 运行日志
 
+## 2026-11-27 确定性 provider 达成 Renown 与原生战斗（契约 7.732）
+触发：阶段①自跑闭环。基于 det-trace 诊断发现遭遇菜单有 str_order_attack+leave 两选项，stub 的 leave 优先导致每次逃跑、renown 永远停滞。修复：str_order_attack 优先、legalTuples 标量展开、recruit 优先级。HTTP 验证遭遇菜单选 str_order_attack、recruit 的 confirmPartySizeWarning=0。真机 `TestResults/20261127-205906-deterministic-eyc`：160 决策，str_order_attack×2→battleSkip×2→battleFinish→partyTakeAll→inventoryTakeAll 全链，safeSettlementRefreshBanditInterruption completed battle-and-captivity-resolved-and-verified，**snapshot gold✓ renown 50/50 ✓ companions✓ partySize 21/25**。后续 run `20261127-213726` 招募子流程 recruitOptions 反复未进 recruit，failureCode=recruitment-decision-budget-exhausted，partySize 仍 22/25。结论：确定性自跑已驱动真实 Host 达成 3/4 目标与原生战斗，四目标完整闭环仅剩 partySize 招募。Docs 126/126/183/74/23。
+
 ## 2026-11-27 确定性 provider 驱动真实地图移动与遭遇（契约 7.731）
 触发：阶段①自跑闭环。基于 det-trace（162 个真实 decision payload）核实 move/pursue 目标来源在 observation.state.nearbySettlements/nearbyParties。修复 stub 三处：move 选安全 town 作 SettlementId、pursue 选最弱敌对 bandit 作 PartyId、observeAgain.waitSeconds 从 controlArguments 动态读边界。HTTP 验证：move→town_ES4、pursue→looters_4179（较弱）、wait 边界 10→waitSeconds 10。真机 `TestResults/20261127-200642-deterministic-eyc`：120 决策、340 原生动作，首次 `safeSettlementRefresh: completed native-settlement-arrival-verified`，途中劫匪触发战斗中断子流程；最终 failureCode=provider-control-arguments-invalid（修复前旧 run）/ establish-clan-objective-routes-currently-unavailable，snapshot gold 1918/2000 partySize 22/25 renown 47/50 companions✓。结论：确定性 provider 已完整驱动 Host→Native 移动/遭遇/城镇到达，剩余为真实世界死锁。Docs 126/126/183/74/23。
 

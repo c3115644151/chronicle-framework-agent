@@ -487,6 +487,12 @@ if ($deterministicProviderBody -notmatch 'nearbySettlements' -or
     $deterministicProviderBody -notmatch 'SettlementId' -or
     $deterministicProviderBody -notmatch 'PartyId') {
     throw 'Contract 7.731 requires the deterministic provider to derive move SettlementId from nearbySettlements, pursue PartyId from nearbyParties, and read observeAgain wait bounds from controlArguments, so it can drive real Native map movement and battle pursuit without empty-argument loops.'
+
+if ($deterministicProviderBody -notmatch 'str_order_attack' -or
+    $deterministicProviderBody -notmatch '@\(\$pv\)\.Count -eq 1' -or
+    $deterministicProviderBody -notmatch "'recruit','recruitOptions'") {
+    throw 'Contract 7.732 requires the deterministic provider to prefer str_order_attack over leave in encounter menus, coil legalTuples scalar values, and prioritize recruit, so it can advance EYC Renown through Native BattleSimulation and recruitment.'
+}
 }
 }
 }

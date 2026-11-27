@@ -1,6 +1,9 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.731
+Contract version: 7.732
+
+## Contract 7.732 — 确定性 provider 达成 EYC Renown 与原生战斗
+之前把 renown 停滞 47-49/50 归为"世界死锁"是误判：真因是 stub 的"leave 优先"启发式在遭遇菜单里每次都选逃跑。修正为遭遇菜单优先 `str_order_attack`（原版 Send Troops/BattleSimulation），并让 legalTuples 的单元素数组（confirmPartySizeWarning=[0]）展开为标量。真机 `TestResults/20261127-205906-deterministic-eyc`：str_order_attack→battleSkip→battleFinish→partyTakeAll→inventoryTakeAll 全链走通，`safeSettlementRefreshBanditInterruption: completed battle-and-captivity-resolved-and-verified`，**renown 达成 50/50**，gold✓ companions✓。四目标剩 partySize 21/25：招募子流程反复 recruitOptions 未进 recruit（团队容量/招募 offer 的另一层逻辑），记为下一步边界，不虚报完整闭环。
 
 ## Contract 7.731 — 确定性 provider 驱动真实地图移动与遭遇
 真机驱动发现 move 的 SettlementId 与 pursue 的 PartyId 就藏在 decision request 的 observation.state 里（nearbySettlements / nearbyParties），上一轮"目标不在 request 中"的判断有误。stub 现在当 catalog 未收窄参数时从附近实体推导目标：move 选安全 town（非敌对/非围城，town 优先），pursue 选最弱敌对 bandit（strength 最小）；observeAgain 的 waitSeconds 从 controlArguments 动态读边界（某阶段固定为 10）。真机 `TestResults/20261127-200642-deterministic-eyc`：首次出现 `safeSettlementRefresh: completed native-settlement-arrival-verified`，确定性 provider 驱动真实 Host 完成城镇到达验证，途中遇劫匪触发战斗中断子流程并处理。剩余为真实世界死锁：renown no-safe-action、partySize 容量锁需 renown 50；四目标完整闭环仍未达成，这是世界状态边界而非工具缺陷。

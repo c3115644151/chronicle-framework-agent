@@ -24,6 +24,10 @@ function Choose-ArgValue($action, [string]$name) {
     if ($values.Count -eq 0) { return $null }
     # Menu/choice values: prefer a safe exit/leave/back/done option over enter/start.
     if ($name -match 'OptionId|Choice|choice') {
+        # Encounter menu: str_order_attack is the original Send Troops/BattleSimulation
+        # route and the only way to advance the EYC Renown objective; prefer it over leave.
+        $attack = @($values | Where-Object { [string]$_ -cmatch 'str_order_attack' })
+        if ($attack.Count -gt 0) { return $attack[0] }
         $safe = @($values | Where-Object { [string]$_ -match '(?i)leave|exit|back|done|finish|decline|reject' })
         if ($safe.Count -gt 0) { return $safe[0] }
     }
@@ -69,7 +73,12 @@ function Build-Arguments($action, $obs = $null) {
     $tuples = Get-Arg $action 'legalTuples'
     if ($null -ne $tuples -and @($tuples).Count -gt 0) {
         $t = @($tuples)[0]
-        foreach ($prop in $t.PSObject.Properties) { $argsObj[$prop.Name] = $prop.Value }
+        foreach ($prop in $t.PSObject.Properties) {
+            $pv = $prop.Value
+            # Host schemas expect scalars; legalTuples may encode confirmPartySizeWarning as [0].
+            if ($null -ne $pv -and @($pv).Count -eq 1 -and $pv -is [array]) { $pv = @($pv)[0] }
+            $argsObj[$prop.Name] = $pv
+        }
     }
     return $argsObj
 }
@@ -147,7 +156,7 @@ function Pick-Decision($decisionInput) {
         return @{ action = $name; arguments = Build-Arguments $a $obs; rationale = 'deterministic: sole current action' }
     }
     # Multiple actions: prefer a state-advancing Native action by fixed priority.
-    $priority = @('recruitOptions','recruit','tradeOptions','trade','tradeConfirm','partyTakeAll','inventoryTakeAll','partyScreenDone','inventoryDone','mapSettlementTargets','menuSelect','move','mapPartyTargets','pursue','dialogueSelect','dialogueContinue','battleSkip','battleFinish','incidentSelect')
+    $priority = @('recruit','recruitOptions','tradeOptions','trade','tradeConfirm','partyTakeAll','inventoryTakeAll','partyScreenDone','inventoryDone','mapSettlementTargets','menuSelect','move','mapPartyTargets','pursue','dialogueSelect','dialogueContinue','battleSkip','battleFinish','incidentSelect','prisonerRecruitmentOptions','partyLootTransferOne')
     foreach ($want in $priority) {
         $a = @($actions | Where-Object { (Get-Arg $_ 'action') -ceq $want } | Select-Object -First 1)
         if ($a.Count -eq 1) { return @{ action = $want; arguments = Build-Arguments $a[0] $obs; rationale = 'deterministic: priority action' } }
