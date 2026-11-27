@@ -505,8 +505,14 @@ if ($agentHostCampaignLoopSource -notmatch 'IsOpenNativeCampaignMenu' -or
     $agentHostCampaignTransportSource -notmatch 'native-menu-select-arguments-invalid' -or
     $agentHostCampaignTransportSource -notmatch 'RunCampaignLoopActionContractSelfTests' -or
     $deterministicProviderBody -notmatch 'argNames0 -cnotcontains') {
-    throw 'Contract 7.733 requires the campaign loop to reflect an open Native settlement menu: list only its available leave menuSelect, refuse map movement until it closes, and report an actionable open-menu rejection code instead of repeating a rejected Native move.'
 }
+if ($agentHostGoldSaleLoopSource -notmatch 'IsQuestEndedByVerifiedCompletion' -or
+    $agentHostGoldSaleLoopSource -notmatch 'BuildQuestCompletedAfterSale' -or
+    $agentHostGoldSaleLoopSource -notmatch 'gold-sale-accepts-a-sale-that-completes-the-original-quest' -or
+    $agentHostGoldSaleLoopSource -notmatch 'storyModeEstablishClanStatus=completed after the verified sale') {
+    throw 'Contract 7.734 requires the Gold sale subflow to accept a sale that finishes the original Establish Your Clan quest: the quest legitimately stops being ongoing, so completion must be proven by Native lifecycle status completed rather than reported as an invalid map state.'
+}
+
 }
 }
 }

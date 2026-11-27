@@ -569,6 +569,19 @@ internal static class AgentHostEstablishClanGoldSaleLoop
         hostileEncounter["context"]!["encounteredPartyId"] = "bandit_party";
         if (BuildActionCatalog(hostileEncounter, null, null, null).Count != 0)
             throw new AgentHostException("gold-sale-self-test-hostile-encounter-not-blocked", "An active non-settlement encounter must remain outside the bounded Gold trade subflow.");
+        var questCompletedAfterSale = MapState("village", "village-a", []);
+        questCompletedAfterSale["quests"] = new JsonArray();
+        questCompletedAfterSale["storyModeEstablishClanStatus"] = new JsonObject { ["status"] = "completed", ["questId"] = QuestId };
+        var questVanishedWithoutCompletion = (JsonObject)questCompletedAfterSale.DeepClone();
+        questVanishedWithoutCompletion["storyModeEstablishClanStatus"] = new JsonObject { ["status"] = "active", ["questId"] = QuestId };
+        var questStillOngoing = (JsonObject)questCompletedAfterSale.DeepClone();
+        questStillOngoing["quests"] = new JsonArray(new JsonObject { ["id"] = QuestId });
+        questStillOngoing["storyModeEstablishClanStatus"] = new JsonObject { ["status"] = "active", ["questId"] = QuestId };
+        if (!IsQuestEndedByVerifiedCompletion(questCompletedAfterSale) ||
+            IsQuestEndedByVerifiedCompletion(questVanishedWithoutCompletion) ||
+            IsQuestEndedByVerifiedCompletion(questStillOngoing) ||
+            !IsFreeCampaignMap(questCompletedAfterSale))
+            throw new AgentHostException("gold-sale-self-test-quest-completion-after-sale-misread", "A sale that finishes the last Journal objective legitimately ends the original quest; only Native lifecycle status completed may justify it, and a still-ongoing or merely vanished quest must not be reported as a completed sale.");
 
         return [
             new { scenario = "gold-sale-orders-stable-goal-and-receipt-context-before-changing-map-state-for-prefix-cache", legacyCommonPrefixTokens = legacyGoldPrefixTokens, cacheOrderedCommonPrefixTokens = cacheOrderedGoldPrefixTokens, cacheablePrefixTokenGain = goldCacheablePrefixGain, passed = true },
@@ -578,7 +591,8 @@ internal static class AgentHostEstablishClanGoldSaleLoop
             new { scenario = "gold-sale-native-move-start-transition-uses-one-bounded-observation", passed = true },
             new { scenario = "gold-sale-rejects-stale-offers-unsafe-targets-and-disabled-native-options", passed = true },
             new { scenario = "gold-sale-allows-native-town-menu-and-training-field-exit-but-rejects-hostile-party-encounter", passed = true },
-            new { scenario = "gold-sale-returns-through-current-native-town-backstreet-leave-before-trading", passed = true }
+            new { scenario = "gold-sale-returns-through-current-native-town-backstreet-leave-before-trading", passed = true },
+            new { scenario = "gold-sale-accepts-a-sale-that-completes-the-original-quest", passed = true }
         ];
     }
 
@@ -770,8 +784,13 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                         using (var fresh = await stateClient.ReadStateAsync(elapsed.Token)) currentNative = ParseObject(fresh.RootElement);
                         ledger.Trace.Add(new JsonObject { ["stage"] = "native-trade-confirmed-state", ["nativeState"] = AgentHostHarnessProgressTrace.BuildNativeStateSummary(currentNative) });
                         var finalState = currentNative["state"] as JsonObject ?? new JsonObject();
-                        if (!IsFreeCampaignMap(finalState) || !HasActiveQuest(finalState))
+                        var completedByThisSale = IsQuestEndedByVerifiedCompletion(finalState);
+                        if (!IsFreeCampaignMap(finalState) || (!HasActiveQuest(finalState) && !completedByThisSale))
                             throw new AgentHostException("gold-sale-final-map-or-quest-invalid", "After the confirmed sale, Native did not return to a free Map with the original StoryMode quest still active.");
+                        if (completedByThisSale)
+                            return BuildQuestCompletedAfterSale(runId, provider, initialNative, currentNative, objectiveSnapshotBefore,
+                                liveMetricDifferencesBefore, saleReceipt, previousReceipt, ledger, actionCount, saleActionCount,
+                                campaignDayBefore, timeControlModeBefore, initialCaptivityRecovery);
                         using var afterDetails = await actionClient.ReadQuestDetailsAsync(QuestId, elapsed.Token);
                         (objectiveSnapshotAfter, liveMetricDifferencesAfter) = ReadGoldJournal(afterDetails.RootElement);
                         var beforeGold = objectiveSnapshotBefore["gold"] as JsonObject;
@@ -1052,8 +1071,13 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                 if (saleReceipt is not null)
                 {
                     var finalState = currentNative["state"] as JsonObject ?? new JsonObject();
-                    if (!IsFreeCampaignMap(finalState) || !HasActiveQuest(finalState))
+                    var completedByThisSale = IsQuestEndedByVerifiedCompletion(finalState);
+                    if (!IsFreeCampaignMap(finalState) || (!HasActiveQuest(finalState) && !completedByThisSale))
                         throw new AgentHostException("gold-sale-final-map-or-quest-invalid", "After the sale, Native did not return to a free Map with the original StoryMode quest still active.");
+                    if (completedByThisSale)
+                        return BuildQuestCompletedAfterSale(runId, provider, initialNative, currentNative, objectiveSnapshotBefore,
+                            liveMetricDifferencesBefore, saleReceipt, previousReceipt, ledger, actionCount, saleActionCount,
+                            campaignDayBefore, timeControlModeBefore, initialCaptivityRecovery);
                     using var afterDetails = await actionClient.ReadQuestDetailsAsync(QuestId, elapsed.Token);
                     (objectiveSnapshotAfter, liveMetricDifferencesAfter) = ReadGoldJournal(afterDetails.RootElement);
                     var beforeGold = objectiveSnapshotBefore["gold"] as JsonObject;
@@ -1740,6 +1764,47 @@ internal static class AgentHostEstablishClanGoldSaleLoop
 
     private static bool HasActiveQuest(JsonObject state) =>
         (state["quests"] as JsonArray)?.OfType<JsonObject>().Any(quest => ReadString(quest, "id") == QuestId) == true;
+
+    private static string? ReadOriginalQuestLifecycleStatus(JsonObject state) =>
+        ReadString(state["storyModeEstablishClanStatus"] as JsonObject, "status");
+
+    // The final Journal objective can finish the original quest inside the same Native transaction. Native then
+    // stops publishing it as ongoing, so a sale that completes the quest must not be reported as an invalid state.
+    private static bool IsQuestEndedByVerifiedCompletion(JsonObject state) =>
+        !HasActiveQuest(state) && string.Equals(ReadOriginalQuestLifecycleStatus(state), "completed", StringComparison.Ordinal);
+
+    private static JsonObject BuildQuestCompletedAfterSale(
+        string runId,
+        IAgentHostDecisionProvider provider,
+        JsonObject initialNative,
+        JsonObject finalNative,
+        JsonObject objectiveSnapshotBefore,
+        JsonArray liveMetricDifferencesBefore,
+        JsonObject saleReceipt,
+        JsonObject? finalReceipt,
+        DecisionRunLedger ledger,
+        int actionsExecuted,
+        int saleActionsExecuted,
+        double campaignDayBefore,
+        string? timeControlModeBefore,
+        JsonObject? captivityRecovery)
+    {
+        var receipt = BuildSuccess(runId, provider, initialNative, finalNative, objectiveSnapshotBefore, objectiveSnapshotBefore,
+            liveMetricDifferencesBefore, liveMetricDifferencesBefore, saleReceipt, finalReceipt, ledger, actionsExecuted,
+            saleActionsExecuted, campaignDayBefore, timeControlModeBefore, captivityRecovery);
+        receipt["originalQuestStillActive"] = false;
+        receipt["originalQuestEndedByThisSale"] = true;
+        receipt["completionEvidence"] = "Native lifecycle status storyModeEstablishClanStatus=completed after the verified sale; the journal is intentionally read only before the transaction because the original quest is no longer ongoing";
+        receipt["finalGoldJournal"] = objectiveSnapshotBefore["gold"]?.DeepClone();
+        receipt["goldJournalDelta"] = null;
+        receipt["termination"] = new JsonObject
+        {
+            ["reason"] = "one-native-sale-verified-and-original-quest-ended-completed",
+            ["completedByProvider"] = false,
+            ["goalVerified"] = true
+        };
+        return receipt;
+    }
 
     private static bool IsFreeCampaignMap(JsonObject state)
     {
