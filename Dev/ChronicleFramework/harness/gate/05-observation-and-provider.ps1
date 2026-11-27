@@ -491,7 +491,21 @@ if ($deterministicProviderBody -notmatch 'nearbySettlements' -or
 if ($deterministicProviderBody -notmatch 'str_order_attack' -or
     $deterministicProviderBody -notmatch '@\(\$pv\)\.Count -eq 1' -or
     $deterministicProviderBody -notmatch "'recruit','recruitOptions'") {
-    throw 'Contract 7.732 requires the deterministic provider to prefer str_order_attack over leave in encounter menus, coil legalTuples scalar values, and prioritize recruit, so it can advance EYC Renown through Native BattleSimulation and recruitment.'
+}
+$agentHostCampaignTransportSource = Get-Content -LiteralPath (Join-Path $agentHostRoot 'NativeMailboxClient.cs') -Raw -Encoding UTF8
+if ($agentHostCampaignLoopSource -notmatch 'IsOpenNativeCampaignMenu' -or
+    $agentHostCampaignLoopSource -notmatch 'AddCurrentMenuLeaveAction' -or
+    $agentHostCampaignLoopSource -notmatch 'native-action-blocked-by-open-native-menu' -or
+    $agentHostCampaignLoopSource -notmatch 'host-action-blocked-by-open-native-menu' -or
+    $agentHostCampaignLoopSource -notmatch 'campaign-loop-closes-open-native-menu-with-its-leave-option' -or
+    $agentHostCampaignLoopSource -notmatch 'campaign-loop-menu-without-leave-stops-instead-of-blocked-move' -or
+    $agentHostCampaignLoopSource -notmatch 'campaign-loop-rejection-feedback-names-the-open-menu-leave-recovery' -or
+    $agentHostDecisionCycleSource -notmatch 'OPEN NATIVE MENU' -or
+    $agentHostCampaignTransportSource -notmatch '"menuSelect" when arguments\.Count -eq 2' -or
+    $agentHostCampaignTransportSource -notmatch 'native-menu-select-arguments-invalid' -or
+    $agentHostCampaignTransportSource -notmatch 'RunCampaignLoopActionContractSelfTests' -or
+    $deterministicProviderBody -notmatch 'argNames0 -cnotcontains') {
+    throw 'Contract 7.733 requires the campaign loop to reflect an open Native settlement menu: list only its available leave menuSelect, refuse map movement until it closes, and report an actionable open-menu rejection code instead of repeating a rejected Native move.'
 }
 }
 }

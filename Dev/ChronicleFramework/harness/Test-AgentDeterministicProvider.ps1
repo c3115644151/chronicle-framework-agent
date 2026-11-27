@@ -74,6 +74,9 @@ function Build-Arguments($action, $obs = $null) {
     if ($null -ne $tuples -and @($tuples).Count -gt 0) {
         $t = @($tuples)[0]
         foreach ($prop in $t.PSObject.Properties) {
+            # legalTuples describe one Native offer; fields such as cost or ownerName are display
+            # data, not action arguments. Sending them would be rejected as an unknown argument.
+            if ($argNames0.Count -gt 0 -and ($argNames0 -cnotcontains [string]$prop.Name)) { continue }
             $pv = $prop.Value
             # Host schemas expect scalars; legalTuples may encode confirmPartySizeWarning as [0].
             if ($null -ne $pv -and @($pv).Count -eq 1 -and $pv -is [array]) { $pv = @($pv)[0] }
@@ -184,8 +187,11 @@ if ($SelfTest) {
     T 'priority-over-first' '{"allowedActions":[{"action":"move","arguments":[],"argumentValues":{}},{"action":"recruitOptions","arguments":[],"argumentValues":{}}],"allowedControls":[],"observation":{}}' {
         param($d) $d.action -ceq 'recruitOptions'
     }
-    T 'legal-tuple-complete' '{"allowedActions":[{"action":"recruit","arguments":["ownerId","troopId","slot","confirmPartySizeWarning"],"argumentValues":{"ownerId":["CharacterObject_1789","CharacterObject_1790"],"troopId":["imperial_recruit"],"slot":[0,1],"confirmPartySizeWarning":[false]},"legalTuples":[{"ownerId":"CharacterObject_1790","troopId":"imperial_recruit","slot":0,"confirmPartySizeWarning":false}]}],"allowedControls":[],"observation":{}}' {
-        param($d) $d.action -ceq 'recruit' -and $d.arguments.ownerId -ceq 'CharacterObject_1790' -and [int]$d.arguments.slot -eq 0
+    T 'legal-tuple-complete' '{"allowedActions":[{"action":"recruit","arguments":["ownerId","troopId","slot","confirmPartySizeWarning"],"argumentValues":{"ownerId":["CharacterObject_1789","CharacterObject_1790"],"troopId":["imperial_recruit"],"slot":[0,1],"confirmPartySizeWarning":[false]},"legalTuples":[{"ownerId":"CharacterObject_1790","troopId":"imperial_recruit","slot":0,"cost":20,"ownerName":"x","confirmPartySizeWarning":false}]}],"allowedControls":[],"observation":{}}' {
+        param($d)
+        $names = @($d.arguments.Keys)
+        $extra = @($names | Where-Object { @('ownerId','troopId','slot','confirmPartySizeWarning') -cnotcontains $_ })
+        $d.action -ceq 'recruit' -and $d.arguments.ownerId -ceq 'CharacterObject_1790' -and [int]$d.arguments.slot -eq 0 -and $extra.Count -eq 0
     }
     'DETERMINISTIC-PROVIDER-SELF-TEST: ALL PASS'
     exit 0

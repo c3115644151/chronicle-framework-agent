@@ -604,6 +604,14 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
 
     internal Task<JsonDocument> ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken)
     {
+        ValidateCampaignAction(action, arguments);
+        return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
+    }
+
+    internal static void ValidateCampaignAction(string action, JsonObject arguments)
+    {
+        static bool HasText(JsonObject value, string key) => value[key] is JsonValue node && node.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text);
+
         switch (action)
         {
             case "mapSettlementTargets" when arguments.Count == 0:
@@ -620,17 +628,48 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
                               settlementIdValue.TryGetValue<string>(out var settlementId) &&
                               !string.IsNullOrWhiteSpace(settlementId):
                 break;
+            // The bounded Campaign loop must be able to leave the Native settlement menu it walked into;
+            // without this case the Host could list a menuSelect it could never deliver.
+            case "menuSelect" when arguments.Count == 2 && HasText(arguments, "menuId") && HasText(arguments, "optionId"):
+                break;
             case "mapSettlementTargets":
                 throw new AgentHostException("native-map-target-arguments-invalid", "mapSettlementTargets does not accept arguments.");
             case "incidentSelect":
                 throw new AgentHostException("native-map-incident-arguments-invalid", "incidentSelect requires only a non-negative optionIndex from the current Native mapIncident observation.");
             case "move":
                 throw new AgentHostException("native-move-arguments-invalid", "move requires only a non-empty observed settlementId.");
+            case "menuSelect":
+                throw new AgentHostException("native-menu-select-arguments-invalid", "menuSelect requires only the exact observed menuId and optionId of the currently open Native menu.");
             default:
                 throw new AgentHostException("native-action-not-in-campaign-loop-scope", "The Agent Host action is outside the current Campaign loop scope.");
         }
+    }
 
-        return SendAsync(action, arguments, acceptedResponseExpected: false, cancellationToken);
+    internal static IReadOnlyList<object> RunCampaignLoopActionContractSelfTests()
+    {
+        ValidateCampaignAction("mapSettlementTargets", new JsonObject());
+        ValidateCampaignAction("move", JsonNode.Parse("{\"settlementId\":\"town_ES6\"}")!.AsObject());
+        ValidateCampaignAction("menuSelect", JsonNode.Parse("{\"menuId\":\"village\",\"optionId\":\"leave\"}")!.AsObject());
+        foreach (var item in new (string Action, string Json)[]
+        {
+            ("move", "{}"),
+            ("move", "{\"settlementId\":\"\"}"),
+            ("move", "{\"settlementId\":\"town_ES6\",\"extra\":true}"),
+            ("menuSelect", "{\"menuId\":\"village\"}"),
+            ("menuSelect", "{\"menuId\":\"village\",\"optionId\":\"\"}"),
+            ("menuSelect", "{\"menuId\":\"village\",\"optionId\":\"leave\",\"extra\":true}"),
+            ("trade", "{}")
+        })
+        {
+            try
+            {
+                ValidateCampaignAction(item.Action, JsonNode.Parse(item.Json)!.AsObject());
+                throw new AgentHostException("native-campaign-invalid-action-accepted", "The Campaign loop transport accepted a malformed move or menuSelect argument set, or an action outside its bounded scope.");
+            }
+            catch (AgentHostException exception) when (
+                exception.Code is "native-action-not-in-campaign-loop-scope" or "native-move-arguments-invalid" or "native-menu-select-arguments-invalid") { }
+        }
+        return [new { scenario = "native-campaign-mailbox-delivers-the-open-menu-leave-option", validCases = 3, invalidCases = 7, passed = true }];
     }
 
     Task<JsonDocument> IAgentHostCampaignNativeClient.ExecuteCampaignActionAsync(string action, JsonObject arguments, CancellationToken cancellationToken) =>

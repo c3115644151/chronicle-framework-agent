@@ -158,10 +158,15 @@ internal static class AgentHostDecisionCycle
         JsonObject request,
         CancellationToken cancellationToken)
     {
-        var prompt = request["goalScopeClassificationRequired"] is JsonValue classification &&
-                     classification.TryGetValue<bool>(out var required) && required
+        var classificationRequired = request["goalScopeClassificationRequired"] is JsonValue classification &&
+                                 classification.TryGetValue<bool>(out var required) && required;
+        var prompt = classificationRequired
             ? BuildCampaignGoalClassificationPrompt(request)
             : CampaignSystemPrompt + " " + QuestTerminalOutcomeRule;
+        if (!classificationRequired &&
+            request["observation"]?["state"]?["context"] is JsonObject campaignContext &&
+            ReadString(campaignContext, "menuId") is { Length: > 0 } openMenuId)
+            prompt += $" OPEN NATIVE MENU: The original '{openMenuId}' menu is still open at the player's current location, so Native settlement movement is rejected until it closes. Choose only the listed menuSelect leave option, then re-observe before any map movement.";
         if (request["allowedActions"] is JsonArray actions && actions.OfType<JsonObject>()
             .Any(action => ReadString(action, "action") is "dialogueSelect" or "dialogueContinue"))
             prompt += " MAP DIALOGUE INTERRUPTION: A current Native non-encounter MapState conversation interrupted travel. Choose only the listed current dialogueSelect option, or dialogueContinue when no clickable choice is available. Read the exact visible text/options; do not accept an unrelated quest, start a Mission or enter combat. After the Native response, reread state and resume settlement travel only if the selected move is still active.";

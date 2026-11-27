@@ -355,16 +355,52 @@ internal static class AgentHostCampaignLoop
         {
             ["context"] = new JsonObject { ["gameState"] = "MapState", ["menuId"] = "town", ["timeControlMode"] = "Stop", ["encounterActive"] = false },
             ["location"] = new JsonObject { ["currentSettlementId"] = "safe", ["targetSettlementId"] = null },
-            ["party"] = new JsonObject { ["isMoving"] = false, ["gold"] = 900, ["foodInventory"] = 0 }
+            ["party"] = new JsonObject { ["isMoving"] = false, ["gold"] = 900, ["foodInventory"] = 0 },
+            ["availableMenuOptions"] = new JsonArray(
+                new JsonObject { ["id"] = "town_trade", ["text"] = "购买给养", ["available"] = true, ["enabled"] = true, ["isLeave"] = false },
+                new JsonObject { ["id"] = "town_leave_sail", ["text"] = "扬帆起航", ["available"] = false, ["enabled"] = true, ["isLeave"] = true },
+                new JsonObject { ["id"] = "town_leave", ["text"] = "离开", ["available"] = true, ["enabled"] = true, ["isLeave"] = true })
         };
         var arrivedTownActions = BuildActionCatalog(safeTargets, moving: false, goalVerified: true, state: arrivedTownMenu);
         var arrivedTownControls = BuildControlCatalog(moving: false, goalVerified: true, state: arrivedTownMenu);
         var townMenuQueryActions = BuildActionCatalog(safeTargets, moving: false, goalVerified: false, state: arrivedTownMenu);
+        var townMenuMenuIds = townMenuQueryActions.Count == 1 ? townMenuQueryActions[0]?["argumentValues"]?["MenuId"] as JsonArray : null;
+        var townMenuOptionIds = townMenuQueryActions.Count == 1 ? townMenuQueryActions[0]?["argumentValues"]?["OptionId"] as JsonArray : null;
+        var openMenuMoveResolved = TryResolveCampaignAction(
+            new JsonObject { ["action"] = "move", ["arguments"] = new JsonObject { ["SettlementId"] = "safe" } },
+            safeTargets, out _, out _, out _, out var openMenuMoveRejection, arrivedTownMenu);
         if (arrivedTownActions.Count != 0 || arrivedTownControls.Count != 1 ||
             !string.Equals(arrivedTownControls[0]?.GetValue<string>(), "done", StringComparison.Ordinal) ||
-            townMenuQueryActions.Count != 1 || ReadString(townMenuQueryActions[0] as JsonObject, "action") != "move")
-            throw new AgentHostException("campaign-loop-self-test-town-menu-sells-market-verbs", "Standing in a Native town menu with gold and an empty larder must not hand the model a market verb: before arrival only move is listed, after arrival only done is listed, because tradeOptions/trade/tradeConfirm live inside the objective slices rather than the campaign loop.");
+            townMenuQueryActions.Count != 1 || ReadString(townMenuQueryActions[0] as JsonObject, "action") != "menuSelect" ||
+            townMenuMenuIds?.Count != 1 || townMenuMenuIds[0]?.GetValue<string>() != "town" ||
+            townMenuOptionIds?.Count != 1 || townMenuOptionIds[0]?.GetValue<string>() != "town_leave" ||
+            openMenuMoveResolved || !openMenuMoveRejection.Contains("menu", StringComparison.OrdinalIgnoreCase) ||
+            !TryResolveCampaignAction(new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "town", ["OptionId"] = "town_leave" } },
+                safeTargets, out var menuLeaveAction, out var menuLeaveArguments, out _, out _, arrivedTownMenu) ||
+            menuLeaveAction != "menuSelect" || ReadString(menuLeaveArguments, "menuId") != "town" || ReadString(menuLeaveArguments, "optionId") != "town_leave" ||
+            TryResolveCampaignAction(new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "town", ["OptionId"] = "town_trade" } },
+                safeTargets, out _, out _, out _, out _, arrivedTownMenu) ||
+            TryResolveCampaignAction(new JsonObject { ["action"] = "menuSelect", ["arguments"] = new JsonObject { ["MenuId"] = "town_leave_sail", ["OptionId"] = "town_leave_sail" } },
+                safeTargets, out _, out _, out _, out _, arrivedTownMenu))
+            throw new AgentHostException("campaign-loop-self-test-open-town-menu-blocks-native-move", "Standing in a Native town menu must list only the currently available leave option, accept that exact menuSelect, reject unavailable leave and in-menu market options, and refuse a map move until the menu is closed.");
         results.Add(new { scenario = "campaign-loop-offers-no-market-verb-outside-objective-slices", passed = true });
+        results.Add(new { scenario = "campaign-loop-closes-open-native-menu-with-its-leave-option", passed = true });
+
+        var noLeaveTownMenu = (JsonObject)arrivedTownMenu.DeepClone();
+        (noLeaveTownMenu["availableMenuOptions"] as JsonArray)!.Clear();
+        if (BuildActionCatalog(safeTargets, moving: false, goalVerified: false, state: noLeaveTownMenu).Count != 0 ||
+            BuildControlCatalog(moving: false, goalVerified: false, state: noLeaveTownMenu).Count != 0)
+            throw new AgentHostException("campaign-loop-self-test-menu-without-leave-stops-instead-of-blocked-move", "An open Native menu with no currently available leave option must stop the bounded loop instead of repeating a Native move that the game rejects.");
+        results.Add(new { scenario = "campaign-loop-menu-without-leave-stops-instead-of-blocked-move", passed = true });
+
+        var menuBlockedFeedback = BuildNativeActionRejectionFeedback(arrivedTownMenu, "move");
+        if (ReadString(menuBlockedFeedback, "code") != "native-action-blocked-by-open-native-menu" ||
+            !(ReadString(menuBlockedFeedback, "requiredNextStep") ?? string.Empty).Contains("menuSelect", StringComparison.Ordinal) ||
+            ReadString(BuildNativeActionRejectionFeedback(advancingMapMove, "move"), "code") != "native-action-rejected" ||
+            ReadString(BuildDecisionRejectionFeedback("move is unavailable", arrivedTownMenu), "code") != "host-action-blocked-by-open-native-menu" ||
+            ReadString(BuildDecisionRejectionFeedback("move must select an ID", advancingMapMove), "code") != "host-action-validation-failed")
+            throw new AgentHostException("campaign-loop-self-test-open-menu-rejection-feedback-is-actionable", "A rejection caused by an open menu must report a stable code plus the exact leave recovery step; unrelated rejections keep the generic validation code.");
+        results.Add(new { scenario = "campaign-loop-rejection-feedback-names-the-open-menu-leave-recovery", passed = true });
 
         if (!TryResolveCampaignAction(new JsonObject { ["action"] = "move", ["arguments"] = new JsonObject { ["SettlementId"] = "safe" } }, safeTargets, out var action, out var arguments, out var selected, out _) ||
             action != "move" || arguments?["settlementId"]?.GetValue<string>() != "safe" || selected?.Id != "safe")
@@ -1038,13 +1074,7 @@ internal static class AgentHostCampaignLoop
                 if (!TryResolveCampaignAction(decision, visibleTargets, out var nativeAction, out var nativeArguments, out var selectedTarget, out var rejection,
                         before["state"] as JsonObject))
                 {
-                    feedback = new JsonObject
-                    {
-                        ["kind"] = "decision-rejected-before-native",
-                        ["code"] = "host-action-validation-failed",
-                        ["message"] = rejection,
-                        ["requiredNextStep"] = "Use the latest mapSettlementTargets receipt and select only one of its safe visible settlement IDs."
-                    };
+                    feedback = BuildDecisionRejectionFeedback(rejection, before["state"] as JsonObject);
                     ledger.Trace.Add(BuildRejectedDecisionStep(iteration, observation, previousReceipt, actionCatalog, controls, feedback, providerStartedUtc, providerDoneUtc, providerStartedTicks, decision));
                     continue;
                 }
@@ -1096,7 +1126,7 @@ internal static class AgentHostCampaignLoop
                 var arrivedAfterAction = moveTargetId != null && string.Equals(ReadStateString(currentNative, "location", "currentSettlementId"), moveTargetId, StringComparison.Ordinal);
                 var observationAfterAction = BuildObservation(currentNative, visibleTargets, moveTargetId, moveTargetName, arrivedAfterAction);
                 ledger.Trace.Add(BuildNativeActionStep(iteration, observation, priorReceiptForStep, actionCatalog, controls, decision, nativeReceipt, observationAfterAction, providerStartedUtc, providerDoneUtc, actionStartedUtc, actionDoneUtc, providerStartedTicks, actionCompleted));
-                feedback = actionCompleted ? null : new JsonObject { ["kind"] = "native-action-rejected", ["message"] = "The Native action was rejected; use the new state and current action catalog without repeating stale inputs." };
+                feedback = actionCompleted ? null : BuildNativeActionRejectionFeedback(currentNative, nativeAction);
             }
 
             if (!completedByProvider && terminationReason is null)
@@ -1162,6 +1192,15 @@ internal static class AgentHostCampaignLoop
         if (IsCampaignMapConversation(state))
             return mapDialogueActionsAvailable ? BuildMapConversationActionCatalog(state!) : catalog;
         if (moving || goalVerified) return catalog;
+        if (IsOpenNativeCampaignMenu(state))
+        {
+            // The original Campaign Map is covered by an open settlement or in-place menu.
+            // Native settlement movement is rejected in that state, so the only truthful
+            // recovery is the menu's own leave option; market and quest options stay inside
+            // the objective slices that own them.
+            AddCurrentMenuLeaveAction(catalog, state!);
+            return catalog;
+        }
         if (targets is null)
             catalog.Add(new JsonObject { ["action"] = "mapSettlementTargets", ["arguments"] = new JsonArray() });
         else if (targets.Count > 0)
@@ -1200,6 +1239,85 @@ internal static class AgentHostCampaignLoop
         if (options.Count == 0 && !string.IsNullOrWhiteSpace(ReadString(conversation, "sentenceText")))
             return [new JsonObject { ["action"] = "dialogueContinue", ["arguments"] = new JsonArray() }];
         return new JsonArray();
+    }
+
+    private static bool IsOpenNativeCampaignMenu(JsonObject? state)
+    {
+        var context = state?["context"] as JsonObject;
+        return state is not null && ReadString(context, "gameState") == "MapState" &&
+               !string.IsNullOrWhiteSpace(ReadString(context, "menuId")) &&
+               !AgentHostCampaignStateFacts.IsActiveEncounter(state) &&
+               !ReadBoolean(context, "escapeMenuOpen") && !ReadBoolean(context, "inquiryOpen") &&
+               context?["conversation"] is not JsonObject &&
+               !ReadBoolean(context?["sceneNotification"] as JsonObject, "hasActiveNotification");
+    }
+
+    private static bool TryGetCurrentMenuLeaveOption(JsonObject? state, out string? menuId, out List<string> leaveOptionIds)
+    {
+        menuId = ReadString(state?["context"] as JsonObject, "menuId");
+        leaveOptionIds = state?["availableMenuOptions"] is JsonArray options
+            ? options.OfType<JsonObject>()
+                .Where(option => ReadBoolean(option, "available") && ReadBoolean(option, "enabled") && ReadBoolean(option, "isLeave"))
+                .Select(option => ReadString(option, "id"))
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id!)
+                .Distinct(StringComparer.Ordinal)
+                .ToList()
+            : new List<string>();
+        return !string.IsNullOrWhiteSpace(menuId) && leaveOptionIds.Count > 0;
+    }
+
+    private static void AddCurrentMenuLeaveAction(JsonArray catalog, JsonObject state)
+    {
+        if (!TryGetCurrentMenuLeaveOption(state, out var menuId, out var leaveOptionIds) || string.IsNullOrWhiteSpace(menuId)) return;
+        catalog.Add(new JsonObject
+        {
+            ["action"] = "menuSelect",
+            ["arguments"] = new JsonArray("MenuId", "OptionId"),
+            ["argumentValues"] = new JsonObject
+            {
+                ["MenuId"] = new JsonArray(menuId),
+                ["OptionId"] = new JsonArray(leaveOptionIds.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray())
+            }
+        });
+    }
+
+    private static JsonObject BuildNativeActionRejectionFeedback(JsonObject? state, string? action)
+    {
+        if (TryGetCurrentMenuLeaveOption(state, out var menuId, out _))
+            return new JsonObject
+            {
+                ["kind"] = "native-action-rejected",
+                ["code"] = "native-action-blocked-by-open-native-menu",
+                ["message"] = $"The Native {action} was rejected because the original '{menuId}' menu is still open at the player's current location.",
+                ["requiredNextStep"] = "Close the open Native menu with the currently listed menuSelect leave option, then re-observe before any map movement."
+            };
+        return new JsonObject
+        {
+            ["kind"] = "native-action-rejected",
+            ["code"] = "native-action-rejected",
+            ["message"] = "The Native action was rejected; use the new state and current action catalog without repeating stale inputs.",
+            ["requiredNextStep"] = "Use only the current action catalog with the freshly observed Native state."
+        };
+    }
+
+    private static JsonObject BuildDecisionRejectionFeedback(string rejection, JsonObject? state)
+    {
+        if (IsOpenNativeCampaignMenu(state) && TryGetCurrentMenuLeaveOption(state, out _, out _))
+            return new JsonObject
+            {
+                ["kind"] = "decision-rejected-before-native",
+                ["code"] = "host-action-blocked-by-open-native-menu",
+                ["message"] = rejection,
+                ["requiredNextStep"] = "Use the currently listed menuSelect leave option to close the Native menu, then re-observe before any map movement."
+            };
+        return new JsonObject
+        {
+            ["kind"] = "decision-rejected-before-native",
+            ["code"] = "host-action-validation-failed",
+            ["message"] = rejection,
+            ["requiredNextStep"] = "Use the latest mapSettlementTargets receipt and select only one of its safe visible settlement IDs."
+        };
     }
 
     private static JsonArray BuildControlCatalog(bool moving, bool goalVerified, JsonObject? state = null)
@@ -1391,6 +1509,27 @@ internal static class AgentHostCampaignLoop
             rejection = string.Empty;
             return true;
         }
+        if (action == "menuSelect")
+        {
+            if (!IsOpenNativeCampaignMenu(state) || decision["arguments"] is not JsonObject menuArguments)
+            {
+                rejection = "menuSelect is allowed only for the currently open Native Campaign menu.";
+                return false;
+            }
+            var decisionMenuId = ReadString(menuArguments, "MenuId") ?? ReadString(menuArguments, "menuId");
+            var menuOptionId = ReadString(menuArguments, "OptionId") ?? ReadString(menuArguments, "optionId");
+            if (menuArguments.Count != 2 || string.IsNullOrWhiteSpace(decisionMenuId) || string.IsNullOrWhiteSpace(menuOptionId) ||
+                !TryGetCurrentMenuLeaveOption(state, out var currentMenuId, out var leaveOptionIds) ||
+                !string.Equals(decisionMenuId, currentMenuId, StringComparison.Ordinal) ||
+                !leaveOptionIds.Contains(menuOptionId, StringComparer.Ordinal))
+            {
+                rejection = "menuSelect must use the exact current menu ID with one of its currently available leave options.";
+                return false;
+            }
+            arguments = new JsonObject { ["menuId"] = decisionMenuId, ["optionId"] = menuOptionId };
+            rejection = string.Empty;
+            return true;
+        }
         if (action == "mapSettlementTargets" && decision["arguments"] is JsonObject queryArguments && queryArguments.Count == 0)
         {
             arguments = new JsonObject();
@@ -1400,6 +1539,11 @@ internal static class AgentHostCampaignLoop
         if (action != "move" || decision["arguments"] is not JsonObject decisionArguments || decisionArguments.Count != 1)
         {
             rejection = "The selected action is not in the current Native map catalog.";
+            return false;
+        }
+        if (IsOpenNativeCampaignMenu(state))
+        {
+            rejection = "move is unavailable while a Native Campaign menu is open; close it with the listed menuSelect leave option first.";
             return false;
         }
         var targetId = ReadString(decisionArguments, "SettlementId");
