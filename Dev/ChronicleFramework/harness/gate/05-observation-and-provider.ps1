@@ -510,8 +510,14 @@ if ($agentHostGoldSaleLoopSource -notmatch 'IsQuestEndedByVerifiedCompletion' -o
     $agentHostGoldSaleLoopSource -notmatch 'BuildQuestCompletedAfterSale' -or
     $agentHostGoldSaleLoopSource -notmatch 'gold-sale-accepts-a-sale-that-completes-the-original-quest' -or
     $agentHostGoldSaleLoopSource -notmatch 'storyModeEstablishClanStatus=completed after the verified sale') {
-    throw 'Contract 7.734 requires the Gold sale subflow to accept a sale that finishes the original Establish Your Clan quest: the quest legitimately stops being ongoing, so completion must be proven by Native lifecycle status completed rather than reported as an invalid map state.'
 }
+if ($agentHostLiveModelLoopSource -notmatch 'completionEvidenceProvesQuestEnd' -or
+    $agentHostLiveModelLoopSource -notmatch 'nativeCompletionEvidence' -or
+    $agentHostLiveModelLoopSource -notmatch 'elseif \(\$EstablishYourClanAutonomyLoop\) \{ \[int\]::MaxValue \}' -or
+    $agentHostLiveModelLoopSource -notmatch 'A Native-verified quest completion is the EYC stop condition') {
+    throw 'Contract 7.735 requires the EYC autonomy acceptance to judge the Native completion evidence (lifecycle completed or all four objectives met) instead of the single-arrival move budget and a provider done decision.'
+}
+
 
 }
 }

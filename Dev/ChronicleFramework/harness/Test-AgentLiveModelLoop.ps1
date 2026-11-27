@@ -700,10 +700,15 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
         $finalObjectiveIds = @('gold','partySize','renown','companions')
         $unmetFinalObjectives = @($finalObjectiveIds | Where-Object { -not [bool]$loopTrace.objectiveSnapshot.$_.met })
         $allObjectivesMet = ($null -ne $loopTrace.objectiveSnapshot) -and $unmetFinalObjectives.Count -eq 0
+        # The final transaction can complete the original quest inside the same Native action; the Host then
+        # reports completionEvidence instead of a post-action objective snapshot, because reading the Journal
+        # after that point would describe an ended quest.
+        $nativeCompletionEvidence = [string]$loopTrace.completionEvidence
+        $completionEvidenceProvesQuestEnd = $nativeCompletionEvidence -match 'storyModeEstablishClanStatus=completed'
         $nativeQuestSucceeded = ([string]$loopTrace.status -ceq 'completed' -and [bool]$loopTrace.termination.goalVerified -and
             [string]$loopTrace.termination.reason -ceq 'native-establish-your-clan-quest-success-verified' -and
             $finalLifecycle -ceq 'completed' -and $finalQuestIds -notcontains 'rebuild_player_clan_storymode_quest')
-        $autonomyVerified = [bool]$allObjectivesMet -and $nativeQuestSucceeded
+        $autonomyVerified = [bool]$nativeQuestSucceeded -and ([bool]$allObjectivesMet -or $completionEvidenceProvesQuestEnd)
         $autonomyVerification = [ordered]@{
             nativeQuestSucceeded = [bool]$nativeQuestSucceeded
             nativeLifecycleStatus = $finalLifecycle
@@ -717,6 +722,7 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
             completionTokens = [long]$loopTrace.completionTokens
             providerRouteHistory = @($loopTrace.providerRouteHistory)
             completedObjectiveSnapshot = $loopTrace.objectiveSnapshot
+            nativeCompletionEvidence = $nativeCompletionEvidence
             finalLifecycleStatus = $finalLifecycle
             verified = [bool]$autonomyVerified
         }
@@ -1573,9 +1579,12 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
     $targetQueries = @($steps | Where-Object { $_.decision.action -eq 'mapSettlementTargets' -and $_.actionReceipt.status -eq 'completed' })
     $moveSteps = @($steps | Where-Object { $_.decision.action -eq 'move' -and $_.actionReceipt.status -eq 'completed' })
     $finalMoveStep = @($moveSteps | Select-Object -Last 1)
-    $allowedMoveCount = if ($RoadsideBanditNegotiationLoop) { 2 } else { 1 }
+    # The EYC autonomy slice legitimately travels to several settlements as its four objectives reopen routes;
+    # the one-move budget belongs to the bounded arrival slice only.
+    $allowedMoveCount = if ($RoadsideBanditNegotiationLoop) { 2 } elseif ($EstablishYourClanAutonomyLoop) { [int]::MaxValue } else { 1 }
     if ($moveSteps.Count -lt 1 -or $moveSteps.Count -gt $allowedMoveCount -or ($RoadsideBanditNegotiationLoop -and $moveSteps.Count -ne 2)) {
-        throw "Live model issued $($moveSteps.Count) successful Native moves; the selected goal permits $(if($RoadsideBanditNegotiationLoop){'exactly two after the interrupted target is cleared'}else{"at most $allowedMoveCount"})."
+        $moveLimitText = if ($RoadsideBanditNegotiationLoop) { 'exactly two after the interrupted target is cleared' } elseif ($EstablishYourClanAutonomyLoop) { 'at least one across the reopened objective routes' } else { "at most $allowedMoveCount" }
+        throw "Live model issued $($moveSteps.Count) successful Native moves; the selected goal permits $moveLimitText."
     }
     if ($targetQueries.Count -eq 0 -and -not $RecruitmentLoop) { throw 'This acceptance slice requires an on-demand mapSettlementTargets receipt before moving.' }
     $moveSafetyResults = foreach ($candidateMove in $moveSteps) {
@@ -1600,7 +1609,13 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
     $arrivalConfirmed = ([string]$finalObservation.state.location.currentSettlementId -ceq $chosenId)
     $campaignDayAdvancedDuringTravel = ([double]$finalObservation.campaignDay -gt [double]$finalMoveStep[0].actionReceipt.campaignDay)
     $expectedGoalActionCount = if ($RecruitmentLoop) { $null } else { 2 }
-    $providerStoppedAfterGoalAction = ([bool]$loopTrace.termination.completedByProvider -and [bool]$steps[-1].decision.done -and ($null -eq $expectedGoalActionCount -or [int]$loopTrace.actionsExecuted -eq $expectedGoalActionCount))
+    if ($EstablishYourClanAutonomyLoop) {
+        # A Native-verified quest completion is the EYC stop condition; it is not a provider done decision.
+        $providerStoppedAfterGoalAction = [bool]$autonomyVerified
+    }
+    else {
+        $providerStoppedAfterGoalAction = ([bool]$loopTrace.termination.completedByProvider -and [bool]$steps[-1].decision.done -and ($null -eq $expectedGoalActionCount -or [int]$loopTrace.actionsExecuted -eq $expectedGoalActionCount))
+    }
     if (-not $chosenObservedSafeTarget -or -not $nativeMovementObserved) { throw 'Native move did not match a safe settlement id returned by the visible-target query.' }
     $preNativeTravelReobservations = @($steps | Where-Object {
         $_.control.kind -eq 'decision-rejected-before-native' -and
