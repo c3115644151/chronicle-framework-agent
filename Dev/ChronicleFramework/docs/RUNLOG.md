@@ -1,5 +1,9 @@
 # Chronicle Framework 运行日志
 
+## 2026-11-27 确定性 provider 招募换城镇优先级尝试（未达目标，已回退）
+
+在 7.732 达成 3/4 目标后，尝试让 stub 在没有 offer 时优先 move/mapSettlementTargets 换城镇、而非反复 recruitOptions。SelfTest 通过（priority-move-over-options），但真机 `TestResults/20261127-222219-deterministic-eyc`：recruit 决策 0、move 5、partySize 仍 22/25、renown 从 50 退到 49、failureCode=recruitment-decision-budget-exhausted。判断该改动未达成目标，用 `git stash push` 回退到已验证的 8b30352（stash@{0}: revert-unverified-recruit-priority-20261127 保留副本），不堆未验证改动。结论：partySize 招募是 EYC 四目标的最后边界；反复 recruitOptions 未进 recruit 的真因仍需单独核实（可能是当前城镇容量/offer 状态的另一层 Host 逻辑），不是简单优先级可解。
+
 ## 2026-11-27 确定性 provider 达成 Renown 与原生战斗（契约 7.732）
 触发：阶段①自跑闭环。基于 det-trace 诊断发现遭遇菜单有 str_order_attack+leave 两选项，stub 的 leave 优先导致每次逃跑、renown 永远停滞。修复：str_order_attack 优先、legalTuples 标量展开、recruit 优先级。HTTP 验证遭遇菜单选 str_order_attack、recruit 的 confirmPartySizeWarning=0。真机 `TestResults/20261127-205906-deterministic-eyc`：160 决策，str_order_attack×2→battleSkip×2→battleFinish→partyTakeAll→inventoryTakeAll 全链，safeSettlementRefreshBanditInterruption completed battle-and-captivity-resolved-and-verified，**snapshot gold✓ renown 50/50 ✓ companions✓ partySize 21/25**。后续 run `20261127-213726` 招募子流程 recruitOptions 反复未进 recruit，failureCode=recruitment-decision-budget-exhausted，partySize 仍 22/25。结论：确定性自跑已驱动真实 Host 达成 3/4 目标与原生战斗，四目标完整闭环仅剩 partySize 招募。Docs 126/126/183/74/23。
 
