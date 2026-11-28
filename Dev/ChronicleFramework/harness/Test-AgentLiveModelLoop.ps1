@@ -455,7 +455,7 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
                 $townTradeMenuToOpen = if ($townTradeMenuId) { $townTradeMenuId } else { 'village' }
                 $townTradeOpen = $null
                 try { $townTradeActivated = Invoke-AgentCli 'harnessActivateSettlementMenu' @('-MenuId', $townTradeMenuToOpen); if ($townTradeActivated.status -ne 'completed') { throw ('activate failed: ' + [string]$townTradeActivated.error) }; $townTradeOpen = Invoke-AgentCli 'menuSelect' @('-MenuId', $townTradeMenuToOpen, '-OptionId', 'trade') }
-                catch {
+                catch { $townTradeActivationError = $_
                     # A loaded save can sit inside a settlement with no current menu. Re-issuing the
                     # approved Native move to the same settlement makes Native show its menu again.
                     $null = Invoke-AgentCli 'mapSettlementTargets'
@@ -464,7 +464,7 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
                     Start-Sleep -Seconds 3
                     $townTradeOpen = Invoke-AgentCli 'menuSelect' @('-MenuId', $townTradeMenuToOpen, '-OptionId', 'trade')
                 }
-                if ($townTradeOpen.status -ne 'completed') { throw ('TownTradeLoop could not open the Native settlement trade menu: ' + [string]$townTradeOpen.error) }
+                if ($townTradeOpen.status -ne 'completed') { throw ('TownTradeLoop could not open the Native settlement trade menu: ' + [string]$townTradeOpen.error + ' | activation=' + ($townTradeActivated | ConvertTo-Json -Compress) + ' | error=' + [string]$townTradeActivationError) }
                 $townTradeOpenedState = Invoke-AgentCli 'state'
                 $townTradeScreenMode = [string]$townTradeOpenedState.partyScreenMode
                 if ($townTradeScreenMode -notmatch 'Trade') { throw ('TownTradeLoop opened the settlement menu but the Native Trade screen did not appear (partyScreenMode=' + $townTradeScreenMode + '); no model action was sent.') }

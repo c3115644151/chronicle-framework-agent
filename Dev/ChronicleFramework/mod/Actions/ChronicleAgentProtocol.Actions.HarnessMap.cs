@@ -78,7 +78,17 @@ internal sealed partial class ChronicleAgentProtocol
         var activeMenuId = Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId;
         if (!string.Equals(activeMenuId, settlementMenuId, StringComparison.Ordinal))
             throw new InvalidOperationException("Native did not activate the requested menu id");
-        var receipt = "{\"schemaVersion\":1,\"requestedMenuId\":\"" + Escape(settlementMenuId) + "\",\"activeMenuId\":\"" + Escape(activeMenuId) + "\",\"priorMenuId\":" + (string.IsNullOrWhiteSpace(priorMenuId) ? "null" : "\"" + Escape(priorMenuId) + "\"") + ",\"campaignDay\":" + CampaignTime.Now.ToDays.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "}";
+        var activatedGameMenu = Campaign.Current?.CurrentMenuContext?.GameMenu;
+        var menuOptionIds = new System.Collections.Generic.List<string>();
+        if (activatedGameMenu != null)
+        {
+            foreach (var menuOption in activatedGameMenu.MenuOptions)
+            {
+                if (menuOption != null) menuOptionIds.Add(menuOption.IdString);
+            }
+        }
+        var menuOptionIdsJson = "[" + string.Join(",", menuOptionIds.ConvertAll(id => "\"" + Escape(id) + "\"")) + "]";
+        var receipt = "{\"schemaVersion\":1,\"requestedMenuId\":\"" + Escape(settlementMenuId) + "\",\"activeMenuId\":\"" + Escape(activeMenuId) + "\",\"priorMenuId\":" + (string.IsNullOrWhiteSpace(priorMenuId) ? "null" : "\"" + Escape(priorMenuId) + "\"") + ",\"optionIds\":" + menuOptionIdsJson + ",\"campaignDay\":" + CampaignTime.Now.ToDays.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "}";
         WriteResponse(commandId, action, "completed", behavior, null, receipt);
     }
     private void HandleHarnessOpenMapEscapeMenu(ChronicleCampaignBehavior behavior, string commandId, string action, string command)

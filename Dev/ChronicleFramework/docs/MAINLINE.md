@@ -2320,6 +2320,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.739 接管事实：玩家按 F10 接管身体时，mod 写 `agent-control.json`（`hold=true`，`reason=player-takeover`），Host 在写下一个原生动作命令前等待该文件释放，`reason=escape-menu` 用于 ESC 菜单打开期间；F10 再按一次交还，F9 结束 Agent。Agent 拥有输入时 `GameKey.IsDown/IsPressed` 在 `MapHotKeyCategory` 上被前缀拦截（`MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`），ESC 不在拦截范围。真机截图取证见 TestResults/20261128-081358 与 20261128-081633。
 
+契约 7.756 事实：`harnessActivateSettlementMenu` 回执新增 `optionIds`（`GameMenuOption.IdString`）。真机 `TestResults/20261128-155311` 显示该存档读进来时停在 `training_field_menu`（选项 `training_field_enter`/`training_field_leave`），并不在村庄菜单——前几轮“菜单没打开/选项名不对”的归因不成立，TownTrade 夹具必须先走完教程退出路径再进定居点菜单。
+
 契约 7.755 事实：新增 Harness-only `harnessActivateSettlementMenu`（`GameMenu.ActivateGameMenu(menuId)` + 回读 `CurrentMenuContext.GameMenu.StringId` 校验，visual-capture/Harness temp/MapState 限定），CLI 同名通道；TownTrade 夹具先激活菜单再 `menuSelect trade`。真机 `TestResults/20261128-155006` 仍报 `menu option not found`（`HandleMenuSelect`）——菜单能激活，但该菜单没有 `trade` 选项；下一步要读菜单实际选项 id。
 
 契约 7.754 补充取证（未实施）：反编译确认 `TaleWorlds.CampaignSystem.GameMenus.GameMenu` 提供 `public static void ActivateGameMenu(string menuId)`、`SwitchToMenu(string)`、`ExitToLast()`，且 `Campaign` 内部正是调用 `GameMenu.ActivateGameMenu(genericStateMenu)` 来设置 `CurrentMenuContext`。因此 TownTrade 夹具准备的正路是激活定居点菜单 id（village/town）后再走 `menuSelect trade`，而不是 `move`。

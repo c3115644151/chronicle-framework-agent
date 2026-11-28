@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.755
+Contract version: 7.756
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -143,6 +143,22 @@ System.InvalidOperationException: menu option not found
 真机（`TestResults/20261128-155006`）：仍然失败，且失败点还是 `HandleMenuSelect` 的 `menu option not found`——说明菜单激活这一步没有抛出（或走了兜底），但该菜单里没有名为 `trade` 的选项。也就是说下一步不是“怎么打开菜单”，而是“菜单里的选项 id 到底是什么”。
 
 下一步：让 `harnessActivateSettlementMenu` 回执顺带列出 `CurrentMenuContext.GameMenu` 当前可用的选项 id（一次读、不改状态），据此确认村庄/城镇菜单里贸易选项的真实 id（可能是 `village_trade`/`town_trade` 之类），再修正夹具与循环目录。
+## Contract 7.756 — 夹具根本不在村庄：它停在 training_field_menu
+
+7.755 的下一步（读菜单选项 id）已执行：`harnessActivateSettlementMenu` 回执新增 `optionIds`（逐条 `GameMenuOption.IdString`），live 测试在失败消息里带上激活回执。
+
+真机（`TestResults/20261128-155311`）给出决定性事实：
+
+```
+"menuId":"training_field_menu"
+"optionIds":["training_field_enter","training_field_leave"]
+```
+
+也就是说这份“EYC 开局”存档读进来时并不在村庄菜单，而是停在**教程训练场菜单**（首次 MapState 的 `training_field_menu`）。之前几轮把失败归因为“菜单没打开”“trade 选项名不对”，真实原因是**整个夹具状态没走完教程入口**：EYC 正常运行里这一步是由 StoryMode 开局流程（`training_field_leave` 等原生动作）清掉的。
+
+因此 TownTrade 夹具准备的正确顺序是：先按已文档化的教程退出路径把 `training_field_menu` 处理掉（原生 `training_field_leave`），再激活/进入定居点菜单，最后才谈 `trade`。
+
+本轮未产出买入收据；但把根因从“菜单/选项名”下移到“夹具起点是教程菜单”，这是一条可执行的具体修复路径。
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：
