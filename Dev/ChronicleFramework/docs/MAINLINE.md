@@ -2320,6 +2320,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.739 接管事实：玩家按 F10 接管身体时，mod 写 `agent-control.json`（`hold=true`，`reason=player-takeover`），Host 在写下一个原生动作命令前等待该文件释放，`reason=escape-menu` 用于 ESC 菜单打开期间；F10 再按一次交还，F9 结束 Agent。Agent 拥有输入时 `GameKey.IsDown/IsPressed` 在 `MapHotKeyCategory` 上被前缀拦截（`MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`），ESC 不在拦截范围。真机截图取证见 TestResults/20261128-081358 与 20261128-081633。
 
+下一步线索（未实施）：mod 已有 `GameMenu.ActivateGameMenu("menu_captivity_end_wilderness_escape")` 先例（`mod/HarnessCaptivityObservationFixture.cs:66`），定居点菜单大概率可用同法激活（village/town 菜单 id），之后再走已有 `menuSelect trade`；这需要一个 Harness-only mod 动作 + CLI 通道 + 真机验证，是产出城镇贸易买入收据的前置。
+
 契约 7.754 事实：TownTrade 夹具的“重进城”兜底（`mapSettlementTargets` + `move` 到当前定居点后 `menuSelect trade`）无效——真机 `TestResults/20261128-154050` 仍报 `menu option not found`，原生不会因 `move` 重新设置 `CurrentMenuContext`。买入收据仍缺，需要真正的定居点菜单入口。
 
 契约 7.753 事实：CLI 新增 `menuSelect`（`-MenuId`/`-OptionId`），TownTrade 夹具准备用它打开贸易屏并回读 `partyScreenMode`；真机 `TestResults/20261128-153608` 在准备阶段失败：`menu option not found`（`HandleMenuSelect`），因为读档后 `menuId` 为空、原生没有当前菜单。买入收据仍缺；下一步是补“进入定居点菜单”的原生动作。
