@@ -61,6 +61,26 @@ internal sealed partial class ChronicleAgentProtocol
         WriteResponse(commandId, action, "completed", behavior, null, BuildHarnessMapDiagnosticsJson(ReadString(command, "heroId")));
     }
 
+
+    private void HandleHarnessActivateSettlementMenu(ChronicleCampaignBehavior behavior, string commandId, string action, string command)
+    {
+        var settlementMenuMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
+        var settlementMenuRoot = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_TEMP");
+        if (!string.Equals(settlementMenuMode, "visual-capture", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(settlementMenuRoot) || !Directory.Exists(settlementMenuRoot))
+            throw new InvalidOperationException("harnessActivateSettlementMenu is restricted to a visual Harness run with a Harness temp directory");
+        if (Game.Current?.GameStateManager?.ActiveState is not MapState)
+            throw new InvalidOperationException("harnessActivateSettlementMenu requires the Campaign Map state");
+        var settlementMenuId = ReadString(command, "menuId");
+        if (string.IsNullOrWhiteSpace(settlementMenuId) || settlementMenuId.Length > 64)
+            throw new InvalidOperationException("harnessActivateSettlementMenu requires one bounded Native menu id");
+        var priorMenuId = Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId;
+        TaleWorlds.CampaignSystem.GameMenus.GameMenu.ActivateGameMenu(settlementMenuId);
+        var activeMenuId = Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId;
+        if (!string.Equals(activeMenuId, settlementMenuId, StringComparison.Ordinal))
+            throw new InvalidOperationException("Native did not activate the requested menu id");
+        var receipt = "{\"schemaVersion\":1,\"requestedMenuId\":\"" + Escape(settlementMenuId) + "\",\"activeMenuId\":\"" + Escape(activeMenuId) + "\",\"priorMenuId\":" + (string.IsNullOrWhiteSpace(priorMenuId) ? "null" : "\"" + Escape(priorMenuId) + "\"") + ",\"campaignDay\":" + CampaignTime.Now.ToDays.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "}";
+        WriteResponse(commandId, action, "completed", behavior, null, receipt);
+    }
     private void HandleHarnessOpenMapEscapeMenu(ChronicleCampaignBehavior behavior, string commandId, string action, string command)
     {
         var escapeFixtureMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");

@@ -196,6 +196,9 @@ internal sealed partial class ChronicleAgentProtocol
             case "harnessMapDiagnostics":
                 HandleHarnessMapDiagnostics(behavior, commandId, action, command);
                 break;
+            case "harnessActivateSettlementMenu":
+                HandleHarnessActivateSettlementMenu(behavior, commandId, action, command);
+                break;
             case "harnessOpenMapEscapeMenu":
                 HandleHarnessOpenMapEscapeMenu(behavior, commandId, action, command);
                 break;

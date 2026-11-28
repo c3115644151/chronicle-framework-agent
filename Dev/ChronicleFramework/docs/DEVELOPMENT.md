@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.754
+Contract version: 7.755
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -136,6 +136,13 @@ System.InvalidOperationException: menu option not found
 也就是说：读档后即使把队伍 `move` 到它已经所在的定居点，原生也不会把 `CurrentMenuContext` 设回定居点菜单。要拿到买入收据，需要一条真正“打开定居点菜单”的原生路径（例如 Native settlement menu 的入口 API，或先离开定居点再进入），而不是继续在 `menuSelect` 上找角度。
 
 当前状态：`-TownTradeFromStoryMode` 入口、`menuSelect` CLI 通道、`partyScreenMode` 校验都在，且失败会确定性拒绝；**没有**买入收据。这两轮把问题从“不知道夹具差什么”收敛成“差一条打开定居点菜单的原生入口”。
+## Contract 7.755 — 有了真正的菜单激活动作，trade 选项名仍不匹配
+
+按 7.754 的取证实现 Harness-only 动作 `harnessActivateSettlementMenu`（`mod/Actions/ChronicleAgentProtocol.Actions.HarnessMap.cs`）：visual-capture + Harness temp 限定、MapState 判定、单一有界 `menuId`，调用 `TaleWorlds.CampaignSystem.GameMenus.GameMenu.ActivateGameMenu(menuId)`，回读 `CurrentMenuContext.GameMenu.StringId` 必须等于请求值，否则拒绝；CLI 增加同名通道，TownTrade 夹具准备先激活菜单再 `menuSelect trade`。
+
+真机（`TestResults/20261128-155006`）：仍然失败，且失败点还是 `HandleMenuSelect` 的 `menu option not found`——说明菜单激活这一步没有抛出（或走了兜底），但该菜单里没有名为 `trade` 的选项。也就是说下一步不是“怎么打开菜单”，而是“菜单里的选项 id 到底是什么”。
+
+下一步：让 `harnessActivateSettlementMenu` 回执顺带列出 `CurrentMenuContext.GameMenu` 当前可用的选项 id（一次读、不改状态），据此确认村庄/城镇菜单里贸易选项的真实 id（可能是 `village_trade`/`town_trade` 之类），再修正夹具与循环目录。
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：

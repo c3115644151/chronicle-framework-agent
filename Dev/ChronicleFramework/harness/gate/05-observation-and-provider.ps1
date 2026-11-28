@@ -960,3 +960,9 @@ if ($agentCliSource -notmatch "'menuSelect'" -or
     $agentLiveModelLoopSource -notmatch 'partyScreenMode') {
     throw 'Contract 7.753 requires the Harness CLI to reach the approved Native menuSelect action and the town-trade fixture preparation to verify the Native Trade screen before any model action is sent.'
 }
+
+if ($agentCliSource -notmatch 'harnessActivateSettlementMenu' -or
+    (Get-Content -LiteralPath (Join-Path $modRoot 'Actions/ChronicleAgentProtocol.Actions.HarnessMap.cs') -Raw -Encoding UTF8) -notmatch 'GameMenu.ActivateGameMenu' -or
+    $agentLiveModelLoopSource -notmatch 'harnessActivateSettlementMenu') {
+    throw 'Contract 7.755 requires a Harness-only settlement menu activation action that verifies the Native menu id, reachable from the CLI and used by the town-trade fixture preparation.'
+}
