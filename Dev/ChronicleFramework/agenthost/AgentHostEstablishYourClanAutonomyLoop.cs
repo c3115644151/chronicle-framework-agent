@@ -772,6 +772,8 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         async Task<JsonDocument?> WaitForBattleMissionEntryAsync(CancellationToken token)
         {
             var deadline = DateTime.UtcNow.AddSeconds(60);
+            JsonObject? lastMission = null;
+            JsonObject? lastContext = null;
             while (DateTime.UtcNow < deadline)
             {
                 token.ThrowIfCancellationRequested();
@@ -787,8 +789,19 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     return JsonDocument.Parse(fresh.RootElement.GetRawText());
                 if (mode is "Deployment" or "Battle")
                     return JsonDocument.Parse(fresh.RootElement.GetRawText());
+                lastMission = mission?.DeepClone() as JsonObject;
+                lastContext = context?.DeepClone() as JsonObject;
                 await Task.Delay(1000, token);
             }
+            ledger.Trace.Add(new JsonObject
+            {
+                ["stage"] = "native-battle-mission-entry-timeout-detail",
+                ["gameState"] = ReadString(lastContext, "gameState"),
+                ["menuId"] = ReadString(lastContext, "menuId"),
+                ["encounterActive"] = ReadBoolean(lastContext, "encounterActive"),
+                ["mission"] = lastMission?.DeepClone(),
+                ["context"] = lastContext?.DeepClone()
+            });
             return null;
         }
         async Task EnsureObjectiveAttemptCheckpointAsync(JsonElement nativeState)

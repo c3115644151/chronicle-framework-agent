@@ -1,5 +1,13 @@
 # Chroni
 
+## 2026-11-28 玩家窗口第二轮（契约 7.744）
+
+- 玩家反馈：启动即全屏、任务栏仍无图标、点击不置顶；拖动已好、缩放仍不行。
+- 实测引擎原生窗口：`display_mode=0` → `style=0x14CA0000`（有标题栏、无 `WS_THICKFRAME`）、`exStyle=0x08000100`（引擎自己带 `WS_EX_NOACTIVATE`）；`display_mode=1/2` → `0x94000000` 无边框 popup。结论：全屏与“不可缩放”来自引擎，只有 mode 0 是可拖动窗口；默认配置固定回 `display_mode=0 / 1600x900 / 60fps`。
+- 改动：`mod/AgentGameWindow.cs` 增加 `WM_MOUSEACTIVATE → MA_ACTIVATE`（点击置顶）、`ITaskbarList::AddTab`（任务栏按钮）、`WM_NCHITTEST` 边缘 6px 缩放钩子；mod 不再保留 `WS_EX_NOACTIVATE`。
+- 真机：`2026-11-28T05:09:46Z|pid=34808`，`agent-window-resize-hook-installed`、`agent-window-taskbar-tab|requested=True`、`agent-window-style|...|noActivate=False|captureMode=False`。
+- 未验证：真实鼠标点击/拖边的手感；需要玩家手测，日志会写 `agent-window-mouse-activate`。
+
 ## 2026-11-28 玩家窗口与从零 EYC 继续（契约 7.743）
 
 - 玩家反馈：窗口不在任务栏、点击不置顶、拖不动，希望可拉边缩放。

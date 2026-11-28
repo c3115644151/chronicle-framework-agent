@@ -1,6 +1,26 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.743
+Contract version: 7.744
+
+## Contract 7.744 — 玩家窗口的第二轮：引擎原生样式、点击激活与边缘缩放
+
+引擎原生窗口实测（`agent-window-style-before`）：
+
+| display_mode | 原生 style | 原生 exStyle | 结论 |
+| 0 | `0x14CA0000`（有标题栏、无 `WS_THICKFRAME`） | `0x08000100`（`WS_EX_NOACTIVATE`） | 窗口化但不可缩放、不激活 |
+| 1 | `0x94000000`（`WS_POPUP`） | `0x08000000` | 无边框全屏式 |
+| 2 | `0x94000000`（`WS_POPUP`） | `0x08000000` | 同上 |
+
+所以“全屏、没任务栏、点击不置顶、不能缩放”不是 mod 造成的，而是引擎自己的窗口创建方式；`display_mode` 只有 0 给出可拖动的窗口。玩家默认配置固定为 `display_mode=0 / 1600x900 / 60fps`。
+
+`mod/AgentGameWindow.cs` 在此基础上补三件事：
+
+- **点击置顶**：引擎的 `WM_MOUSEACTIVATE` 通常回答 `MA_NOACTIVATE`，仅清 `WS_EX_NOACTIVATE` 不足以让被遮住的窗口抬起来；现在 WndProc 钩子直接返回 `MA_ACTIVATE`（首次触发写 `agent-window-mouse-activate|player-clicks-raise-window=True`）。
+- **任务栏**：除 `WS_EX_APPWINDOW` 外，改用 `ITaskbarList::HrInit/AddTab` 显式登记，绕开“窗口创建后再加 APPWINDOW 不刷新任务栏按钮”的已知限制，写 `agent-window-taskbar-tab|requested=True`。
+- **边缘缩放**：引擎窗口没有 `WS_THICKFRAME`，补上后引擎的 `WM_NCHITTEST` 仍返回客户端区域；钩子在窗口四边与四角 6px 内返回 `HTLEFT/HTRIGHT/HTTOP/…`，其余消息原样 `CallWindowProc` 转发，写 `agent-window-resize-hook-installed`。
+- **不再由 mod 保留 `WS_EX_NOACTIVATE`**：玩家会话一律可激活；需要“不抢光标”的自动捕获由 harness 自己加、自己撤（`CHRONICLE_HARNESS_NONACTIVATING_WINDOW`）。
+
+真机取证：`2026-11-28T05:09:46Z|pid=34808`：`agent-window-resize-hook-installed`、`agent-window-taskbar-tab|requested=True`、`agent-window-style|caption=True|thickFrame=True|appWindow=True|toolWindow=False|noActivate=False|captureMode=False`。点击置顶与拖边缩放的行为由用户手测确认，日志行会记录首次点击。
 
 ## Contract 7.743 — 玩家窗口：任务栏、点击置顶、拖动与边缘缩放
 
