@@ -1,6 +1,24 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.745
+Contract version: 7.746
+
+## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
+
+契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：
+
+```
+mission-conversation-surface|type=TaleWorlds.CampaignSystem.Conversation.ConversationManager|mode=Conversation|members=BeginConversation,Clear,ContinueConversation,CurOptions,CurrentSentenceText,DoOptionContinue,EndConversation,IsConversationInProgress,…
+```
+
+也就是说 Mission 内的会话管理器与地图会话是**同一个类**（`ConversationManager`）但**不同实例**，`Campaign.Current.ConversationManager` 上的 `dialogueSelect` 打不到它，`missionLeave` 又只对 Tavern 生效——这就是前两轮“离场被拒”的根因。
+
+本契约交付：
+
+- `mod/AgentObserver.cs` 在 Mission 观察里新增 `conversation` 字段：`inProgress`、`sentenceText`、`heroId/heroName`、`options[{id,text,clickable}]`（读的就是 Mission 那个实例的 `CurOptions`）；
+- `mod/Actions/ChronicleAgentProtocol.Actions.Dialogue.cs` 新增 `missionConversationSelect`（按 `optionId` 调原生 `DoOption`）与 `missionConversationContinue`（无选项时 `ContinueConversation`），都只作用于 `MissionConversationLogic.ConversationManager`；
+- `mod/Protocol/ChronicleAgentProtocol.Dispatch.cs` 分发这两个动作。
+
+未完成且明确留待下一增量：Host 侧的有界循环（读 `mission.conversation` 组目录、交给 provider 或规则选原生选项、直到会话结束回到地图）。本契约只保证“能看到原生选项、能按原生选项执行”，不声称已经能通过对话场景。
 
 ## Contract 7.745 — 遭遇直接进入 MissionState：统一任务入口与对话场景边界
 

@@ -1,5 +1,12 @@
 # Chroni
 
+## 2026-11-28 Mission 会话表面（契约 7.746）
+
+- 取事实：`mission-conversation-surface|type=TaleWorlds.CampaignSystem.Conversation.ConversationManager|mode=Conversation|members=…CurOptions…DoOptionContinue…IsConversationInProgress…`（pid=9916）。
+- 结论：地图会话与 Mission 会话是同类不同实例，`dialogueSelect` 打不到 Mission 实例，`missionLeave` 只对 Tavern 生效。
+- 交付：Mission 观察新增 `conversation{inProgress,sentenceText,hero,options[id,text,clickable]}`；新增 `missionConversationSelect` / `missionConversationContinue` 两个动作并分发。
+- 待办：Host 有界循环尚未接入；四目标仍未达成。
+
 ## 2026-11-28 遭遇直接进任务场景（契约 7.745）
 
 - 真机：`TestResults/20261128-121956`…`20261128-132409` 连续复现“Map 遭遇 → MissionState”，旧代码在 Map 分类器处判死整轮。

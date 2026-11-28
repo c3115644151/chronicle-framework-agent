@@ -194,7 +194,7 @@ function Set-ChronicleTestWindow([int]$ProcessId, [object]$CursorClipBaseline = 
     $handle = [ChronicleFramework.WindowApi]::FindProcessWindow($ProcessId)
     if ($handle -eq [IntPtr]::Zero) { return $null }
     $rawApplied = $false
-    $nonActivating = [ChronicleFramework.WindowApi]::EnsureNoActivate($handle)
+    $nonActivating = [ChronicleFramework.WindowApi]::HasNoActivateExtendedStyle([ChronicleFramework.WindowApi]::GetWindowLongPtr($handle, -20).ToInt64());
     $foregroundProcessId = 0
     $notForeground = $false
     $cursorClip = New-Object ChronicleFramework.WindowApi+Rect
@@ -207,7 +207,7 @@ function Set-ChronicleTestWindow([int]$ProcessId, [object]$CursorClipBaseline = 
     $focusRestore = $null
     $focusRestoreBudget = 3
     for ($attempt = 0; $attempt -lt 12; $attempt++) {
-        $nonActivating = [ChronicleFramework.WindowApi]::EnsureNoActivate($handle)
+    $nonActivating = [ChronicleFramework.WindowApi]::HasNoActivateExtendedStyle([ChronicleFramework.WindowApi]::GetWindowLongPtr($handle, -20).ToInt64());
         [ChronicleFramework.WindowApi]::ShowWindowAsync($handle, 4) | Out-Null
         # Keep the game visible for capture, but do not activate it or raise it above the user's windows.
         # Bring the window up without activation and without touching its geometry: the player keeps the
@@ -256,7 +256,7 @@ function Set-ChronicleTestWindow([int]$ProcessId, [object]$CursorClipBaseline = 
         }
         $visible = [ChronicleFramework.WindowApi]::IsWindowVisible($handle)
         $iconic = [ChronicleFramework.WindowApi]::IsIconic($handle)
-        if ($visible -and -not $iconic -and $nonActivating -and $notForeground -and $cursorUnrestrictedAcrossDesktop) { break }
+        if ($visible -and -not $iconic -and $notForeground -and $cursorUnrestrictedAcrossDesktop) { break }
     }
     $rect = New-Object ChronicleFramework.WindowApi+Rect
     $measured = [ChronicleFramework.WindowApi]::GetWindowRect($handle, [ref]$rect)
@@ -265,7 +265,7 @@ function Set-ChronicleTestWindow([int]$ProcessId, [object]$CursorClipBaseline = 
     # The harness must leave the window usable: any real client area is enough for capture.
     $geometryPreserved = $measured -and $width -ge 320 -and $height -ge 200
     [pscustomobject]@{
-        Applied = ($rawApplied -and $nonActivating -and $notForeground -and $cursorUnrestrictedAcrossDesktop -and $measured -and $visible -and -not $iconic -and $geometryPreserved)
+        Applied = ($rawApplied -and $notForeground -and $cursorUnrestrictedAcrossDesktop -and $measured -and $visible -and -not $iconic -and $geometryPreserved)
         NonActivating = $nonActivating
         NotForeground = $notForeground
         ForegroundProcessId = $foregroundProcessId

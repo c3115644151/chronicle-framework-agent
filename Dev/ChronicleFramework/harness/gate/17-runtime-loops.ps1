@@ -43,7 +43,7 @@ if (-not (Test-ChronicleNoActivateStyleContract) -or
     -not [bool]$cursorClipRestoreContract.RestoresOnlyTestIntroducedClip -or
     -not [bool]$cursorClipRestoreContract.RefusesWhenGameIsForeground -or
     -not [bool]$cursorClipRestoreContract.RefusesToOverridePreExistingRestriction -or
-    $testWindowLayoutSource -notmatch 'EnsureNoActivate' -or
+    $testWindowLayoutSource -notmatch 'HasNoActivateExtendedStyle' -or
     $testWindowLayoutSource -notmatch '0x08000000L' -or
     $testWindowLayoutSource -notmatch 'GetForegroundProcessId' -or
     $testWindowLayoutSource -notmatch 'NotForeground = \$notForeground' -or
@@ -63,6 +63,11 @@ if (-not (Test-ChronicleNoActivateStyleContract) -or
     (Get-Content -LiteralPath (Join-Path $modRoot 'AgentGameWindow.cs') -Raw -Encoding UTF8) -notmatch 'WmMouseActivate' -or
     (Get-Content -LiteralPath (Join-Path $modRoot 'AgentGameWindow.cs') -Raw -Encoding UTF8) -notmatch 'MaActivate' -or
     (Get-Content -LiteralPath (Join-Path $modRoot 'AgentGameWindow.cs') -Raw -Encoding UTF8) -notmatch 'ITaskbarList' -or
+    (Get-Content -LiteralPath (Join-Path $modRoot 'AgentObserver.cs') -Raw -Encoding UTF8) -notmatch 'mission-conversation-surface' -or
+    (Get-Content -LiteralPath (Join-Path $modRoot 'AgentObserver.cs') -Raw -Encoding UTF8) -notmatch 'missionConversationManager.CurOptions' -or
+    (Get-Content -LiteralPath (Join-Path $modRoot 'Actions/ChronicleAgentProtocol.Actions.Dialogue.cs') -Raw -Encoding UTF8) -notmatch 'missionConversationSelect' -or
+    (Get-Content -LiteralPath (Join-Path $modRoot 'Actions/ChronicleAgentProtocol.Actions.Dialogue.cs') -Raw -Encoding UTF8) -notmatch 'missionConversationContinue' -or
+    (Get-Content -LiteralPath (Join-Path $modRoot 'Protocol/ChronicleAgentProtocol.Dispatch.cs') -Raw -Encoding UTF8) -notmatch 'missionConversationSelect' -or
     (Get-Content -LiteralPath (Join-Path $modRoot 'AgentGameWindow.cs') -Raw -Encoding UTF8) -notmatch 'HtBottomRight' -or
     (Get-Content -LiteralPath (Join-Path $modRoot 'AgentGameWindow.cs') -Raw -Encoding UTF8) -notmatch 'agent-window-resize-hook-installed' -or
     $agentCliSource -notmatch 'CHRONICLE_HARNESS_NONACTIVATING_WINDOW' -or

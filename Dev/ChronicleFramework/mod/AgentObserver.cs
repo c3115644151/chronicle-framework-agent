@@ -24,6 +24,7 @@ namespace ChronicleFramework;
 
 internal static class ChronicleAgentObserver
 {
+    private static bool _missionConversationSurfaceLogged;
     internal static string BuildSnapshotJson()
     {
         var campaign = Campaign.Current;
@@ -975,6 +976,59 @@ internal static class ChronicleAgentObserver
         Property(json, "mode", mission.Mode.ToString(), true);
         Property(json, "combatType", mission.CombatType.ToString(), true);
         json.Append(",\"nativeConversationReady\":").Append(Bool(missionConversationLogic?.ConversationManager != null));
+        var missionConversationManager = missionConversationLogic?.ConversationManager;
+        json.Append(",\"conversationManagerType\":");
+        if (missionConversationManager == null) { json.Append("null"); }
+        else { json.Append('"').Append(Escape(missionConversationManager.GetType().FullName)).Append('"'); }
+        json.Append(",\"conversation\":");
+        if (missionConversationManager == null)
+        {
+            json.Append("null");
+        }
+        else
+        {
+            json.Append('{');
+            json.Append("\"inProgress\":").Append(Bool(missionConversationManager.IsConversationInProgress));
+            Property(json, "sentenceText", missionConversationManager.CurrentSentenceText, true);
+            Property(json, "heroId", missionConversationManager.OneToOneConversationHero?.StringId, true);
+            Property(json, "heroName", missionConversationManager.OneToOneConversationHero?.Name?.ToString(), true);
+            json.Append(",\"options\":[");
+            var missionOptions = missionConversationManager.CurOptions;
+            for (var optionIndex = 0; optionIndex < missionOptions.Count; optionIndex++)
+            {
+                if (optionIndex > 0) json.Append(',');
+                var missionOption = missionOptions[optionIndex];
+                json.Append('{');
+                Property(json, "id", missionOption.Id);
+                Property(json, "text", missionOption.Text?.ToString(), true);
+                json.Append(",\"clickable\":").Append(Bool(missionOption.IsClickable));
+                json.Append('}');
+            }
+            json.Append("]}");
+        }
+        if (missionConversationManager != null && !_missionConversationSurfaceLogged)
+        {
+            _missionConversationSurfaceLogged = true;
+            var surface = string.Join(",", missionConversationManager.GetType().GetProperties().Select(property => property.Name)
+                .Concat(missionConversationManager.GetType().GetMethods().Where(method => method.GetParameters().Length == 0 && !method.IsSpecialName).Select(method => method.Name))
+                .Distinct().OrderBy(name => name, StringComparer.Ordinal));
+            ChronicleDiagnostics.Write($"mission-conversation-surface|type={missionConversationManager.GetType().FullName}|mode={mission.Mode}|members={surface}");
+        }
+        json.Append(",\"conversationManagerMembers\":");
+        if (missionConversationManager == null) { json.Append("null"); }
+        else
+        {
+            json.Append('[');
+            var members = missionConversationManager.GetType().GetProperties().Select(property => property.Name)
+                .Concat(missionConversationManager.GetType().GetMethods().Where(method => method.GetParameters().Length == 0 && !method.IsSpecialName).Select(method => method.Name))
+                .Distinct().OrderBy(name => name, StringComparer.Ordinal).ToArray();
+            for (var index = 0; index < members.Length; index++)
+            {
+                if (index > 0) json.Append(',');
+                json.Append('"').Append(Escape(members[index])).Append('"');
+            }
+            json.Append(']');
+        }
         json.Append(",\"activeAgentCount\":").Append(missionAgents.Length);
         json.Append(",\"camera\":");
         if (mainAgentController?.MissionScreen == null)

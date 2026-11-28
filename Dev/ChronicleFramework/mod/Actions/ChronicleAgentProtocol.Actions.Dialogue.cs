@@ -146,6 +146,38 @@ internal sealed partial class ChronicleAgentProtocol
         WriteResponse(commandId, action, "completed", behavior);
     }
 
+    // Mission encounter conversations use MissionConversationLogic.ConversationManager, which is the same class
+    // as Campaign.Current.ConversationManager but a different instance. These handlers act on the mission one,
+    // so the Host can use the game's own listed options instead of inventing dialogue.
+    private void HandleMissionConversationSelect(ChronicleCampaignBehavior behavior, string commandId, string action, string command)
+    {
+        var optionId = ReadString(command, "optionId");
+        var manager = CurrentMissionConversationManager();
+        if (manager == null || !manager.IsConversationInProgress)
+            throw new InvalidOperationException("missionConversationSelect requires an active Mission conversation");
+        var option = manager.CurOptions.FirstOrDefault(candidate => string.Equals(candidate.Id, optionId, StringComparison.Ordinal));
+        if (string.IsNullOrWhiteSpace(option.Id) || !option.IsClickable)
+            throw new InvalidOperationException("mission conversation option is missing or not clickable");
+        manager.DoOption(optionId);
+        WriteResponse(commandId, action, "completed", behavior);
+    }
+
+    private void HandleMissionConversationContinue(ChronicleCampaignBehavior behavior, string commandId, string action, string command)
+    {
+        var manager = CurrentMissionConversationManager();
+        if (manager == null || !manager.IsConversationInProgress || manager.CurOptions.Count != 0)
+            throw new InvalidOperationException("missionConversationContinue requires an active Mission conversation with no selectable options");
+        manager.ContinueConversation();
+        WriteResponse(commandId, action, "completed", behavior);
+    }
+
+    private static TaleWorlds.CampaignSystem.Conversation.ConversationManager CurrentMissionConversationManager()
+    {
+        var mission = TaleWorlds.MountAndBlade.Mission.Current;
+        if (mission == null) return null;
+        var logic = mission.MissionBehaviors.OfType<SandBox.Conversation.MissionLogics.MissionConversationLogic>().FirstOrDefault();
+        return logic?.ConversationManager;
+    }
     private void HandlePersuasionDetails(ChronicleCampaignBehavior behavior, string commandId, string action, string command)
     {
         WriteResponse(commandId, action, "completed", behavior, null, ChroniclePersuasionAdapter.ReadCurrentPersuasion());

@@ -491,6 +491,12 @@ internal sealed partial class ChronicleAgentProtocol
             case "dialogueSelect":
                 HandleDialogueSelect(behavior, commandId, action, command);
                 break;
+            case "missionConversationSelect":
+                HandleMissionConversationSelect(behavior, commandId, action, command);
+                break;
+            case "missionConversationContinue":
+                HandleMissionConversationContinue(behavior, commandId, action, command);
+                break;
             case "persuasionDetails":
                 HandlePersuasionDetails(behavior, commandId, action, command);
                 break;
