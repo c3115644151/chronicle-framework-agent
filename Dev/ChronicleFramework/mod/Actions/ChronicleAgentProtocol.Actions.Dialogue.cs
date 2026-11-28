@@ -153,8 +153,15 @@ internal sealed partial class ChronicleAgentProtocol
     {
         var optionId = ReadString(command, "optionId");
         var manager = CurrentMissionConversationManager();
-        if (manager == null || !manager.IsConversationInProgress)
+        if (manager == null)
             throw new InvalidOperationException("missionConversationSelect requires an active Mission conversation");
+        // Native publishes a Mission conversation surface in Stealth missions where the flow is
+        // stopped between lines: options exist, IsConversationInProgress is false. The listed,
+        // clickable option is the authority, not the flow flag.
+        if (!manager.IsConversationInProgress && manager.CurOptions.Count == 0)
+            throw new InvalidOperationException("missionConversationSelect requires a listed Mission conversation option");
+        if (manager.ConversationAgents == null || manager.ConversationAgents.Count == 0)
+            throw new InvalidOperationException("mission conversation has no registered speaker/listener agent yet; a selection would throw inside UpdateSpeakerAndListenerAgents");
         var option = manager.CurOptions.FirstOrDefault(candidate => string.Equals(candidate.Id, optionId, StringComparison.Ordinal));
         if (string.IsNullOrWhiteSpace(option.Id) || !option.IsClickable)
             throw new InvalidOperationException("mission conversation option is missing or not clickable");
@@ -165,7 +172,8 @@ internal sealed partial class ChronicleAgentProtocol
     private void HandleMissionConversationContinue(ChronicleCampaignBehavior behavior, string commandId, string action, string command)
     {
         var manager = CurrentMissionConversationManager();
-        if (manager == null || !manager.IsConversationInProgress || manager.CurOptions.Count != 0)
+        if (manager == null || manager.CurOptions.Count != 0 ||
+            (!manager.IsConversationInProgress && !manager.IsConversationFlowActive))
             throw new InvalidOperationException("missionConversationContinue requires an active Mission conversation with no selectable options");
         manager.ContinueConversation();
         WriteResponse(commandId, action, "completed", behavior);

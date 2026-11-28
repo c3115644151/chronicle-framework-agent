@@ -989,6 +989,11 @@ internal static class ChronicleAgentObserver
         {
             json.Append('{');
             json.Append("\"inProgress\":").Append(Bool(missionConversationManager.IsConversationInProgress));
+            // A Stealth Mission can publish options before the manager registers its speaker/
+            // listener agents; DoOption then throws inside UpdateSpeakerAndListenerAgents. The Host
+            // must see that boundary instead of sending a command Native cannot process.
+            json.Append(",\"addressable\":").Append(Bool(missionConversationManager.ConversationAgents != null && missionConversationManager.ConversationAgents.Count > 0));
+            json.Append(",\"flowActive\":").Append(Bool(missionConversationManager.IsConversationFlowActive));
             Property(json, "sentenceText", missionConversationManager.CurrentSentenceText, true);
             Property(json, "heroId", missionConversationManager.OneToOneConversationHero?.StringId, true);
             Property(json, "heroName", missionConversationManager.OneToOneConversationHero?.Name?.ToString(), true);

@@ -27,6 +27,18 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
+function Assert-AgentHostBinaryIsFresh {
+    param([string]$HostDll)
+    if (-not (Test-Path -LiteralPath $HostDll -PathType Leaf)) { throw "The Local Agent Host binary is missing: $HostDll. Build agenthost in Release before running a Host slice." }
+    $hostRoot = Join-Path (Split-Path -Parent $PSScriptRoot) 'agenthost'
+    $newestSource = Get-ChildItem -LiteralPath $hostRoot -Recurse -File -Include *.cs,*.csproj -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' } |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    $hostBinary = Get-Item -LiteralPath $HostDll
+    if ($null -ne $newestSource -and $hostBinary.LastWriteTime -lt $newestSource.LastWriteTime) {
+        throw ("The Local Agent Host binary is stale: it was built {0:o}, before {1} ({2:o}). A Host receipt only proves this source tree when the evaluated binary is built from it; build agenthost in Release first." -f $hostBinary.LastWriteTime, $newestSource.FullName, $newestSource.LastWriteTime)
+    }
+}
 $freeLlmProfileHelper = Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1'
 . $freeLlmProfileHelper
 $cli = Join-Path $PSScriptRoot 'Agent-Cli.ps1'
@@ -131,6 +143,7 @@ if ($TournamentLoop -and -not $AgentHostRuntime) { throw 'TournamentLoop require
 $catalog = $null
 if ($AgentHostRuntime) {
     $agentHostDllForCatalog = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'agenthost') 'bin\Release\net8.0\ChronicleAgentHost.dll'
+    Assert-AgentHostBinaryIsFresh -HostDll $agentHostDllForCatalog
     if (-not (Test-Path -LiteralPath $agentHostDllForCatalog -PathType Leaf)) { throw 'The current Agent Host action catalog is missing; no game was launched.' }
     $catalogOutput = & dotnet $agentHostDllForCatalog --campaign-action-catalog 2>&1 | Out-String
     $catalogExitCode = $LASTEXITCODE
@@ -775,6 +788,7 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
             throw ("The Local Agent Host accepts only one exact approved Campaign action set; this slice requests {0} actions that match none of [{1}], so the Host would reject the request before the first Native command. This slice can only run on the FreeLLMAPI PowerShell provider." -f $requestedActionNames.Count, $hostProfileNames)
         }
         $agentHostDll = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'agenthost') 'bin\Release\net8.0\ChronicleAgentHost.dll'
+        Assert-AgentHostBinaryIsFresh -HostDll $agentHostDll
         if ($SupplyManagementLoop) {
             $hostRunMode = 'supply-loop'
             $hostRequest = [ordered]@{

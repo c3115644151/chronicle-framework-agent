@@ -919,3 +919,14 @@ if ($agentHostAutonomyLoopSource -notmatch 'HasHandledMissionConversation' -or
     $agentHostAutonomyLoopSource -notmatch 'objective-mission-conversation-surface-ended') {
     throw 'Contract 7.748 requires the Mission conversation surface, not the Mission mode string, to decide whether the Host can act in bounds; a Mission that stops publishing the surface must end the conversation subflow instead of failing the objective.'
 }
+
+$agentLiveModelLoopSource = Get-Content -LiteralPath (Join-Path $stageRoot 'Test-AgentLiveModelLoop.ps1') -Raw -Encoding UTF8
+if ($agentLiveModelLoopSource -notmatch 'Assert-AgentHostBinaryIsFresh' -or
+    $agentLiveModelLoopSource -notmatch 'A Host receipt only proves this source tree when the evaluated binary is built from it' -or
+    $agentObserverSource -notmatch '\\"addressable\\"' -or
+    $agentObserverSource -notmatch 'IsConversationFlowActive' -or
+    $agentMissionDialogueSource -notmatch 'ConversationAgents.Count == 0' -or
+    $agentHostAutonomyLoopSource -notmatch 'native-mission-conversation-surface-not-addressable' -or
+    $agentHostAutonomyLoopSource -notmatch 'MaxMissionConversationSurfaceRetries') {
+    throw 'Contract 7.749 requires the Harness to prove which Host binary it evaluates, the Mission conversation observation to publish addressability, and the Host to stop on a listed surface that Native cannot address instead of retrying or inventing another line.'
+}

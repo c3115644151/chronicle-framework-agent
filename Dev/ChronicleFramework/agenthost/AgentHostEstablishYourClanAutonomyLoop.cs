@@ -788,6 +788,10 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 var missionConversation = state?["conversation"] as JsonObject ?? state?["mission"]?["conversation"] as JsonObject;
                 if (missionConversation is null)
                     return new JsonObject { ["decisions"] = decisions, ["actions"] = actions, ["returnedToMap"] = false, ["conversationSurface"] = "absent" };
+                var namedOptions = (missionConversation["options"] as JsonArray ?? new JsonArray()).OfType<JsonObject>().Count(option => ReadBoolean(option, "clickable"));
+                if (namedOptions > 0 && !ReadBoolean(missionConversation, "addressable"))
+                    return new JsonObject { ["decisions"] = decisions, ["actions"] = actions, ["returnedToMap"] = false, ["conversationSurface"] = "not-addressable" };
+
                 var clickableIds = (missionConversation["options"] as JsonArray ?? new JsonArray()).OfType<JsonObject>()
                     .Where(option => ReadBoolean(option, "clickable"))
                     .Select(option => ReadString(option, "id"))
@@ -861,12 +865,26 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 var nativeArguments = actionName == "missionConversationSelect"
                     ? new JsonObject { ["optionId"] = ReadString(arguments, "OptionId") }
                     : new JsonObject();
-                using var response = await conversationClient.ExecuteCompanionHiringActionAsync(actionName, nativeArguments, token);
-                var receipt = JsonNode.Parse(response.RootElement.GetRawText())?.AsObject() ?? new JsonObject();
-                if (ReadString(receipt, "status") != "completed")
+                JsonObject receipt = new();
+                for (var attempt = 0; ; attempt++)
                 {
-                    ledger.Trace.Add(new JsonObject { ["stage"] = "mission-conversation-native-action-rejected", ["action"] = actionName, ["nativeReceipt"] = receipt.DeepClone() });
-                    return null;
+                    using var response = await conversationClient.ExecuteCompanionHiringActionAsync(actionName, nativeArguments, token);
+                    receipt = JsonNode.Parse(response.RootElement.GetRawText())?.AsObject() ?? new JsonObject();
+                    if (ReadString(receipt, "status") == "completed") break;
+                    // Native can publish a Mission conversation surface a frame before the manager
+                    // registers its speaker/listener agents; DoOption then throws Index was out of range
+                    // inside UpdateSpeakerAndListenerAgents. Retry the same listed option a bounded
+                    // number of times instead of failing the objective or inventing a different line.
+                    var nativeError = ReadString(receipt, "error") ?? string.Empty;
+                    var surfaceRace = nativeError.Contains("UpdateSpeakerAndListenerAgents", StringComparison.Ordinal) &&
+                        attempt < MaxMissionConversationSurfaceRetries;
+                    if (!surfaceRace)
+                    {
+                        ledger.Trace.Add(new JsonObject { ["stage"] = "mission-conversation-native-action-rejected", ["action"] = actionName, ["nativeReceipt"] = receipt.DeepClone() });
+                        return null;
+                    }
+                    ledger.Trace.Add(new JsonObject { ["stage"] = "mission-conversation-native-action-retried", ["action"] = actionName, ["attempt"] = attempt, ["nativeError"] = nativeError });
+                    await Task.Delay(400, token);
                 }
                 actions++;
                 ledger.Trace.Add(new JsonObject
@@ -1677,6 +1695,10 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                                 return BuildResult("failed", "native-mission-conversation-unresolved", false,
                                     "The Native mission conversation never offered a selectable Native option or a continuable line; the Host stopped instead of inventing dialogue.",
                                     "native-mission-conversation-unresolved", journalObjectives, snapshot, differences);
+                            if (ReadString(conversationResult, "conversationSurface") == "not-addressable")
+                                return BuildResult("failed", "native-mission-conversation-surface-not-addressable", false,
+                                    "Native listed Mission conversation options but its manager registered no speaker/listener agents, so any selection would throw inside UpdateSpeakerAndListenerAgents; the Host stopped instead of retrying a command Native cannot process.",
+                                    "native-mission-conversation-surface-not-addressable", journalObjectives, snapshot, differences);
                             if (ReadString(conversationResult, "conversationSurface") == "absent")
                             {
                                 ledger.Trace.Add(new JsonObject
@@ -2585,6 +2607,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
     internal const int MaxEncounterClearedReplans = 12;
     internal const int MaxConversationLeaves = 4;
     internal const int MaxMissionConversationDecisions = 16;
+        internal const int MaxMissionConversationSurfaceRetries = 4;
 
     internal static bool IsEncounterInterruptionTermination(string? termination) =>
         termination is "campaign-interruption" or AgentHostNativeMapMovementMonitor.FailureCode or

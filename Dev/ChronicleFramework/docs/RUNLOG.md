@@ -1,5 +1,14 @@
 # Chroni
 
+## 2026-11-28 Host 二进制证据链与“不可行动会话表面”（契约 7.749）
+
+- 根因：`harness/Test-AgentLiveModelLoop.ps1` 启动的是 `agenthost/bin/Release/net8.0/ChronicleAgentHost.dll`，上一轮只构建了 Debug → 7.748 的判定从未被执行。
+- 门禁：新增 `Assert-AgentHostBinaryIsFresh`，Release DLL 早于 `agenthost/**/*.cs|csproj` 就在启动游戏前抛错（已实测拦下陈旧二进制）。
+- 重新取证（Release 重建后）：`TestResults/20261128-143825` 起，Stealth 场景的原生选项 `adg:131` 被真正选中。
+- 原生边界：`DoOption` 抛 `ArgumentOutOfRangeException … UpdateSpeakerAndListenerAgents`（`ConversationAgents` 为空 + `IsConversationInProgress=false`）。4 次 400ms 重试全部同错 → 竞态假设证伪。
+- 收敛为显式边界：观察新增 `conversation.addressable`/`flowActive`；mod 选择/继续先预检 `ConversationAgents`；Host 遇到“有选项但不可行动”以 `native-mission-conversation-surface-not-addressable` 结束目标（`TestResults/20261128-144808`，18 决策/24 动作）。
+- 四目标仍 1000/2000 金、1/25 兵、20/50 声望、0/1 同伴。
+
 ## 2026-11-28 会话表面决定能否行动（契约 7.748，未验证）
 
 

@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.748
+Contract version: 7.749
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -40,6 +40,22 @@ objective-mission-conversation-resolved|decisionsUsed=6|nativeActionsUsed=6|retu
 验证状态：代码已编译（`dotnet build agenthost/ChronicleAgentHost.csproj` 0 错；`ChronicleAgentHost.dll` 内含 `HasHandledMissionConversation`）。真机复跑 `TestResults/20261128-141945-deterministic-eyc-ChronicleEycDev-opening-20261126` **仍然**以 `native-mission-entry-mode-unavailable` 结束（18 决策/24 动作），失败时的 `native-mission-entry-mode-unavailable-detail` 里 `mode=Stealth` 且 `conversation` 有两个 clickable 选项——即“表面存在而门未放行”。
 
 因此 7.748 的代码判定**未经验证**：代码路径已就位，但那一轮运行的 Host 可执行文件来源未能证明是本次编译产物（游戏日志该轮没有 `agent-host-process-started`，`D:/ChronicleFramework/BuildCache/Packages` 为空，`Modules/ChronicleFramework/AgentHost` 也不存在）。下一步必须先固定“运行中的 Host 到底是哪个二进制”的证据链（例如让 mod 在启动 Host 时记录路径与 assembly 版本，或在无外壳复用缓存时强制重打包），再复跑同一开局夹具。
+## Contract 7.749 — 先证明跑的是哪个 Host，再谈会话表面
+
+7.748 的“未验证”有了答案：**那一轮跑的 Host 根本不是这次编译的代码**。`harness/Test-AgentLiveModelLoop.ps1` 两处都用 `agenthost/bin/Release/net8.0/ChronicleAgentHost.dll` 启动 Host（`--campaign-action-catalog` 与 `--campaign-loop`），而我上一轮只构建了 Debug（14:19:18），Release 仍是 14:05:01 的旧产物。旧的 `D:/ChronicleFramework/BuildCache/Packages` 已空、`Modules/ChronicleFramework/AgentHost` 不存在，于是日志里自然没有 `agent-host-process-started`。
+
+新增门禁 `Assert-AgentHostBinaryIsFresh`（`harness/Test-AgentLiveModelLoop.ps1`）：读取 `agenthost/` 下最新 `.cs`/`.csproj`（排除 `bin`/`obj`），与待运行的 Release DLL 的 `LastWriteTime` 比较，旧了就直接抛错并说明“Host 收据只有在被评测二进制来自当前源码树时才成立”，两处调用点（catalog 读取、Host 启动）都接上。已实测：陈旧二进制会在启动游戏前被拦下。
+
+在证据链可信之后，Stealth 会话表面才真正被驱动（`TestResults/20261128-143825`、`143825` 之后的 `144123`/`144449`/`144808` 四轮）：
+
+- 入口门按 `HasHandledMissionConversation` 放行，Stealth 场景里 `missionConversationSelect adg:131`（“带路吧。”）被真正发出；
+- 但 Native 返回 `ArgumentOutOfRangeException: Index was out of range … at ConversationManager.UpdateSpeakerAndListenerAgents` —— 该 Mission 会话在 `IsConversationInProgress=false`、`ConversationAgents` 为空的状态下已经发布了选项，`DoOption` 必然崩；
+- Host 先做 4 次 400ms 重试（`mission-conversation-native-action-retried`），四次都是同一异常，竞态假设被证伪；
+- 因此改为显式边界：`mod/AgentObserver.cs` 的 Mission 会话新增 `addressable`（`ConversationAgents.Count > 0`）与 `flowActive`；`HandleMissionConversationSelect/Continue` 先检查 `ConversationAgents`，不可行动时抛出可读拒绝而不是让 Native 崩；Host 在“有 clickable 选项但 `addressable=false`”时直接以 `native-mission-conversation-surface-not-addressable` 结束目标，不再重试、不再猜别的台词。
+
+真机（`TestResults/20261128-144808`）：18 决策 / 24 动作，`failureCode=native-mission-conversation-surface-not-addressable`，前 6 步仍是原生选项驱动的对话（`Continue → adg:124 → Continue → adg:128 → adg:131`）。这条边界是**当前原生能力的真实上限**，不是框架缺动作：该 Mission 的会话管理器在发布选项时没有任何 speaker/listener agent，任何选择都会在原生内部抛异常。
+
+下一步（另行增量）：判断这类“发布选项但不可行动”的 Mission 是否本就不该被 Agent 路线触发（决策层避开），或是否存在原生前置动作（例如让任务逻辑先 `BeginConversation`）能让管理器注册 agent；在没有原生证据前不再对同一场景重复尝试。
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：
