@@ -2320,6 +2320,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.739 接管事实：玩家按 F10 接管身体时，mod 写 `agent-control.json`（`hold=true`，`reason=player-takeover`），Host 在写下一个原生动作命令前等待该文件释放，`reason=escape-menu` 用于 ESC 菜单打开期间；F10 再按一次交还，F9 结束 Agent。Agent 拥有输入时 `GameKey.IsDown/IsPressed` 在 `MapHotKeyCategory` 上被前缀拦截（`MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`），ESC 不在拦截范围。真机截图取证见 TestResults/20261128-081358 与 20261128-081633。
 
+契约 7.767 事实：`BuildActionCatalog` 在“已在定居点且菜单未打开”时改为提供 `menuSelect{MenuId: ResolveSettlementMenuId(...), OptionId: trade}`；移动中改为被动等待（`town-trade-passive-move-wait`，1s 重读，上限 MaxPassiveMoveWaits=45，超出抛 `town-trade-move-never-arrived`）。真机 `TestResults/20261128-192424`：3 决策/2 动作，move 发出后 45 秒窗口内队伍始终没到达——新边界是“移动没有推进”，需先查 `timeControlMode` 与 `party.isMoving` 再定修法。
+
 契约 7.766 事实：mod 的 `menuSelect` 现在可在“队伍站在定居点且无当前菜单”时按请求 `menuId` 激活该菜单（激活后必须 `StringId` 匹配，否则拒绝）。真机 `TestResults/20261128-185210` 结果不变（4 决策/2 动作，`town-trade-no-safe-native-action`，`menuId=<none>`），说明循环未发出 `menuSelect`——缺的是 `BuildActionCatalog` 在 MapState 下、站在城镇且菜单未打开时的候选。该 mod 能力尚未被真机触发。
 
 契约 7.765 事实（进展）：贸易循环起始判定报出确切事实后，真正拦住它的是打开的 Native 询问（`inquiry=True`）；夹具用 `respondInquiry -InquiryToken -InquiryChoice` 解析后，真机 `TestResults/20261128-184706` 首次执行原生动作：`decisions=4, actionsExecuted=2`，停在 `town-trade-no-safe-native-action`（`buyOfferCount=0`，自由地图无报价）。另修：mod 发布的空 `partyScreen` 节点按无屏处理（`IsInactivePartyScreen`）。

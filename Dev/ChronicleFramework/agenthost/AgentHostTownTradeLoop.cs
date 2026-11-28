@@ -35,6 +35,8 @@ internal static class AgentHostTownTradeLoop
         var buyActionCount = 0;
         string? moveTargetId = null;
         var encounterWaits = 0;
+        var passiveMoveWaits = 0;
+        const int MaxPassiveMoveWaits = 45;
         const int MaxEncounterWaits = 20;
         var moveStartPending = false;
         var rejectedProviderDecisions = 0;
@@ -190,6 +192,26 @@ internal static class AgentHostTownTradeLoop
                     }
                 }
 
+                // While the party is still travelling the bounded slice has nothing to decide: waiting
+                // passively keeps the run moving without inventing an action or asking the model.
+                var movingTarget = ReadString(state["location"] as JsonObject, "targetSettlementId");
+                var movingNow = ReadBoolean(state["party"] as JsonObject, "isMoving") ||
+                    (!string.IsNullOrWhiteSpace(movingTarget) && !string.Equals(ReadString(state["location"] as JsonObject, "currentSettlementId"), movingTarget, StringComparison.Ordinal));
+                if (movingNow && passiveMoveWaits >= MaxPassiveMoveWaits)
+                    throw new AgentHostException("town-trade-move-never-arrived", "The bounded Native settlement move did not arrive within the passive watch window; no purchase was attempted and Campaign time was not changed explicitly.");
+                if (movingNow && moveTargetId is not null && passiveMoveWaits < MaxPassiveMoveWaits)
+                {
+                    passiveMoveWaits++;
+                    ledger.Trace.Add(new JsonObject
+                    {
+                        ["stage"] = "town-trade-passive-move-wait",
+                        ["targetSettlementId"] = movingTarget,
+                        ["nativeActionSent"] = false
+                    });
+                    await Task.Delay(1000, elapsed.Token);
+                    using (var movingFresh = await stateClient.ReadStateAsync(elapsed.Token)) currentNative = ParseObject(movingFresh.RootElement);
+                    continue;
+                }
                 var actionCatalog = BuildActionCatalog(state, previousReceipt, safeTowns, moveTargetId, maxPurchaseUnits, allowMapAfterNativeTownLeave);
                 var controls = BuildControlCatalog(state, moveTargetId, moveStartPending);
                 if (actionCatalog.Count == 0 && controls.Count == 0)
@@ -513,7 +535,19 @@ internal static class AgentHostTownTradeLoop
                 ["argumentValues"] = new JsonObject { ["MenuId"] = new JsonArray(menuId), ["OptionId"] = new JsonArray("trade") }
             });
         }
-        if (!string.IsNullOrWhiteSpace(currentSettlementId)) return new JsonArray();
+        if (!string.IsNullOrWhiteSpace(currentSettlementId))
+        {
+            // Standing inside a settlement leaves the party on the Map with no menu until someone opens
+            // it. Offer the settlement's own menu plus its trade option so the bounded buy can start; the
+            // Native handler activates that exact menu id when no menu is open.
+            var standingMenuId = ResolveSettlementMenuId(state, currentSettlementId);
+            if (string.IsNullOrWhiteSpace(standingMenuId)) return new JsonArray();
+            return new JsonArray(new JsonObject
+            {
+                ["action"] = "menuSelect", ["arguments"] = new JsonArray("MenuId", "OptionId"),
+                ["argumentValues"] = new JsonObject { ["MenuId"] = new JsonArray(standingMenuId), ["OptionId"] = new JsonArray("trade") }
+            });
+        }
         if (safeMarkets is null) return new JsonArray(new JsonObject { ["action"] = "mapSettlementTargets", ["arguments"] = new JsonArray() });
         var ids = safeMarkets.OfType<JsonObject>().Select(target => ReadString(target, "id"))
             .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToArray();
@@ -1023,6 +1057,18 @@ internal static class AgentHostTownTradeLoop
         return AgentHostCampaignStateFacts.IsActiveEncounter(state) && !nativeSettlementTrade;
     }
 
+    private static string? ResolveSettlementMenuId(JsonObject state, string settlementId)
+    {
+        foreach (var target in (state["nearbySettlements"] as JsonArray ?? new JsonArray()).OfType<JsonObject>())
+        {
+            if (!string.Equals(ReadString(target, "id"), settlementId, StringComparison.Ordinal)) continue;
+            var type = ReadString(target, "type");
+            if (string.Equals(type, "village", StringComparison.Ordinal)) return "village";
+            if (string.Equals(type, "town", StringComparison.Ordinal)) return "town";
+            return null;
+        }
+        return null;
+    }
     private static (string Code, string Message) DescribeNoAction(
         JsonObject state,
         JsonObject? previousReceipt,

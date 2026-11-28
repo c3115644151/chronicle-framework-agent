@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.766
+Contract version: 7.767
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -295,7 +295,23 @@ failure = gameState=MapState; menuId=<none>; buyOfferCount=0
 所以下一步不在 mod，而在 `AgentHostTownTradeLoop.BuildActionCatalog` 的 MapState 分支：当 `location.currentSettlementId` 属于本次移动目标（或已知城镇）且 `context.menuId` 为空时，提供一个 `menuSelect { menuId: town|village, optionId: trade }` 候选，让刚补的 mod 能力被真正调用。
 
 本轮没有买入收据；`menuSelect` 激活能力目前是“已实现、未被真机触发”，这点在文档里写清，没有当成已验证能力。
-## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
+## Contract 7.767 — 站在城镇给 `menuSelect` 候选、移动中被动等待（有上限）
+
+两处改动（都在 `AgentHostTownTradeLoop`）：
+
+1. `BuildActionCatalog` 的 MapState 分支：原来在“队伍已在某定居点、菜单未打开”时直接返回空目录（第 516 行），现在改为提供 `menuSelect{MenuId, OptionId: trade}`，`MenuId` 由新增的 `ResolveSettlementMenuId` 从 `nearbySettlements` 的 `type` 推出（town/village）——让 7.766 的 mod 能力真正有被调用的机会；
+2. 移动中被动等待：`party.isMoving` 或 `targetSettlementId != currentSettlementId` 时不问模型，写 `town-trade-passive-move-wait`、等 1 秒、重读状态；上限 `MaxPassiveMoveWaits = 45`，超出抛 `town-trade-move-never-arrived`（不静默循环、不改时间）。
+
+真机（`TestResults/20261128-192424`）：
+
+```
+resultKind = town-trade-buy, decisions = 3, actionsExecuted = 2
+failureCode = town-trade-move-never-arrived
+```
+
+即：`mapSettlementTargets` + `move` 都发出了，但 45 秒窗口内队伍**始终没有到达**，等待轨迹只有 `town-trade-passive-move-wait`。这是一条明确的新边界——不是菜单问题，是移动本身没有推进（考虑 Campaign 时钟/暂停与移动速度，先确认 `timeControlMode` 与 `party.isMoving` 的实际值再定修法）。
+
+中途一次“10 分钟只 3 决策”的空转（`TestResults/20261128-185958`）是等待上限设成 600 造成，已调到 45 并加了显式失败码。## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：
 
