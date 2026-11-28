@@ -949,6 +949,14 @@ if ($agentHostAutonomyLoopSource -notmatch 'IsStartUpLocationMission' -or
 $agentHostEvaluationSource = Get-Content -LiteralPath (Join-Path $stageRoot 'Test-AgentHostCampaignLoopEvaluation.ps1') -Raw -Encoding UTF8
 if ($agentHostEvaluationSource -notmatch 'TownTradeFromStoryMode' -or
     $agentHostEvaluationSource -notmatch "'-TownTradeLoop'" -or
-    $agentLiveModelLoopSource -notmatch 'TownTradeLoop requires a free Campaign Map or a settlement menu that publishes the Native trade option') {
+    $agentLiveModelLoopSource -notmatch 'TownTradeLoop requires the settlement trade screen to be open before the bounded run') {
     throw 'Contract 7.752 requires the town-trade slice to have an evaluation entry that passes the bounded loop switch and a live precondition that refuses fixtures which are neither a free map nor a settlement trade menu.'
+}
+
+$agentCliSource = Get-Content -LiteralPath (Join-Path $stageRoot 'Agent-Cli.ps1') -Raw -Encoding UTF8
+if ($agentCliSource -notmatch "'menuSelect'" -or
+    $agentCliSource -notmatch 'menuId = \$MenuId' -or
+    $agentLiveModelLoopSource -notmatch 'TownTradeLoop could not open the Native settlement trade menu' -or
+    $agentLiveModelLoopSource -notmatch 'partyScreenMode') {
+    throw 'Contract 7.753 requires the Harness CLI to reach the approved Native menuSelect action and the town-trade fixture preparation to verify the Native Trade screen before any model action is sent.'
 }

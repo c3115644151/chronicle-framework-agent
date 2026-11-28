@@ -1,5 +1,11 @@
 # Chroni
 
+## 2026-11-28 城镇贸易夹具：缺“进入定居点菜单”一步（契约 7.753）
+
+- 新增 CLI `menuSelect`（`-MenuId`/`-OptionId`）+ live 测试夹具准备（打开 trade 屏并回读 `partyScreenMode`）。
+- 真机 `TestResults/20261128-153608`：`menu option not found`（`HandleMenuSelect`）——读档后 `menuId` 为空，原生没有当前菜单，`menuSelect village trade` 无从匹配。
+- 下一步：先补一个进入定居点菜单的原生动作（例如 Native 的 settlement menu 入口），再做 trade 选项与买入收据。
+
 ## 2026-11-28 城镇贸易评测入口（契约 7.752）
 
 - 新增 `-TownTradeFromStoryMode`（evaluation）+ TownTrade 前置条件（live test）：自由地图或已发布 trade 选项的定居点菜单才放行。

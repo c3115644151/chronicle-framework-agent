@@ -446,8 +446,23 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
         # would need an unverified menu guess.
         $townTradeMenuId = [string]$baseline.state.context.menuId
         $townTradeOption = @($baseline.state.availableMenuOptions | Where-Object { $_.available -and $_.enabled -and ([string]$_.id -match 'trade') }).Count -gt 0
-        if (-not [string]::IsNullOrWhiteSpace([string]$baseline.state.location.currentSettlementId) -and -not $townTradeOption) {
-            throw 'TownTradeLoop requires a free Campaign Map or a settlement menu that publishes the Native trade option; no model action was sent.'
+        $townTradeSettlementId = [string]$baseline.state.location.currentSettlementId
+        if (-not [string]::IsNullOrWhiteSpace($townTradeSettlementId)) {
+            if (-not $townTradeOption) {
+                # Harness fixture preparation: open the settlement trade screen through the same
+                # Native menu action the Agent uses, so the bounded loop starts in a trade screen
+                # instead of guessing. The receipt is recorded in the live result.
+                $townTradeMenuToOpen = if ($townTradeMenuId) { $townTradeMenuId } else { 'village' }
+                $townTradeOpen = Invoke-AgentCli 'menuSelect' @('-MenuId', $townTradeMenuToOpen, '-OptionId', 'trade')
+                if ($townTradeOpen.status -ne 'completed') { throw ('TownTradeLoop could not open the Native settlement trade menu: ' + [string]$townTradeOpen.error) }
+                $townTradeOpenedState = Invoke-AgentCli 'state'
+                $townTradeScreenMode = [string]$townTradeOpenedState.partyScreenMode
+                if ($townTradeScreenMode -notmatch 'Trade') { throw ('TownTradeLoop opened the settlement menu but the Native Trade screen did not appear (partyScreenMode=' + $townTradeScreenMode + '); no model action was sent.') }
+                $townTradeFixtureReceipt = [ordered]@{ MenuId = $townTradeMenuToOpen; OptionId = 'trade'; PartyScreenMode = $townTradeScreenMode; SettlementId = $townTradeSettlementId }
+            }
+            elseif ($townTradeMenuId) {
+                throw 'TownTradeLoop requires the settlement trade screen to be open before the bounded run; the fixture only published the trade menu option.'
+            }
         }
     }
     elseif ($baseline.state.location.currentSettlementId) {

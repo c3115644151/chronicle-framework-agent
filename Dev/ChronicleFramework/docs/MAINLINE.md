@@ -2320,6 +2320,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.739 接管事实：玩家按 F10 接管身体时，mod 写 `agent-control.json`（`hold=true`，`reason=player-takeover`），Host 在写下一个原生动作命令前等待该文件释放，`reason=escape-menu` 用于 ESC 菜单打开期间；F10 再按一次交还，F9 结束 Agent。Agent 拥有输入时 `GameKey.IsDown/IsPressed` 在 `MapHotKeyCategory` 上被前缀拦截（`MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`），ESC 不在拦截范围。真机截图取证见 TestResults/20261128-081358 与 20261128-081633。
 
+契约 7.753 事实：CLI 新增 `menuSelect`（`-MenuId`/`-OptionId`），TownTrade 夹具准备用它打开贸易屏并回读 `partyScreenMode`；真机 `TestResults/20261128-153608` 在准备阶段失败：`menu option not found`（`HandleMenuSelect`），因为读档后 `menuId` 为空、原生没有当前菜单。买入收据仍缺；下一步是补“进入定居点菜单”的原生动作。
+
 契约 7.752 事实：评测脚本新增 `-TownTradeFromStoryMode`（克隆源存档并传 `-TownTradeLoop`），live 测试新增 TownTrade 前置条件（自由地图或已发布 trade 选项的定居点菜单）。真机 `TestResults/20261128-152713` 在入口处确定性拒绝（未发模型动作），因为现成夹具停在定居点但菜单关闭；买入收据仍缺。
 
 契约 7.751 事实：遭遇入口分支（`IsNativeMissionScene` → `WaitForHandledMissionModeAsync`）不再接管 `mode=StartUp` 的地点任务（`IsStartUpLocationMission`），Town/Tavern 继续走 Leave/对话/交易路径；会话表面放行同样排除 StartUp。此改动修复了 b96b29d 就已存在的 `companion-provider-failure-recovery-selftest-failed`（`--provider-self-test` 现为 EXIT=0）。town-trade 分派接受 `AllSupportedActions`，为 EYC 复用买入腿准备；但该 slice 仍无 evaluation wrapper，live 直跑被“地图夹具不得停在定居点”拒绝。

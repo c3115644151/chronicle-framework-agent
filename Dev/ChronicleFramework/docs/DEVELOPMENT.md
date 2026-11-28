@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.752
+Contract version: 7.753
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -106,6 +106,21 @@ TownTradeLoop requires a free Campaign Map or a settlement menu that publishes t
 也就是说入口本身可用且确定性地拒绝不合适的夹具；**还没有**一次真正的买入收据。原因已查清：现成夹具（`ChronicleEycDev-opening-20261126`）虽然停在定居点，但读档后菜单是关闭的（`menuId` 为空），既不是自由地图也不是 trade 屏；而 Host 的城镇贸易循环按合同只在“自由地图或当前定居点的原生 Trade 屏”启动。
 
 下一步：给 TownTrade 切片准备一个真正的夹具——要么读档后立刻用原生菜单进入 trade 屏，要么把队伍置于定居点外的自由地图；然后才能产出 #143 需要的“买入收据 + 金币/货物变化”证据。
+## Contract 7.753 — 城镇贸易夹具尝试：菜单没打开，原生就不认动作
+
+7.752 之后给 TownTrade 切片加了夹具准备：`harness/Agent-Cli.ps1` 补上 `menuSelect` 的 CLI 通道（`-MenuId`/`-OptionId`），live 测试在“定居点菜单未打开”时先用同一原生菜单动作打开贸易屏，并回读 `partyScreenMode` 校验。
+
+真机（`TestResults/20261128-153608-deterministic-towntrade-eval-ChronicleEycDev-opening-20261126`）：夹具准备阶段直接失败——
+
+```
+TownTradeLoop could not open the Native settlement trade menu:
+System.InvalidOperationException: menu option not found
+   at ChronicleFramework.ChronicleAgentProtocol.HandleMenuSelect
+```
+
+结论：**整局读档后 `menuId` 为空**，此时原生没有“当前菜单”，`menuSelect village trade` 自然找不到选项（EYC 运行里同一调用能成功，是因为那时 village 菜单已经是当前菜单）。所以夹具准备还缺第一步——从地图进入定居点菜单，然后才谈 trade 选项。
+
+这一轮没有产出买入收据，但把缺口从“不知道差什么”缩小成“差一次进入定居点菜单的原生动作”；`menuSelect` 的 CLI 通道与前置校验已成为可复用件，`-TownTradeFromStoryMode` 仍会在准备失败时确定性拒绝而不是带着错误状态启动 Host。
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：
