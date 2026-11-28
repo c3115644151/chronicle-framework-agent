@@ -29,6 +29,8 @@ internal static class AgentGameWindow
     private const uint SwpNoMove = 0x0002;
     private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoActivate = 0x0010;
+    private const int SwShowNoActivate = 4;
+    private static bool _captureMode;
     private const uint SwpFrameChanged = 0x0020;
 
     private static int _installed;
@@ -44,7 +46,12 @@ internal static class AgentGameWindow
     {
         // The engine itself creates its window without activation. A player session must be a normal window, so the
         // mod never keeps WS_EX_NOACTIVATE; capture runs that must not steal the cursor re-apply it from the harness.
-        const bool keepNonActivating = false;
+        // An automation run must not take the desktop: the player keeps the foreground and the pointer.
+        // Outside a harness run the window stays a normal player window (clickable, taskbar, resizable).
+        var keepNonActivating = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE"));
+        // Remember whose window the player was using, so an automation start can hand it straight back.
+        var priorForeground = keepNonActivating ? GetForegroundWindow() : IntPtr.Zero;
+
         for (var attempt = 0; attempt < 120; attempt++)
         {
             try
@@ -52,9 +59,9 @@ internal static class AgentGameWindow
                 var handle = FindMainWindow(Process.GetCurrentProcess().Id);
                 if (handle != IntPtr.Zero)
                 {
-                    Apply(handle, keepNonActivating);
+                    Apply(handle, keepNonActivating, priorForeground);
                     Thread.Sleep(4000);
-                    Apply(handle, keepNonActivating);
+                    Apply(handle, keepNonActivating, priorForeground);
                     return;
                 }
             }
@@ -68,7 +75,7 @@ internal static class AgentGameWindow
         ChronicleDiagnostics.Write("agent-window-style-skipped|reason=no-main-window");
     }
 
-    private static void Apply(IntPtr handle, bool keepNonActivating)
+    private static void Apply(IntPtr handle, bool keepNonActivating, IntPtr priorForeground)
     {
         EnsureResizableHitTest(handle);
         RegisterTaskbarTab(handle);
@@ -82,10 +89,18 @@ internal static class AgentGameWindow
         if (owner != IntPtr.Zero) SetWindowLongPtr(handle, GwOwner, IntPtr.Zero);
         var requestedStyle = (style & ~WsPopup) | WsCaption | WsThickFrame | WsSysMenu | WsMinimizeBox | WsMaximizeBox;
         var requestedExStyle = (exStyle | WsExAppWindow) & ~WsExToolWindow;
-        if (!keepNonActivating) requestedExStyle &= ~WsExNoActivate;
+        // Capture runs must stay non-activating or the engine grabs the pointer; a player run must not.
+        if (keepNonActivating) requestedExStyle |= WsExNoActivate;
+        else requestedExStyle &= ~WsExNoActivate;
+        _captureMode = keepNonActivating;
         if (requestedStyle != style) SetWindowLongPtr(handle, GwlStyle, new IntPtr(requestedStyle));
         if (requestedExStyle != exStyle) SetWindowLongPtr(handle, GwlExStyle, new IntPtr(requestedExStyle));
         SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0, SwpFrameChanged | SwpNoMove | SwpNoSize | SwpNoZOrder | SwpNoActivate);
+        if (keepNonActivating)
+        {
+            ShowWindow(handle, SwShowNoActivate);
+            if (priorForeground != IntPtr.Zero && GetForegroundWindow() == handle) SetForegroundWindow(priorForeground);
+        }
         var finalStyle = GetWindowLongPtr(handle, GwlStyle).ToInt64();
         var finalExStyle = GetWindowLongPtr(handle, GwlExStyle).ToInt64();
         ChronicleDiagnostics.Write(
@@ -128,6 +143,7 @@ internal static class AgentGameWindow
     private const uint WmNcHitTest = 0x0084;
     private const uint WmMouseActivate = 0x0021;
     private const int MaActivate = 1;
+    private const int MaNoActivate = 3;
     private static bool _mouseActivateLogged;
     private const int HtClient = 1;
     private const int HtLeft = 10, HtRight = 11, HtTop = 12, HtTopLeft = 13, HtTopRight = 14, HtBottom = 15, HtBottomLeft = 16, HtBottomRight = 17;
@@ -158,7 +174,9 @@ internal static class AgentGameWindow
                 _mouseActivateLogged = true;
                 ChronicleDiagnostics.Write("agent-window-mouse-activate|player-clicks-raise-window=True");
             }
-            return new IntPtr(MaActivate);
+            // In an automation run the window must stay non-activating; otherwise the engine takes the
+            // pointer the moment the run starts (contract 7.776).
+            return new IntPtr(_captureMode ? MaNoActivate : MaActivate);
         }
         if (message == WmNcHitTest)
         {
@@ -223,6 +241,9 @@ internal static class AgentGameWindow
     [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr handle, int command);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr handle);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr handle, int command);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr handle);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr handle, out Rect rect);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr handle, StringBuilder text, int count);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)] private static extern IntPtr GetWindowLongPtr(IntPtr handle, int index);

@@ -296,7 +296,12 @@ if ($Action -in @('start','load')) {
         Set-SafeExitMarker
         # Capture runs must not steal the cursor; the player session keeps normal activation so clicking raises the window.
         [Environment]::SetEnvironmentVariable('CHRONICLE_HARNESS_NONACTIVATING_WINDOW', '1', 'Process')
-        $process = Start-ChronicleSteamGame -FilePath $launcher -ArgumentList "/continuesave $SaveName $moduleArgument /anticheat" -WorkingDirectory $binDirectory -WindowStyle Hidden
+        # An automation start must not take the desktop: remember whose window the user was using and hand it
+    # back if the game engine activates itself while loading (the mod also refuses activation in harness mode).
+    . (Join-Path $PSScriptRoot "HarnessWindowGuard.ps1")
+    $priorForeground = [ChronicleWindowGuard]::GetForegroundWindow()
+    $process = Start-ChronicleSteamGame -FilePath $launcher -ArgumentList "/continuesave $SaveName $moduleArgument /anticheat" -WorkingDirectory $binDirectory -WindowStyle Hidden
+    if ($priorForeground -ne [IntPtr]::Zero) { [ChronicleWindowGuard]::StartRestoring($priorForeground, $process.Id, 60) }
         $startupTraceDirectory = if (-not [string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) { $env:CHRONICLE_HARNESS_TEMP } else { $protocolRoot }
         New-Item -ItemType Directory -Force -Path $startupTraceDirectory | Out-Null
         $startupProgressPath = Join-Path $startupTraceDirectory "agent-cli-startup-$($process.Id).jsonl"

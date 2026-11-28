@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.775
+Contract version: 7.776
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -2313,7 +2313,24 @@ A0/A30/A60: day=91077.375, moving=False, tc=StoppablePlay   （仍然完全不�
 
 一次变更只推进一个验收层或一个消费者。新 API 先 Probe；行为代码先只读；写入原版状态前必须有基线、回滚和回归测试。
 
-## 长时间运行与恢复
+## Contract 7.776 — 启动不再抢桌面：不抢前台、不抓鼠标
+
+用户反馈（m19570）：启动客户端会抢走屏幕上层与鼠标。定位到两个来源并分别修掉：
+
+1. **引擎激活**：`mod/AgentGameWindow.cs` 在自动化运行（`CHRONICLE_HARNESS_MODE` 非空）时现在强制 `WS_EX_NOACTIVATE`（此前只“不删除”，从不添加）、`ShowWindow(SW_SHOWNOACTIVATE)`，并让窗口子类化里的 `WM_MOUSEACTIVATE` 返回 `MA_NOACTIVATE`（`MaNoActivate = 3`）——引擎因此不会抢前台也不会抓指针；玩家正常运行时仍返回 `MA_ACTIVATE`，点标题即可置顶；
+2. **加载期抢焦点**：新增 `harness/HarnessWindowGuard.ps1`（`GetForegroundWindow`/`SetForegroundWindow`/`GetWindowThreadProcessId`），`Agent-Cli.ps1` 在启动游戏前记住用户当前前台窗口，启动后用后台线程在 60 秒内若发现前台变成游戏进程就把前台交还。
+
+真机测量（`TestResults/_tmp/probe-foreground5.log`，全程 `CHRONICLE_HARNESS_MODE=visual-capture`，加载期间每 2 秒采样共 44 秒）：
+
+```
+STOLEN_SAMPLES=0/22
+FINAL_STOLEN=no
+窗口样式：noActivate=True | captureMode=True（mod 日志）
+```
+
+对照：修复前的 `probe-foreground.log` 出现过 `stolen=True`，且窗口样式是 `noActivate=False|captureMode=False`。
+
+边界说明：玩家**不带 harness 模式**手动启动时，窗口仍是普通玩家窗口（可点击置顶、可缩放），这是 7.742 的既有契约，本次不动。## 长时间运行与恢复
 
 - 使用检查点推进，不进行一次性盲等；
 - 每个检查点保存状态、最后命令、事件计数、进程健康和 disposable save；

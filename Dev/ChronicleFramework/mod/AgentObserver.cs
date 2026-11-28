@@ -159,6 +159,10 @@ internal static class ChronicleAgentObserver
         var nativeInquiryOpen = ChronicleInquiryAdapter.IsInquiryOpen;
         json.Append(",\"inquiryOpen\":").Append(Bool(nativeInquiryOpen));
         Property(json, "inquiryActiveGameState", activeGameState?.GetType().Name, true);
+        json.Append(",\"campaignTimeMode\":").Append(Campaign.Current == null ? "null" : "\"" + Campaign.Current.TimeControlMode.ToString() + "\"");
+        json.Append(",\"engineTickCount\":").Append(ChronicleCampaignBehavior.CampaignTickCount);
+        json.Append(",\"engineDeltaTime\":").Append(ChronicleCampaignBehavior.LastCampaignDeltaTime.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+        json.Append(",\"engineCampaignDay\":").Append(double.IsNaN(ChronicleCampaignBehavior.LastCampaignDay) ? "null" : ChronicleCampaignBehavior.LastCampaignDay.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
         json.Append(",\"inquiry\":").Append(nativeInquiryOpen ? ChronicleInquiryAdapter.BuildMapInquiryJson() : "null");
         json.Append(",\"sceneNotification\":").Append(ChronicleAgentSceneNotification.BuildJson(includeClockAudit: false));
         json.Append(",\"mapIncident\":").Append(ChronicleAgentMapIncidentAdapter.BuildJson());

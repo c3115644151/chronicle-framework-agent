@@ -385,6 +385,9 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
     private ChronicleAgentProtocol _agentProtocol;
 
     internal int DailyTickCount => _dailyTickCount;
+    internal static long CampaignTickCount;
+    internal static float LastCampaignDeltaTime;
+    internal static double LastCampaignDay;
     internal string AgentRuntimeSessionId => _agentRuntimeSessionId;
     internal bool AgentProtocolReady => _agentProtocol != null;
     internal void PollAgentProtocol() => _agentProtocol?.Poll(this);
@@ -706,6 +709,10 @@ internal sealed class ChronicleCampaignBehavior : CampaignBehaviorBase
 
     private void OnCampaignTick(float deltaTime)
     {
+        // Diagnostic counter: proves whether the Campaign engine ticks at all (contract 7.775).
+        CampaignTickCount++;
+        LastCampaignDeltaTime = deltaTime;
+        LastCampaignDay = TaleWorlds.CampaignSystem.CampaignTime.Now.ToDays;
         if (Environment.GetEnvironmentVariable(HarnessModeVariable) == "campaign-actor-think-trace" && !_campaignActorThinkTraceCaptured)
         {
             _campaignActorThinkTraceScanElapsed += deltaTime;
