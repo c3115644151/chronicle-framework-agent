@@ -781,13 +781,13 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     ? JsonNode.Parse(stateNode.GetRawText())?.AsObject()
                     : null;
                 var context = state?["context"] as JsonObject;
-                if (string.Equals(ReadString(context, "gameState"), "MissionState", StringComparison.Ordinal) == false ||
-                    context?["conversation"] is not JsonObject)
+                if (string.Equals(ReadString(context, "gameState"), "MissionState", StringComparison.Ordinal) == false)
                     return new JsonObject { ["decisions"] = decisions, ["actions"] = actions, ["returnedToMap"] = true };
                 if (!IsNativeConversationMissionScene(fresh.RootElement))
-                    return new JsonObject { ["decisions"] = decisions, ["actions"] = actions, ["returnedToMap"] = true };
+                    return new JsonObject { ["decisions"] = decisions, ["actions"] = actions, ["returnedToMap"] = false, ["conversationSurface"] = "absent" };
                 var missionConversation = state?["conversation"] as JsonObject ?? state?["mission"]?["conversation"] as JsonObject;
-                if (missionConversation is null) return null;
+                if (missionConversation is null)
+                    return new JsonObject { ["decisions"] = decisions, ["actions"] = actions, ["returnedToMap"] = false, ["conversationSurface"] = "absent" };
                 var clickableIds = (missionConversation["options"] as JsonArray ?? new JsonArray()).OfType<JsonObject>()
                     .Where(option => ReadBoolean(option, "clickable"))
                     .Select(option => ReadString(option, "id"))
@@ -897,7 +897,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 var ended = ReadBoolean(mission, "missionEnded");
                 if (ReadString(context, "gameState") != "MissionState" || ended)
                     return JsonDocument.Parse(fresh.RootElement.GetRawText());
-                if (mode is "Deployment" or "Battle" or "Conversation")
+                if (mode is "Deployment" or "Battle" or "Conversation" || HasHandledMissionConversation(state))
                     return JsonDocument.Parse(fresh.RootElement.GetRawText());
                 lastMission = mission?.DeepClone() as JsonObject;
                 lastContext = context?.DeepClone() as JsonObject;
@@ -1677,6 +1677,19 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                                 return BuildResult("failed", "native-mission-conversation-unresolved", false,
                                     "The Native mission conversation never offered a selectable Native option or a continuable line; the Host stopped instead of inventing dialogue.",
                                     "native-mission-conversation-unresolved", journalObjectives, snapshot, differences);
+                            if (ReadString(conversationResult, "conversationSurface") == "absent")
+                            {
+                                ledger.Trace.Add(new JsonObject
+                                {
+                                    ["stage"] = "objective-mission-conversation-surface-ended",
+                                    ["objectiveId"] = objectiveId,
+                                    ["decisionsUsed"] = conversationResult["decisions"]?.DeepClone(),
+                                    ["nativeActionsUsed"] = conversationResult["actions"]?.DeepClone(),
+                                    ["returnedToMap"] = false
+                                });
+                                nativeActions += ReadInt(conversationResult, "actions", 0);
+                                continue;
+                            }
                             ledger.Trace.Add(new JsonObject
                             {
                                 ["stage"] = "objective-mission-conversation-resolved",
@@ -2598,8 +2611,21 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         var state = JsonNode.Parse(stateElement.GetRawText())?.AsObject();
         if (state is null || ReadString(state["context"] as JsonObject, "gameState") != "MissionState") return false;
         var mission = state["mission"] as JsonObject;
-        return mission is not null && ReadBoolean(mission, "active") && !ReadBoolean(mission, "missionEnded") &&
-               string.Equals(ReadString(mission, "mode"), "Conversation", StringComparison.Ordinal);
+        if (mission is null || !ReadBoolean(mission, "active") || ReadBoolean(mission, "missionEnded")) return false;
+        if (string.Equals(ReadString(mission, "mode"), "Conversation", StringComparison.Ordinal)) return true;
+        // Native publishes the same ConversationManager surface from non-Conversation Mission
+        // modes (a hideout Stealth approach opens with a spoken line and Native options).
+        // The published surface, not the mode string, decides whether the Host can act in bounds.
+        return HasHandledMissionConversation(state);
+    }
+    internal static bool HasHandledMissionConversation(JsonObject? state)
+    {
+        var mission = state?["mission"] as JsonObject;
+        var conversation = state?["conversation"] as JsonObject ?? mission?["conversation"] as JsonObject;
+        if (conversation is null) return false;
+        if (ReadBoolean(conversation, "inProgress")) return true;
+        if (!string.IsNullOrWhiteSpace(ReadString(conversation, "sentenceText"))) return true;
+        return (conversation["options"] as JsonArray ?? new JsonArray()).OfType<JsonObject>().Any(option => ReadBoolean(option, "clickable"));
     }
     internal static bool IsNativeBattleMissionScene(JsonElement native)
     {

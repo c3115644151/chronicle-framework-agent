@@ -913,3 +913,9 @@ if ($agentMissionDialogueSource -notmatch 'HandleMissionConversationSelect' -or
     $deterministicProviderSource -notmatch '离开\|结束\|拒绝') {
     throw 'Contract 7.747 requires the Host to drive the Native mission conversation through the option directory the mod exposes, reject invented answers, and let the deterministic provider pick a leaving option.'
 }
+
+if ($agentHostAutonomyLoopSource -notmatch 'HasHandledMissionConversation' -or
+    $agentHostAutonomyLoopSource -notmatch 'conversationSurface' -or
+    $agentHostAutonomyLoopSource -notmatch 'objective-mission-conversation-surface-ended') {
+    throw 'Contract 7.748 requires the Mission conversation surface, not the Mission mode string, to decide whether the Host can act in bounds; a Mission that stops publishing the surface must end the conversation subflow instead of failing the objective.'
+}

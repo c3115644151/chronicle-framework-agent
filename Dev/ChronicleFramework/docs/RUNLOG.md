@@ -1,5 +1,12 @@
 # Chroni
 
+## 2026-11-28 会话表面决定能否行动（契约 7.748，未验证）
+
+- 事实：`TestResults/20261128-140539` 的 `native-mission-entry-mode-unavailable-detail` 里 `mode=Stealth`（`villa_singular_c`）而 `conversation` 已发布两个 clickable 选项（`adg:131` 带路吧、`adg:132` 我得先处理另一件事），入口门只认模式字符串所以 60 秒判死。
+- 改动：`HasHandledMissionConversation` + `IsNativeConversationMissionScene`/`WaitForHandledMissionModeAsync` 改按会话表面放行；会话表面中途消失时写 `objective-mission-conversation-surface-ended` 并重新规划，不再把目标判死。
+- 复跑：`TestResults/20261128-141945` 仍以 `native-mission-entry-mode-unavailable` 结束（18 决策 / 24 动作），失败 detail 与上一轮同形。→ 代码判定未经验证。
+- 未决：这一轮运行中的 Host 可执行文件来源没能证明是本次编译产物（该轮游戏日志无 `agent-host-process-started`；`D:/ChronicleFramework/BuildCache/Packages` 为空；`Modules/ChronicleFramework/AgentHost` 不存在）。下一步先把“运行中的 Host 是哪个二进制”的证据链固定下来（记录路径与 assembly 版本，或禁用缓存复用强制重打包）再复跑。
+
 ## 2026-11-28 Mission 会话真机走通（契约 7.747）
 
 - Host：`ResolveMissionConversationAsync` 有界（16 决策）驱动 `missionConversationSelect/Continue`，只用原生列出的 clickable 选项。

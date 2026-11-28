@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.747
+Contract version: 7.748
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -26,6 +26,20 @@ objective-mission-conversation-resolved|decisionsUsed=6|nativeActionsUsed=6|retu
 
 同轮暴露的下一个边界：随后一次遭遇把 Native 带进 `mode=Stealth`（`villa_singular_c`）场景，`WaitForHandledMissionModeAsync` 60s 内等不到 Deployment/Battle/Conversation，终态 `native-mission-entry-mode-unavailable`。`missionLeave` 只接受友好地点 Mission（`AgentMissionInputPatch.IsSupportedLocationLeaveMission` + `IsFriendlyMission`），Stealth 不在其中，因此 Host 目前对该场景没有有界动作面。下一步二选一：给 mod 加非友好 Stealth 场景的有界离场，或在决策层避免把队伍送进会触发 Stealth 的路线。
 
+## Contract 7.748 — 会话表面（而不是 Mission 模式）决定 Host 能否行动
+
+7.747 之后暴露一个真实边界：遭遇可以把 Native 推进 `mode=Stealth` 的 Mission（实测 `sceneName=villa_singular_c`），此时 `mission.conversation` 已经有句面与可点选项（`带路吧。`=`adg:131`、`我得先处理另一件事。`=`adg:132`），但入口门只认 `Deployment|Battle|Conversation` 三个模式字符串，60 秒后判 `native-mission-entry-mode-unavailable`（`TestResults/20261128-140539`，18 决策/82 秒）。
+
+改动（`agenthost/AgentHostEstablishYourClanAutonomyLoop.cs`）：
+
+- 新增 `HasHandledMissionConversation(JsonObject? state)`：读 `state.mission.conversation`（或顶层 `state.conversation`），`inProgress`、非空 `sentenceText`、或至少一个 `clickable` 选项，任一成立即为“可行动的会话表面”；
+- `IsNativeConversationMissionScene` 从“模式字符串等于 Conversation”改为“Mission 活着且（模式是 Conversation 或发布可行动会话表面）”，Stealth/其它模式只要发布会话就归入同一有界分支；
+- `WaitForHandledMissionModeAsync` 在 `mode is Deployment or Battle or Conversation` 之外接受 `HasHandledMissionConversation`；
+- `ResolveMissionConversationAsync` 不再要求 `context.conversation` 存在（Stealth 场景的会话挂在 `mission.conversation` 上），并且当 Mission 仍活着但会话表面消失时返回 `conversationSurface=absent`，由调用方写 `objective-mission-conversation-surface-ended` 后重新规划，而不是把整个目标判死。
+
+验证状态：代码已编译（`dotnet build agenthost/ChronicleAgentHost.csproj` 0 错；`ChronicleAgentHost.dll` 内含 `HasHandledMissionConversation`）。真机复跑 `TestResults/20261128-141945-deterministic-eyc-ChronicleEycDev-opening-20261126` **仍然**以 `native-mission-entry-mode-unavailable` 结束（18 决策/24 动作），失败时的 `native-mission-entry-mode-unavailable-detail` 里 `mode=Stealth` 且 `conversation` 有两个 clickable 选项——即“表面存在而门未放行”。
+
+因此 7.748 的代码判定**未经验证**：代码路径已就位，但那一轮运行的 Host 可执行文件来源未能证明是本次编译产物（游戏日志该轮没有 `agent-host-process-started`，`D:/ChronicleFramework/BuildCache/Packages` 为空，`Modules/ChronicleFramework/AgentHost` 也不存在）。下一步必须先固定“运行中的 Host 到底是哪个二进制”的证据链（例如让 mod 在启动 Host 时记录路径与 assembly 版本，或在无外壳复用缓存时强制重打包），再复跑同一开局夹具。
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：
