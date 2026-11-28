@@ -1,5 +1,12 @@
 # Chroni
 
+## 2026-11-28 会话按台词选离开项（契约 7.750）
+
+- 事实：前几轮 provider 一直选列表第一项（adg:124/128/131），全是“走进藏身处 Stealth”的分支；`adg:132`（我得先处理另一件事）才是离开。
+- 改动：`Choose-MissionConversationOption` 按 `optionTexts` 选离开语义，无匹配时取最后一项；先于通用分支生效；自测两条用例 PASS。
+- 真机 `TestResults/20261128-145609`：`adg:125 → adg:129 → adg:132`，`objective-mission-conversation-resolved|returnedToMap=true`，队伍首次从藏身处遭遇退回地图。
+- 之后跑满 160 决策 / 177 动作到 `gold-sale-budget-exhausted`（预算边界）；金币 1000 → 1011；四目标仍未达成。
+
 ## 2026-11-28 Host 二进制证据链与“不可行动会话表面”（契约 7.749）
 
 - 根因：`harness/Test-AgentLiveModelLoop.ps1` 启动的是 `agenthost/bin/Release/net8.0/ChronicleAgentHost.dll`，上一轮只构建了 Debug → 7.748 的判定从未被执行。

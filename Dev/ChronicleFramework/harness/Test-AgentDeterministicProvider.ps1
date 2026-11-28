@@ -133,6 +133,21 @@ function Get-ObserveWaitSeconds($decisionInput) {
     if ($min -gt $max) { $min = $max }
     return $max
 }
+function Choose-MissionConversationOption($action) {
+    # Mission conversation ids (adg:NNN) carry no semantics, so choose by the Native text the
+    # Host publishes. A decline/leave line keeps the Agent out of Mission scenes whose surface
+    # Native cannot address yet; when no line says that, Native lists the non-committal branch
+    # last, so prefer it over blindly taking the first option.
+    $ids = @(Arg-Values $action 'OptionId')
+    if ($ids.Count -eq 0) { return $null }
+    $decline = '(?i)离开|结束|拒绝|另一件事|先处理|没空|改天|算了|再见|不去|不参加|leave|decline|refuse|not now|later'
+    foreach ($entry in @(Get-Arg $action 'optionTexts')) {
+        $entryId = [string](Get-Arg $entry 'id')
+        $entryText = [string](Get-Arg $entry 'text')
+        if ($entryText -match $decline -and ($ids -ccontains $entryId)) { return @{ id = $entryId; reason = 'decline-keyword' } }
+    }
+    return @{ id = [string]$ids[$ids.Count - 1]; reason = 'last-listed-option' }
+}
 function Pick-Decision($decisionInput) {
     if ($env:CHRONICLE_DETERMINISTIC_TRACE) {
         $decisionInput | ConvertTo-Json -Depth 20 -Compress | Add-Content -LiteralPath $env:CHRONICLE_DETERMINISTIC_TRACE -Encoding UTF8
@@ -202,6 +217,11 @@ function Get-GoalControlSlug([string]$control) {
         if ($controls -ccontains 'done') { return @{ control = 'done'; rationale = 'deterministic: no further safe action' } }
         return @{ control = 'done'; rationale = 'deterministic: no current action or control' }
     }
+    $conversationSelect = @($actions | Where-Object { (Get-Arg $_ 'action') -ceq 'missionConversationSelect' } | Select-Object -First 1)
+    if ($conversationSelect.Count -eq 1) {
+        $pick = Choose-MissionConversationOption $conversationSelect[0]
+        if ($null -ne $pick) { return @{ action = 'missionConversationSelect'; arguments = @{ OptionId = $pick.id }; rationale = ('deterministic: mission conversation ' + $pick.reason) } }
+    }
     if ($actions.Count -eq 1) {
         $a = $actions[0]
         $name = [string](Get-Arg $a 'action')
@@ -240,6 +260,12 @@ if ($SelfTest) {
     }
     T 'priority-over-first' '{"allowedActions":[{"action":"move","arguments":[],"argumentValues":{}},{"action":"recruitOptions","arguments":[],"argumentValues":{}}],"allowedControls":[],"observation":{}}' {
         param($d) $d.action -ceq 'recruitOptions'
+    }
+    T 'mission-conversation-decline-line' '{"allowedActions":[{"action":"missionConversationSelect","arguments":["OptionId"],"argumentValues":{"OptionId":["adg:131","adg:132"]},"optionTexts":[{"id":"adg:131","text":"带路吧。"},{"id":"adg:132","text":"我得先处理另一件事。"}]}],"allowedControls":[],"observation":{"state":{}}}' {
+        param($d) $d.action -ceq 'missionConversationSelect' -and $d.arguments.OptionId -ceq 'adg:132'
+    }
+    T 'mission-conversation-prefers-last-listed' '{"allowedActions":[{"action":"missionConversationSelect","arguments":["OptionId"],"argumentValues":{"OptionId":["adg:1","adg:2"]},"optionTexts":[{"id":"adg:1","text":"好。"},{"id":"adg:2","text":"开始吧。"}]}],"allowedControls":[],"observation":{"state":{}}}' {
+        param($d) $d.action -ceq 'missionConversationSelect' -and $d.arguments.OptionId -ceq 'adg:2'
     }
     T 'legal-tuple-complete' '{"allowedActions":[{"action":"recruit","arguments":["ownerId","troopId","slot","confirmPartySizeWarning"],"argumentValues":{"ownerId":["CharacterObject_1789","CharacterObject_1790"],"troopId":["imperial_recruit"],"slot":[0,1],"confirmPartySizeWarning":[false]},"legalTuples":[{"ownerId":"CharacterObject_1790","troopId":"imperial_recruit","slot":0,"cost":20,"ownerName":"x","confirmPartySizeWarning":false}]}],"allowedControls":[],"observation":{}}' {
         param($d)

@@ -930,3 +930,11 @@ if ($agentLiveModelLoopSource -notmatch 'Assert-AgentHostBinaryIsFresh' -or
     $agentHostAutonomyLoopSource -notmatch 'MaxMissionConversationSurfaceRetries') {
     throw 'Contract 7.749 requires the Harness to prove which Host binary it evaluates, the Mission conversation observation to publish addressability, and the Host to stop on a listed surface that Native cannot address instead of retrying or inventing another line.'
 }
+
+if ($deterministicProviderSource -notmatch 'Choose-MissionConversationOption' -or
+    $deterministicProviderSource -notmatch 'decline-keyword' -or
+    $deterministicProviderSource -notmatch 'last-listed-option' -or
+    $deterministicProviderSource -notmatch 'mission-conversation-decline-line' -or
+    $deterministicProviderSource -notmatch 'mission-conversation-prefers-last-listed') {
+    throw 'Contract 7.750 requires the deterministic provider to pick a Native mission-conversation line by the published option text, prefer leaving, fall back to the last listed option, and keep both self-tests.'
+}

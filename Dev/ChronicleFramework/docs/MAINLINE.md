@@ -2320,6 +2320,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.739 接管事实：玩家按 F10 接管身体时，mod 写 `agent-control.json`（`hold=true`，`reason=player-takeover`），Host 在写下一个原生动作命令前等待该文件释放，`reason=escape-menu` 用于 ESC 菜单打开期间；F10 再按一次交还，F9 结束 Agent。Agent 拥有输入时 `GameKey.IsDown/IsPressed` 在 `MapHotKeyCategory` 上被前缀拦截（`MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`），ESC 不在拦截范围。真机截图取证见 TestResults/20261128-081358 与 20261128-081633。
 
+契约 7.750 事实：Mission 会话选项 id（adg:NNN）无语义，确定性 provider 改为按 Host 发布的 `optionTexts` 选离开/拒绝语义，无匹配时取最后一项（原版非承诺分支在末尾）；该规则先于通用动作优先级生效。真机 `TestResults/20261128-145609`：`adg:125 → adg:129 → adg:132`，`returnedToMap=true`，队伍首次从藏身处遭遇退回地图，随后跑满 160 决策/177 动作至 `gold-sale-budget-exhausted`，金币 1000→1011。
+
 契约 7.749 事实：Harness 启动的 Host 是 `agenthost/bin/Release/net8.0/ChronicleAgentHost.dll`，新增 `Assert-AgentHostBinaryIsFresh` 在 Release DLL 早于源码时于启动游戏前抛错（7.748 的“未验证”即由此产生）。Stealth 场景（`villa_singular_c`）的 Mission 会话会发布 clickable 选项而 `ConversationAgents` 为空、`IsConversationInProgress=false`，`DoOption` 必抛 `ArgumentOutOfRangeException … UpdateSpeakerAndListenerAgents`（4 次 400ms 重试同错）；观察因此新增 `conversation.addressable/flowActive`，Host 以 `native-mission-conversation-surface-not-addressable` 结束目标而不是重试或换台词（真机 `TestResults/20261128-144808`，18 决策/24 动作）。
 
 契约 7.748 事实（未验证）：入口门改按**会话表面**放行（`HasHandledMissionConversation`：`mission.conversation` 的 `inProgress`／`sentenceText`／clickable 选项任一存在即算可行动），Stealth 等非 Conversation 模式只要发布会话就进入同一有界分支；会话表面中途消失写 `objective-mission-conversation-surface-ended` 重新规划。真机 `TestResults/20261128-141945` 复跑仍以 `native-mission-entry-mode-unavailable` 结束（18 决策/24 动作），失败 detail 同时显示 `mode=Stealth` 与两个 clickable 选项——代码判定未经验证，先要固定“运行中的 Host 是哪个二进制”的证据链。

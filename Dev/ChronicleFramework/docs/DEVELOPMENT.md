@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.749
+Contract version: 7.750
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -56,6 +56,26 @@ objective-mission-conversation-resolved|decisionsUsed=6|nativeActionsUsed=6|retu
 真机（`TestResults/20261128-144808`）：18 决策 / 24 动作，`failureCode=native-mission-conversation-surface-not-addressable`，前 6 步仍是原生选项驱动的对话（`Continue → adg:124 → Continue → adg:128 → adg:131`）。这条边界是**当前原生能力的真实上限**，不是框架缺动作：该 Mission 的会话管理器在发布选项时没有任何 speaker/listener agent，任何选择都会在原生内部抛异常。
 
 下一步（另行增量）：判断这类“发布选项但不可行动”的 Mission 是否本就不该被 Agent 路线触发（决策层避开），或是否存在原生前置动作（例如让任务逻辑先 `BeginConversation`）能让管理器注册 agent；在没有原生证据前不再对同一场景重复尝试。
+## Contract 7.750 — 会话选项按原生台词选，先离开再谈推进
+
+7.749 之后，真正的阻塞不是“能不能选”，而是“选了哪一句”。7.748/7.749 四轮里确定性 provider 一直选列表第一项：`adg:124`（“转身迅速换掩体”）、`adg:128`（“穿狩猎服”）、`adg:131`（“带路吧。”）——全是把队伍推进**藏身处 Stealth 任务**的分支；而 `adg:132`（“我得先处理另一件事。”）才是离开。
+
+改动（`harness/Test-AgentDeterministicProvider.ps1`）：
+
+- 新增 `Choose-MissionConversationOption`：Mission 会话的选项 id（`adg:NNN`）没有语义，改按 Host 随目录发布的 `optionTexts` 选；先匹配离开/拒绝语义（`离开|结束|拒绝|另一件事|先处理|没空|改天|算了|再见|不去|不参加|leave|decline|refuse|not now|later`），没有匹配时取**列表最后一项**（原版把非承诺分支放最后），并在 rationale 里写明 `decline-keyword` 或 `last-listed-option`；
+- 该规则在 `Pick-Decision` 中先于“单一动作直接选”和“优先级动作”生效，避免又被通用分支抢走；
+- 自测新增 `mission-conversation-decline-line`（带路吧/我得先处理另一件事 → 必选 `adg:132`）与 `mission-conversation-prefers-last-listed`（无关键词 → 最后一项），全部 PASS。
+
+真机（`TestResults/20261128-145609`）：
+
+```
+missionConversationSelect adg:125 -> adg:129 -> adg:132
+objective-mission-conversation-resolved|decisionsUsed=6|nativeActionsUsed=6|returnedToMap=true|dialogueAnswerInvented=false
+```
+
+即同一开局夹具下，队伍第一次真正**从藏身处遭遇里退回地图**，随后继续跑满 160 决策 / 177 原生动作，直到 `gold-sale-budget-exhausted`（预算边界，不是场景边界）；金币 1000 → 1011。四目标仍未达成（1011/2000 金、1/25 兵、20/50 声望、0/1 同伴）。
+
+注意：这条规则是**决策层策略**，不是游戏事实。它让 Agent 在“被拉进藏身处”的对话里选择离开，从而不必依赖 7.749 记录的不可行动会话表面；真实模型接入后仍应把同一政策作为可覆盖的默认，而不是硬编码唯一答案。
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：
