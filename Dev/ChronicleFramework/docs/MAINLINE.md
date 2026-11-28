@@ -2320,6 +2320,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.739 接管事实：玩家按 F10 接管身体时，mod 写 `agent-control.json`（`hold=true`，`reason=player-takeover`），Host 在写下一个原生动作命令前等待该文件释放，`reason=escape-menu` 用于 ESC 菜单打开期间；F10 再按一次交还，F9 结束 Agent。Agent 拥有输入时 `GameKey.IsDown/IsPressed` 在 `MapHotKeyCategory` 上被前缀拦截（`MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`），ESC 不在拦截范围。真机截图取证见 TestResults/20261128-081358 与 20261128-081633。
 
+契约 7.770 事实：等待窗口放大到 300 并以 campaignDay 是否变化判定冻结（连续 30 次不变 → `town-trade-move-time-frozen`）。真机 `TestResults/20261128-194528` 证明发起 move 后 Campaign 时间 30 秒内一格未走（91077.375 首尾相同），而等待里 `timeControlMode=StoppablePlay`、决策观察里是 `Stop`——不是距离远，是时间冻住。下一步验证是否为窗口失焦/最小化导致的引擎暂停（对照实验：保持游戏前台再跑同一夹具）。
+
 契约 7.769 事实：`TownTradeActions` 增加 `resume`、`ValidateTownTradeAction` 放行 `resume{}`，循环在 `IsStalledNativeSettlementMove` 为真时发原生 resume；真机 `TestResults/20261128-193905` 该分支从未命中（无 `town-trade-move-resumed`）——该判定要求 `timeControlMode == "Stop"`（AgentHostNativeMapMovementMonitor.cs:196），运行期实际是 `StoppablePlay`，但 campaignDay 不动且 isMoving=false。需先查 StoppablePlay 下时间不推进的成因。
 
 契约 7.768 事实（决定性）：贸易切片 45 次等待中 `partyIsMoving=false`、`campaignDay` 恒为 91077.375、`timeControlMode=StoppablePlay`，而决策观察里是 `Stop`——`move` 回执 completed 但队伍没进入移动，时间也没推进。EYC 的 run 里 campaignDay 会变（91077.489），说明移动链路在那边是通的。下一步二选一：发起 move 前恢复正常时钟并记录该显式动作，或把这条切片改为只买当前已开市城镇（把移动需求移出）。

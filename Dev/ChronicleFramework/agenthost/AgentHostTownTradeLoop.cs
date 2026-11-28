@@ -36,7 +36,10 @@ internal static class AgentHostTownTradeLoop
         string? moveTargetId = null;
         var encounterWaits = 0;
         var passiveMoveWaits = 0;
-        const int MaxPassiveMoveWaits = 45;
+        var frozenTimeWaits = 0;
+        var waitStartCampaignDay = double.NaN;
+        const int MaxPassiveMoveWaits = 300;
+        const int MaxFrozenTimeWaits = 30;
         const int MaxEncounterWaits = 20;
         var moveStartPending = false;
         var rejectedProviderDecisions = 0;
@@ -223,6 +226,11 @@ internal static class AgentHostTownTradeLoop
                         ["partyIsMoving"] = ReadBoolean(state["party"] as JsonObject, "isMoving"),
                         ["campaignDay"] = ReadDouble(currentNative, "campaignDay", double.NaN)
                     });
+                    var waitDayNow = ReadDouble(currentNative, "campaignDay", double.NaN);
+                    if (double.IsNaN(waitStartCampaignDay)) waitStartCampaignDay = waitDayNow;
+                    frozenTimeWaits = Math.Abs(waitDayNow - waitStartCampaignDay) < 1e-6 ? frozenTimeWaits + 1 : 0;
+                    if (frozenTimeWaits >= MaxFrozenTimeWaits)
+                        throw new AgentHostException("town-trade-move-time-frozen", "Campaign time did not advance for thirty watch cycles during a Native settlement move; the bounded buy stopped without changing time or items.");
                     await Task.Delay(1000, elapsed.Token);
                     using (var movingFresh = await stateClient.ReadStateAsync(elapsed.Token)) currentNative = ParseObject(movingFresh.RootElement);
                     continue;

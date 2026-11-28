@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.769
+Contract version: 7.770
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -376,7 +376,21 @@ trace stages = town-trade-passive-move-wait（没有 town-trade-move-resumed）
 
 因此下一增量明确：**Mission 会话表面**——mod 需要暴露并执行 Mission 内部会话的选项（列出现有 clickable 选项、选择、继续），Host 才能在不编造台词的条件下走完真实选项回到地图。当前契约只保证“不判死整轮、把真实回执记进 trace”，不声称能通过对话场景。
 
-## Contract 7.744 — 玩家窗口的第二轮：引擎原生样式、点击激活与边缘缩放
+## Contract 7.770 — 不是慢，是时间真的冻住了
+
+把等待窗口从 45 加到 300，并区分“慢”和“冻住”：以 `campaignDay` 是否变化为准（连续 30 次不变即判冻结，抛 `town-trade-move-time-frozen`）。
+
+真机（`TestResults/20261128-194528`）：
+
+```
+resultKind = town-trade-buy, decisions = 3, actionsExecuted = 2
+failureCode = town-trade-move-time-frozen
+waits = 30, campaignDay = 91077.375（首尾相同）
+```
+
+结论：发起 `move` 之后 Campaign 时间**完全不推进**（30 秒内一格没走），而 `timeControlMode` 在等待里读作 `StoppablePlay`、在决策观察里读作 `Stop`。这与“距离远、走得慢”不是一回事。
+
+下一步：查 Bannerlord 在什么条件下会“显示 StoppablePlay 但时间不走”——最可能是窗口失焦/最小化导致的引擎暂停（本项目已有的焦点保护 `HarnessFocusRestore` 会把焦点交还给用户）。确认方式：真机期间保持游戏窗口前台再跑一次同一夹具，比较 `campaignDay` 是否开始推进；若确认是焦点/暂停问题，则给出 Harness 侧的对策（例如移动期间临时保持前台并在移动结束后归还焦点）。## Contract 7.744 — 玩家窗口的第二轮：引擎原生样式、点击激活与边缘缩放
 
 引擎原生窗口实测（`agent-window-style-before`）：
 
