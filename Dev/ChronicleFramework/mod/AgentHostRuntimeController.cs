@@ -268,8 +268,24 @@ internal static class ChronicleAgentRuntimeController
         }
     }
 
+    // A failure anywhere in Host startup must surface in the panel and diagnostics. An escaping exception used to
+    // leave the state at Starting with no Host and no explanation.
     private static void StartOwnedHost(ChronicleAgentProviderSettings harnessSettings = null)
     {
+        try
+        {
+            StartOwnedHostCore(harnessSettings);
+        }
+        catch (Exception exception)
+        {
+            ChronicleDiagnostics.Write("agent-host-start-exception|type=" + exception.GetType().Name + "|message=" + Shorten(exception.Message, 160));
+            FailStart("Host启动异常（" + exception.GetType().Name + "）");
+        }
+    }
+
+    private static void StartOwnedHostCore(ChronicleAgentProviderSettings harnessSettings)
+    {
+        NormalizeCaseDuplicateEnvironmentNames();
         if (_process != null && !_process.HasExited)
         {
             SetState(RuntimeState.Running, "Host进程仍在运行；不会重复启动");
@@ -384,7 +400,7 @@ internal static class ChronicleAgentRuntimeController
         };
         ConfigureProviderProxyEnvironment(startInfo, providerUri);
         if (!string.IsNullOrWhiteSpace(configuredApiKey))
-            startInfo.EnvironmentVariables["CHRONICLE_LLM_API_KEY"] = configuredApiKey;
+            SetChildEnvironment(startInfo, "CHRONICLE_LLM_API_KEY", configuredApiKey);
         foreach (var name in new[]
         {
             "CHRONICLE_LLM_MAX_TOKENS", "CHRONICLE_LLM_MAX_TOKEN_PARAMETER", "CHRONICLE_LLM_THINKING_MODE",
@@ -393,7 +409,7 @@ internal static class ChronicleAgentRuntimeController
         {
             var value = Environment.GetEnvironmentVariable(name);
             if (string.IsNullOrWhiteSpace(value)) value = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User);
-            if (!string.IsNullOrWhiteSpace(value)) startInfo.EnvironmentVariables[name] = value;
+            if (!string.IsNullOrWhiteSpace(value)) SetChildEnvironment(startInfo, name, value);
         }
 
         try
@@ -446,6 +462,39 @@ internal static class ChronicleAgentRuntimeController
         }
     }
 
+    // Windows environment blocks are case-insensitive: adding "NO_PROXY" beside an inherited "no_proxy" throws when
+    // .NET merges the child block. Keep exactly one entry per name by inheriting the parent value when it exists.
+    // Windows treats environment names case-insensitively but ProcessStartInfo.EnvironmentVariables does not, so a
+    // parent block holding both "NO_PROXY" and "no_proxy" makes every child start throw. Collapse the duplicates once.
+    private static void NormalizeCaseDuplicateEnvironmentNames()
+    {
+        var kept = new System.Collections.Generic.Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var removed = new System.Collections.Generic.List<string>();
+        foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
+        {
+            if (entry.Key is not string key) continue;
+            if (kept.TryGetValue(key, out var existing))
+            {
+                if (!string.Equals(existing, key, StringComparison.Ordinal))
+                {
+                    Environment.SetEnvironmentVariable(key, null);
+                    removed.Add(key);
+                }
+                continue;
+            }
+            kept[key] = key;
+        }
+        if (removed.Count > 0)
+            ChronicleDiagnostics.Write("agent-host-env-duplicates-collapsed|keys=" + string.Join(",", removed));
+    }
+
+    private static void SetChildEnvironment(ProcessStartInfo startInfo, string name, string value)
+    {
+        foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
+            if (entry.Key is string key && string.Equals(key, name, StringComparison.OrdinalIgnoreCase)) return;
+        startInfo.EnvironmentVariables[name] = value;
+    }
+
     private static void ConfigureProviderProxyEnvironment(ProcessStartInfo startInfo, Uri providerUri)
     {
         if (providerUri == null || providerUri.IsLoopback) return;
@@ -461,19 +510,19 @@ internal static class ChronicleAgentRuntimeController
         foreach (var name in new[] { "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY" })
         {
             var value = ReadProxyEnvironment(name);
-            if (!string.IsNullOrWhiteSpace(value)) startInfo.EnvironmentVariables[name] = value;
+            if (!string.IsNullOrWhiteSpace(value)) SetChildEnvironment(startInfo, name, value);
         }
         if (string.IsNullOrWhiteSpace(selectedProxy))
         {
-            startInfo.EnvironmentVariables["CHRONICLE_LLM_PROXY_SELECTION_SOURCE"] =
-                ProviderProxySelection.IsNoProxyMatch(providerUri.Host, noProxy) ? "no-proxy-bypass" : "system-default";
+            SetChildEnvironment(startInfo, "CHRONICLE_LLM_PROXY_SELECTION_SOURCE",
+                ProviderProxySelection.IsNoProxyMatch(providerUri.Host, noProxy) ? "no-proxy-bypass" : "system-default");
             return;
         }
 
         // The Host is a separate process. Pass a user-configured proxy through,
         // or use the already-running local proxy as a process-only fallback.
-        startInfo.EnvironmentVariables["HTTPS_PROXY"] = selectedProxy;
-        if (string.IsNullOrWhiteSpace(httpProxy)) startInfo.EnvironmentVariables["HTTP_PROXY"] = selectedProxy;
+        SetChildEnvironment(startInfo, "HTTPS_PROXY", selectedProxy);
+        if (string.IsNullOrWhiteSpace(httpProxy)) SetChildEnvironment(startInfo, "HTTP_PROXY", selectedProxy);
 
         var source = !string.IsNullOrWhiteSpace(httpsProxy) ? "https-proxy-environment" :
             !string.IsNullOrWhiteSpace(httpProxy) ? "http-proxy-environment" :

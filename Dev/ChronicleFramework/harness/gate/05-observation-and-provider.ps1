@@ -578,7 +578,11 @@ if ($agentControlChannelSource -notmatch 'agent-control\.json' -or
     $agentControlChannelSource -notmatch 'EscapeMenuReason' -or
     $agentPlayerInputOwnershipSource -notmatch '_playerTakeover' -or
     $agentPlayerInputOwnershipSource -notmatch 'SyncControlHold' -or
-    $agentPlayerInputOwnershipSource -notmatch 'BlockPlayerTimeControlKey' -or
+    $agentPlayerInputOwnershipSource -notmatch 'BlockPlayerInput' -or
+    $agentPlayerInputOwnershipSource -notmatch 'PlayerInputWhitelist' -or
+    $agentPlayerInputOwnershipSource -notmatch 'agent-input-guard\\|blocked=' -or
+    $agentHostRuntimeControllerSource -notmatch 'NormalizeCaseDuplicateEnvironmentNames' -or
+    $agentHostLifecycleHarness -notmatch 'blockedMouse=True' -or
     $agentPlayerInputOwnershipSource -notmatch 'MapTimeTogglePause' -or
     $agentPlayerInputOwnershipSource -notmatch 'PollStopKey' -or
     $agentPlayerInputOwnershipSource -notmatch 'InputKey\.F9' -or

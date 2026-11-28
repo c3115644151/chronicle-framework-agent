@@ -14,6 +14,7 @@ internal static class ChronicleAgentControlChannel
     internal const string PlayerTakeoverReason = "player-takeover";
     internal const string EscapeMenuReason = "escape-menu";
     private static bool _holdWritten;
+    private static bool _holdState;
     private static string _holdReason = string.Empty;
 
     internal static string ProtocolRoot() =>
@@ -27,7 +28,7 @@ internal static class ChronicleAgentControlChannel
     internal static bool SetHold(bool hold, string reason)
     {
         var normalized = string.IsNullOrWhiteSpace(reason) ? PlayerTakeoverReason : reason;
-        if (_holdWritten && _holdReason == normalized) return true;
+        if (_holdWritten && _holdState == hold && _holdReason == normalized) return true;
         try
         {
             var path = ControlPath();
@@ -44,6 +45,7 @@ internal static class ChronicleAgentControlChannel
             File.Copy(temporary, path, overwrite: true);
             File.Delete(temporary);
             _holdWritten = true;
+            _holdState = hold;
             _holdReason = normalized;
             ChronicleDiagnostics.Write("agent-control-hold|hold=" + hold + "|reason=" + normalized);
             return true;

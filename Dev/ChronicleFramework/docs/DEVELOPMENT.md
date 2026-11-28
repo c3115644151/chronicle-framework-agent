@@ -1,6 +1,16 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.739
+Contract version: 7.740
+
+## Contract 7.740 — 真正的玩家输入门禁（按键 + 鼠标）与 Host 启动修复
+
+玩家实测反馈：Agent 持有时仍能点地图移动、按时间键暂停、调时间流速。根因是旧门禁只拦 `MapHotKeyCategory` 的时间键，而地图点击走 `InputKey.LeftMouseButton`、其余操作走别的键路径。现在 `mod/AgentPlayerInputOwnership.cs` 在 `Input.IsDown/IsPressed/IsReleased/IsKeyDown/IsKeyPressed/...` 与 `Key.IsDown/...` 上装统一前缀：Agent 持有身体且玩家未接管时，除 `Escape`、`F6`、`F7`、`F9` 和**当前绑定的交接键**外全部返回 false，鼠标键同样被拦；每次拦截写 `agent-input-guard|blocked=<键名>|total=<次数>`。交接键必须留在白名单里，否则玩家自己也切不回来（这就是上一版 F10 失效的真因）。
+
+同一契约修掉三个真机缺陷：① `ChronicleAgentControlChannel.SetHold` 的缓存键漏了 `hold` 本身，接管时写不出 `hold=true`，Host 从未真正停手；② Host 启动时 `ProcessStartInfo.EnvironmentVariables` 在 .NET Framework 下对 `NO_PROXY`/`no_proxy` 这类大小写重复项会抛 `ArgumentException`（日志 `agent-host-start-exception`），现在启动前调用 `NormalizeCaseDuplicateEnvironmentNames` 折叠重复名；③ 该异常原先在 try 之外逃逸，界面停在“Starting”没有任何解释，现在 `StartOwnedHost` 包一层并写 `agent-host-start-exception`。
+
+Harness：`Test-AgentHostLifecycleEvaluation -Scenario InputToggle` 改判交接语义（一次 Host、agent→player→agent、`agent-control-hold|hold=True` 与 `hold=False` 各出现、注入的空格键与左键被 `blockedSpace=True|blockedMouse=True` 证明拦下），并在循环后从日志补解析 Host PID，避免并发读取漏行导致误判“没有启动 Host”。
+
+取证窗口说明：capture 类阶段会把 `engine_config.txt` 临时改成 840x472/30fps 并在正常退出时还原；进程被强杀会留下这套小窗口。`harness/Reset-EngineDisplayConfig.ps1 -Width 1600 -Height 900` 可修复玩家侧显示设置。
 
 ## Contract 7.739 — 玩家接管与 Agent 时钟门禁（F10 交还 / F9 停止）
 

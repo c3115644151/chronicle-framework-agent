@@ -47,6 +47,9 @@ internal static class ChroniclePlayerInputOwnership
     private static bool _stopKeyWasDown;
     private static readonly Harmony PauseGuardHarmony = new Harmony("ChronicleFramework.AgentPlayerInputPauseGuard");
     private static readonly string[] BlockedPlayerTimeControlKeys = { "MapTimeStop", "MapTimeTogglePause", "MapTimeFastForward", "MapTimeNormal" };
+    private static readonly InputKey[] PlayerInputWhitelist = { InputKey.Escape, InputKey.F6, InputKey.F7, InputKey.F9, InputKey.F10 };
+    private static readonly System.Collections.Generic.HashSet<string> _blockedPlayerInputLogged = new System.Collections.Generic.HashSet<string>();
+    private static long _blockedPlayerInputTotal;
 
     internal static bool IsLocked => _locked;
 
@@ -592,38 +595,37 @@ internal static class ChroniclePlayerInputOwnership
     {
         if (_pauseGuardInstalled) return;
         var patched = new System.Collections.Generic.List<string>();
+        var inputGuard = AccessTools.Method(typeof(ChroniclePlayerInputOwnership), nameof(BlockPlayerInput));
+        var keyGuard = AccessTools.Method(typeof(ChroniclePlayerInputOwnership), nameof(BlockPlayerInputKey));
         var gameKeyGuard = AccessTools.Method(typeof(ChroniclePlayerInputOwnership), nameof(BlockPlayerTimeControlGameKey));
-        var keyGuard = AccessTools.Method(typeof(ChroniclePlayerInputOwnership), nameof(BlockPlayerTimeControlKey));
-        var inputGuard = AccessTools.Method(typeof(ChroniclePlayerInputOwnership), nameof(BlockPlayerTimeControlInput));
-
-        var gameKeyType = AccessTools.TypeByName("TaleWorlds.InputSystem.GameKey");
-        if (gameKeyType != null && gameKeyGuard != null)
-            foreach (var method in gameKeyType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
-                if (method.ReturnType == typeof(bool) && method.Name is "IsDown" or "IsDownImmediate" or "IsPressed" or "IsReleased")
-                    if (TryPatchTimeControlMethod(method, gameKeyGuard)) patched.Add("GameKey." + method.Name + "/" + method.GetParameters().Length);
-
-        var keyType = AccessTools.TypeByName("TaleWorlds.InputSystem.Key");
-        if (keyType != null && keyGuard != null)
-            foreach (var method in keyType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
-                if (method.ReturnType == typeof(bool) && method.GetParameters().Length == 0 && method.Name is "IsDown" or "IsDownImmediate" or "IsPressed" or "IsReleased")
-                    if (TryPatchTimeControlMethod(method, keyGuard)) patched.Add("Key." + method.Name);
 
         var inputType = AccessTools.TypeByName("TaleWorlds.InputSystem.Input");
         if (inputType != null && inputGuard != null)
             foreach (var method in inputType.GetMethods(BindingFlags.Public | BindingFlags.Static))
-                if (method.ReturnType == typeof(bool) && method.GetParameters().Length == 1 && IsTimeControlInputMethodName(method.Name))
-                    if (TryPatchTimeControlMethod(method, inputGuard)) patched.Add("Input." + method.Name);
+                if (method.ReturnType == typeof(bool) && method.GetParameters().Length == 1 &&
+                    method.GetParameters()[0].ParameterType == typeof(InputKey) &&
+                    method.Name is "IsDown" or "IsDownImmediate" or "IsPressed" or "IsReleased" or "IsKeyDown" or "IsKeyDownImmediate" or "IsKeyPressed" or "IsKeyReleased")
+                    if (TryPatchPlayerInputMethod(method, inputGuard)) patched.Add("Input." + method.Name);
+
+        var keyType = AccessTools.TypeByName("TaleWorlds.InputSystem.Key");
+        if (keyType != null && keyGuard != null)
+            foreach (var method in keyType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                if (method.ReturnType == typeof(bool) && method.GetParameters().Length == 0 &&
+                    method.Name is "IsDown" or "IsDownImmediate" or "IsPressed" or "IsReleased")
+                    if (TryPatchPlayerInputMethod(method, keyGuard)) patched.Add("Key." + method.Name);
+
+        // Campaign time control is also read through GameKey instances, so the key definition needs its own gate.
+        var gameKeyType = AccessTools.TypeByName("TaleWorlds.InputSystem.GameKey");
+        if (gameKeyType != null && gameKeyGuard != null)
+            foreach (var method in gameKeyType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                if (method.ReturnType == typeof(bool) && method.Name is "IsDown" or "IsDownImmediate" or "IsPressed" or "IsReleased")
+                    if (TryPatchPlayerInputMethod(method, gameKeyGuard)) patched.Add("GameKey." + method.Name);
 
         _pauseGuardInstalled = patched.Count > 0;
-        ChronicleDiagnostics.Write("agent-input-pause-guard|installed=" + _pauseGuardInstalled + "|methods=" + string.Join(",", patched));
+        ChronicleDiagnostics.Write("agent-input-guard|installed=" + _pauseGuardInstalled + "|methods=" + string.Join(",", patched));
     }
 
-    // /// <summary>Game keys funnel down to the raw key queries, so the raw names matter as much as the game-key names.</summary>
-    private static bool IsTimeControlInputMethodName(string name) =>
-        name is "IsDown" or "IsDownImmediate" or "IsPressed" or "IsReleased" or
-                "IsKeyDown" or "IsKeyDownImmediate" or "IsKeyPressed" or "IsKeyReleased";
-
-    private static bool TryPatchTimeControlMethod(MethodInfo method, MethodInfo prefix)
+    private static bool TryPatchPlayerInputMethod(MethodInfo method, MethodInfo prefix)
     {
         try
         {
@@ -632,36 +634,76 @@ internal static class ChroniclePlayerInputOwnership
         }
         catch (Exception exception)
         {
-            ChronicleDiagnostics.Write("agent-input-pause-guard-patch-failed|method=" + method.Name + "|type=" + exception.GetType().Name);
+            ChronicleDiagnostics.Write("agent-input-guard-patch-failed|method=" + method.Name + "|type=" + exception.GetType().Name);
             return false;
         }
     }
 
-    // While the agent owns the clock the player cannot stop, fast-forward, or re-enable campaign time. GameKey identity
-    // comes from the Native key definition so rebinding the pause key does not silently reopen the pause.
+    // While the agent owns the body, the player cannot drive the map, press time controls, or click orders. Only the
+    // panel keys, the handover key and ESC stay live, because ESC is the one pause the player must always keep.
+    private static bool BlockPlayerInput(InputKey key, ref bool __result)
+    {
+        if (!_locked || _playerTakeover) return true;
+        if (IsPlayerInputAllowed(key)) return true;
+        RecordBlockedPlayerInput(key.ToString());
+        __result = false;
+        return false;
+    }
+
+    private static bool BlockPlayerInputKey(Key __instance, ref bool __result)
+    {
+        if (!_locked || _playerTakeover || __instance == null) return true;
+        var key = __instance.InputKey;
+        if (IsPlayerInputAllowed(key)) return true;
+        RecordBlockedPlayerInput("Key." + key);
+        __result = false;
+        return false;
+    }
+
     private static bool BlockPlayerTimeControlGameKey(GameKey __instance, ref bool __result)
     {
         if (!_locked || _playerTakeover || __instance == null) return true;
-        if (!string.Equals(__instance.GroupId, "MapHotKeyCategory", StringComparison.Ordinal)) return true;
-        if (!IsBlockedPlayerTimeControlKey(__instance.StringId)) return true;
+        var isTimeControl = string.Equals(__instance.GroupId, "MapHotKeyCategory", StringComparison.Ordinal) &&
+                            IsBlockedPlayerTimeControlKey(__instance.StringId);
+        var isWhitelistedKey = __instance.KeyboardKey != null && IsPlayerInputAllowed(__instance.KeyboardKey.InputKey);
+        if (!isTimeControl || isWhitelistedKey) return true;
+        RecordBlockedPlayerInput("GameKey." + (__instance.StringId ?? "unknown"));
         __result = false;
         return false;
     }
 
-    private static bool BlockPlayerTimeControlKey(Key __instance, ref bool __result)
+    private static bool IsPlayerInputAllowed(InputKey key)
     {
-        if (!_locked || _playerTakeover || __instance == null) return true;
-        if (!string.Equals(__instance.InputKey.ToString(), "Space", StringComparison.Ordinal)) return true;
-        __result = false;
-        return false;
+        foreach (var allowed in PlayerInputWhitelist)
+            if (allowed == key) return true;
+        // The handover key is whatever the player has bound, so it must stay readable while the agent holds input.
+        return (ToggleKeyboardInputKey != InputKey.Invalid && key == ToggleKeyboardInputKey) ||
+               (ToggleControllerInputKey != InputKey.Invalid && key == ToggleControllerInputKey);
     }
 
-    private static bool BlockPlayerTimeControlInput(InputKey key, ref bool __result)
+    private static InputKey ToggleKeyboardInputKey
     {
-        if (!_locked || _playerTakeover) return true;
-        if (key != InputKey.Space) return true;
-        __result = false;
-        return false;
+        get
+        {
+            var gameKey = _gameKeyContext?.GetGameKey(ChronicleAgentControlGameKeyContext.ToggleControl);
+            return gameKey?.KeyboardKey?.InputKey ?? InputKey.Invalid;
+        }
+    }
+
+    private static InputKey ToggleControllerInputKey
+    {
+        get
+        {
+            var gameKey = _gameKeyContext?.GetGameKey(ChronicleAgentControlGameKeyContext.ToggleControl);
+            return gameKey?.ControllerKey?.InputKey ?? InputKey.Invalid;
+        }
+    }
+
+    private static void RecordBlockedPlayerInput(string name)
+    {
+        _blockedPlayerInputTotal++;
+        if (!_blockedPlayerInputLogged.Add(name)) return;
+        ChronicleDiagnostics.Write("agent-input-guard|blocked=" + name + "|total=" + _blockedPlayerInputTotal.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     private static bool IsBlockedPlayerTimeControlKey(string stringId)
@@ -891,10 +933,25 @@ internal static class ChroniclePlayerInputOwnership
             return;
         }
 
+        // With the agent holding the body, a synthetic pause key and a synthetic map click must both be refused
+        // by the input guard; only ESC and the panel keys stay live.
         if (_ownershipToggleHarnessProbeStage == 2 && !_playerTakeover && ChronicleAgentRuntimeController.ShouldOwnPlayerInput)
         {
-            ChronicleDiagnostics.Write("agent-input-toggle-harness-probe|passed=True|cycle=agent-player-agent");
+            Input.PressKey(InputKey.Space);
+            Input.PressKey(InputKey.LeftMouseButton);
             _ownershipToggleHarnessProbeStage = 3;
+            return;
+        }
+
+        if (_ownershipToggleHarnessProbeStage == 3)
+        {
+            var spaceBlocked = _blockedPlayerInputLogged.Contains("Space");
+            var mouseBlocked = _blockedPlayerInputLogged.Contains("LeftMouseButton");
+            ChronicleDiagnostics.Write("agent-input-toggle-harness-probe|passed=" + (spaceBlocked && mouseBlocked) +
+                "|cycle=agent-player-agent|blockedSpace=" + spaceBlocked + "|blockedMouse=" + mouseBlocked);
+            _ownershipToggleHarnessProbeStage = 4;
+            ChronicleAgentControlChannel.ClearHold();
+            ChronicleAgentRuntimeController.RequestStop();
         }
     }
 

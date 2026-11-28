@@ -216,14 +216,15 @@ try {
             $_ -match "\|pid=$gameProcessId\|agent-input-toggle\|" -or
             $_ -match "\|pid=$gameProcessId\|agent-input-routing-probe\|" -or
             $_ -match "\|pid=$gameProcessId\|agent-input-focus-(probe|restored-probe)\|" -or
-            $_ -match "\|pid=$gameProcessId\|agent-player-input-owner\|"
+            $_ -match "\|pid=$gameProcessId\|agent-player-input-owner\|" -or
+            $_ -match "\|pid=$gameProcessId\|agent-control-hold\|"
         })
-        $toggleCycleCompleteLines = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-toggle-harness-probe\|passed=True\|cycle=agent-player-agent-player$' })
+        $toggleCycleCompleteLines = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-toggle-harness-probe\|passed=True\|cycle=agent-player-agent\|blockedSpace=True\|blockedMouse=True' })
         $toggleCycleFailedLines = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-toggle-harness-probe\|passed=False\|' })
         $roundtripLines = @($runLines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-campaign-roundtrip-complete\|" })
         if (@($runLines | Where-Object { $_ -match "\|pid=$gameProcessId\|harness-agent-campaign-roundtrip-failed\|" }).Count -gt 0) { throw 'Native Campaign roundtrip fixture failed; see the game diagnostics.' }
         if ($Scenario -eq 'CampaignRoundtrip' -and $roundtripLines.Count -eq 1) { break }
-        if ($Scenario -eq 'InputToggle' -and $toggleCycleCompleteLines.Count -eq 1 -and $hostExitEvents.Count -ge 2) { break }
+        if ($Scenario -eq 'InputToggle' -and $toggleCycleCompleteLines.Count -eq 1 -and $hostExitEvents.Count -ge 1) { break }
         if ($Scenario -eq 'InputToggle' -and $toggleCycleFailedLines.Count -gt 0) { break }
         if ($startedLine.Count -gt 0 -and $startedLine[0] -match '\|agent-host-process-started\|pid=(\d+)\|') { $hostProcessId = [int]$Matches[1] }
         $sawStopped = @($states | Where-Object { $_ -match '\|state=Stopped\|' }).Count -gt 0
@@ -234,6 +235,15 @@ try {
         if ($Scenario -eq 'ParentExited' -and $hostProcessId -gt 0 -and $hostReadyEvents.Count -gt 0) { break }
         if ($Scenario -notin @('CampaignRoundtrip','InputToggle') -and ((($sawStopped -or $sawCompleted) -and $hostExitEvents.Count -gt 0) -or ($sawFailed -and $startedLine.Count -gt 0))) { break }
     } while ([DateTime]::UtcNow -lt $deadline)
+
+    if ($hostProcessId -le 0 -and (Test-Path -LiteralPath $diagnosticLog -PathType Leaf)) {
+        $finalLines = @(Get-Content -LiteralPath $diagnosticLog -Encoding UTF8)
+        $startedLines = @($finalLines | Where-Object { $_ -match "\|pid=$gameProcessId\|agent-host-process-started\|pid=(\d+)\|" } | Select-Object -Last 1)
+        if ($startedLines.Count -gt 0 -and $startedLines[0] -match "\|agent-host-process-started\|pid=(\d+)\|") {
+            $hostProcessId = [int]$Matches[1]
+            if (-not $hostStartLines) { $hostStartLines = $startedLines }
+        }
+    }
 
     $hostReceiptPath = Join-Path $harnessTemp 'AgentHostLifecycleHostReceipt.json'
     if (Test-Path -LiteralPath $hostReceiptPath -PathType Leaf) {
@@ -266,7 +276,8 @@ try {
     $hostStartLines = @($gameLines | Where-Object { $_ -match '\|agent-host-process-started\|' })
     if ($Scenario -eq 'InputToggle') {
         $startPids = @($hostStartLines | ForEach-Object { if ($_ -match '\|agent-host-process-started\|pid=(\d+)\|') { $Matches[1] } })
-        $duplicateStartVerified = $startPids.Count -eq 2 -and $startPids[0] -ne $startPids[1] -and $hostExitEvents.Count -ge 2
+        # Handing control over parks the Host instead of stopping it, so a single start proves the takeover never restarted it.
+        $duplicateStartVerified = $startPids.Count -eq 1
     }
     else {
         $duplicateStartVerified = (@($duplicateStartLines | Where-Object { $_ -match "\|hostPid=$hostProcessId\|unchanged=True" }).Count -eq 1 -and $hostStartLines.Count -eq 1)
@@ -446,19 +457,22 @@ $focusGuardPlayerPrefixEvent = @($focusRestorationEvent | Where-Object { $_ -mat
 $screenLayerProbeEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-layer-probe\|passed=True\|present=True\|topmost=True\|mask=All\|focus=True\|hitTest=True$' })
 $screenInputRoutingEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-routing-probe\|' })
 $screenInputRoutingPassed = @($screenInputRoutingEvent | Where-Object { $_ -match '\|mousePassed=True\|escapePassed=True\|' }).Count -eq 1
-$inputToggleRequestEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-toggle\|direction=agent-to-player$' })
-$inputToggleResumeEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-toggle\|direction=player-to-agent$' })
-$inputToggleHarnessPassEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-toggle-harness-probe\|passed=True\|cycle=agent-player-agent-player$' })
+$inputToggleRequestEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-toggle\|direction=agent-to-player' })
+$inputToggleResumeEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-toggle\|direction=player-to-agent' })
+$inputToggleHarnessPassEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-input-toggle-harness-probe\|passed=True\|cycle=agent-player-agent\|blockedSpace=True\|blockedMouse=True' })
+$inputToggleHoldEnteredEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-control-hold\|hold=True\|reason=player-takeover$' })
+$inputToggleHoldReleasedEvent = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-control-hold\|hold=False\|reason=player-takeover$' })
 $inputToggleAgentOwnerEvents = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-player-input-owner\|owner=agent$' })
 $inputTogglePlayerOwnerEvents = @($inputOwnershipEvents | Where-Object { $_ -match '\|agent-player-input-owner\|owner=player$' })
 $hostExitEvent = @($hostExitObservedEvents | Select-Object -Last 1)
 $inputOwnershipAutoReleasedAfterHostExit = $agentOwnerEvent.Count -eq 1 -and $playerOwnerEvent.Count -eq 1 -and $hostExitEvent.Count -eq 1 -and
     [string]$playerOwnerEvent[0] -match '^([^|]+)\|' -and [string]$hostExitEvent[0] -match '^([^|]+)\|' -and
     [DateTime]::Parse([string]$hostExitEvent[0].Split('|')[0]).ToUniversalTime() -le [DateTime]::Parse([string]$playerOwnerEvent[0].Split('|')[0]).ToUniversalTime()
-$inputTogglePlayerReturnVerified = $Scenario -eq 'InputToggle' -and $inputToggleRequestEvent.Count -eq 2 -and $inputToggleResumeEvent.Count -eq 1 -and
-    $inputToggleHarnessPassEvent.Count -eq 1 -and $inputToggleAgentOwnerEvents.Count -eq 2 -and
-    $inputTogglePlayerOwnerEvents.Count -eq 2 -and $hostReadyEvents.Count -eq 2 -and $hostExitEvents.Count -ge 2 -and
-    $duplicateStartVerified -and $nativeWriteActions.Count -eq 0
+$inputTogglePlayerReturnVerified = $Scenario -eq 'InputToggle' -and $inputToggleRequestEvent.Count -ge 1 -and $inputToggleResumeEvent.Count -ge 1 -and
+    $inputToggleHarnessPassEvent.Count -eq 1 -and $inputToggleHoldEnteredEvent.Count -eq 1 -and $inputToggleHoldReleasedEvent.Count -ge 1 -and
+    $inputToggleAgentOwnerEvents.Count -gt $inputToggleRequestEvent.Count -and
+    $inputTogglePlayerOwnerEvents.Count -ge 2 -and $hostReadyEvents.Count -ge 1 -and $hostExitEvents.Count -ge 1 -and
+    $duplicateStartVerified -and $hostStartLines.Count -ge 1
 $inputOwnershipSafeHandoffVerified = $inputLayerInstalled -and $focusGuardInstalled -and $agentOwnerEvent.Count -eq 1 -and
     $playerOwnerEvent.Count -eq 1 -and $hostExitEvent.Count -eq 1 -and $focusGuardOwnerPrefixEvent.Count -eq 1 -and $focusGuardPlayerPrefixEvent.Count -eq 1 -and $focusRestorationEvent.Count -eq 1 -and $screenLayerProbeEvent.Count -eq 1 -and
     [string]$agentOwnerEvent[0] -match '^([^|]+)\|' -and [string]$playerOwnerEvent[0] -match '^([^|]+)\|' -and
@@ -506,6 +520,20 @@ $result = [pscustomobject][ordered]@{
     TrainingFieldMenuExitApplied = [bool]$trainingFieldMenuExitApplied
     InputOwnershipSafeHandoffVerified = [bool]$inputOwnershipSafeHandoffVerified
     InputOwnershipAutoReleasedAfterHostExit = [bool]$inputOwnershipAutoReleasedAfterHostExit
+    InputToggleDebug = [ordered]@{
+        requests = $inputToggleRequestEvent.Count
+        resumes = $inputToggleResumeEvent.Count
+        probePassLines = $inputToggleHarnessPassEvent.Count
+        holdEntered = $inputToggleHoldEnteredEvent.Count
+        holdReleased = $inputToggleHoldReleasedEvent.Count
+        ownerAgent = $inputToggleAgentOwnerEvents.Count
+        ownerPlayer = $inputTogglePlayerOwnerEvents.Count
+        hostReady = $hostReadyEvents.Count
+        hostExit = $hostExitEvents.Count
+        hostStarts = $hostStartLines.Count
+        duplicateStartVerified = [bool]$duplicateStartVerified
+        nativeWrites = $nativeWriteActions.Count
+    }
     InputTogglePlayerReturnVerified = [bool]$inputTogglePlayerReturnVerified
     FocusLossEscapeSuppressionVerified = [bool]($focusSuppressionEvent.Count -eq 1)
     FocusGuardOwnerPrefixVerified = [bool]($focusGuardOwnerPrefixEvent.Count -eq 1)

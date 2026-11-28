@@ -2318,7 +2318,9 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.738 游戏内 UI 事实：玩家明确表示 HTML 决策时间线难用，要求游戏内专属 UI 并区分普通/调试信息层。Host 每次 provider 决策/失败写 `%Documents%\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\agent-live-status.json`（原子替换、debug 观察截断 24KB）；mod 用非焦点 GlobalLayer 上的 GauntletLayer 读取它，F7 显示/隐藏、F6 普通/调试，面板永不抢焦点或阻塞输入（`ScreenManager.AddGlobalLayer(..., isFocusable: false)`）。面板只是观察窗：胜负/奖励仍以原生回执为准。
 
-契约 7.739 接管事实：玩家按 F10 接管身体时，mod 写 `agent-control.json`（`hold=true`，`reason=player-takeover`），Host 在写下一个原生动作命令前等待该文件释放，`reason=escape-menu` 用于 ESC 菜单打开期间；F10 再按一次交还，F9 结束 Agent。Agent 拥有输入时 `GameKey.IsDown/IsPressed` 在 `MapHotKeyCategory` 上被前缀拦截（`MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`），ESC 不在拦截范围。真机截图取证尚未取得。
+契约 7.739 接管事实：玩家按 F10 接管身体时，mod 写 `agent-control.json`（`hold=true`，`reason=player-takeover`），Host 在写下一个原生动作命令前等待该文件释放，`reason=escape-menu` 用于 ESC 菜单打开期间；F10 再按一次交还，F9 结束 Agent。Agent 拥有输入时 `GameKey.IsDown/IsPressed` 在 `MapHotKeyCategory` 上被前缀拦截（`MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`），ESC 不在拦截范围。真机截图取证见 TestResults/20261128-081358 与 20261128-081633。
+
+契约 7.740 输入门禁事实：Agent 持有身体时，玩家对 `Input.IsDown/IsPressed/IsReleased/IsKeyDown/IsKeyPressed/IsKeyReleased` 与 `Key.IsDown/...` 的读取（含鼠标键）全部被前缀拦成 false，只有 `Escape`、`F6`、`F7`、`F9` 和当前绑定的交接键例外；每次拦截写 `agent-input-guard|blocked=<键名>|total=<次数>`。真机交接闭环：`TestResults/20261128-101606`（InputToggle 场景 Passed=true，requests=1、resumes=1、holdEntered=1、holdReleased=2、hostStarts=1、probePass 行含 blockedSpace=True|blockedMouse=True）。Host 启动前折叠大小写重复的环境变量名（NO_PROXY 与 no_proxy 并存会让 ProcessStartInfo.EnvironmentVariables 抛异常），并给 StartOwnedHost 加异常兜底写 agent-host-start-exception。采集类 harness 阶段会把窗口临时改成 840x472/30fps，被强杀会残留；harness/Reset-EngineDisplayConfig.ps1 用于修复玩家侧显示设置。
 
 契约 7.732 修正：EYC Renown 停滞的真因不是世界死锁，而是确定性 provider 的"leave 优先"启发式在遭遇菜单每次选逃跑；原生遭遇菜单提供 `str_order_attack`（Send Troops/BattleSimulation）时该选项才是推进 Renown 的正当路径。修正后真机完成原生战斗全链并达成 renown 50/50。招募动作 legalTuples 中 `confirmPartySizeWarning` 可能编码为 `[0]`（单元素数组），provider 必须展开为标量 0 才能通过 Host schema。四目标闭环剩余 partySize 招募未达，属招募子流程选择逻辑，不虚报通过。
 
