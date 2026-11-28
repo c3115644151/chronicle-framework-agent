@@ -2320,6 +2320,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.739 接管事实：玩家按 F10 接管身体时，mod 写 `agent-control.json`（`hold=true`，`reason=player-takeover`），Host 在写下一个原生动作命令前等待该文件释放，`reason=escape-menu` 用于 ESC 菜单打开期间；F10 再按一次交还，F9 结束 Agent。Agent 拥有输入时 `GameKey.IsDown/IsPressed` 在 `MapHotKeyCategory` 上被前缀拦截（`MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`），ESC 不在拦截范围。真机截图取证见 TestResults/20261128-081358 与 20261128-081633。
 
+契约 7.760 机制事实（未实现）：`AgentHostNativeMapMovementMonitor` 是被动监视器——可见敌对匪徒出现时发原生 Pause 并回传 `native-visible-hostile-bandit-interrupted-settlement-move` 作为“交给遭遇流程”的信号；贸易循环把它当终止条件才是问题所在。下一步按其语义做有界交接（遭遇→既有战斗入口；已清除→清 move 重挑城镇），有界次数后仍按原码终止。
+
 契约 7.759 收正：`native-visible-hostile-bandit-interrupted-settlement-move` 由 `agenthost/AgentHostNativeMapMovementMonitor.cs:34` 产生（移动监视器），不是父级分派入口；7.759 里“打断发生在进入循环之前”的说法据此存疑，下一步应直接在移动监视器/其调用方实现打断收敛，而不是另加一层。
 
 契约 7.759 事实：`AgentHostTownTradeLoop` 新增有界遭遇等待（最多 20×1s，写 `town-trade-encounter-waited`）；真机 `TestResults/20261128-160403` 仍在 10 决策/17 动作以 `native-visible-hostile-bandit-interrupted-settlement-move` 结束且无 `town-trade-*` 阶段，证明打断发生在进入循环之前，循环内等待未被走到。

@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.759
+Contract version: 7.760
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -193,6 +193,18 @@ failureCode = native-visible-hostile-bandit-interrupted-settlement-move
 真机（`TestResults/20261128-160403`）：仍在 10 决策 / 17 动作以 `native-visible-hostile-bandit-interrupted-settlement-move` 结束，且本轮没有出现贸易循环自己的 `town-trade-*` 阶段记录——说明这次打断发生在**进入循环之前**（父级分派/规划阶段），等待逻辑根本没被走到。
 
 结论：贸易切片要跑通，必须先让“进入循环前的移动/遇敌”具备和 EYC 父流程一样的打断收敛，否则循环内的等待只是局部补丁。
+## Contract 7.760 — 打断码是“请把地图交给遭遇流程”的信号，不是失败
+
+读 `agenthost/AgentHostNativeMapMovementMonitor.cs`（第 26–35 行注释与常量）得到机制事实：这个监视器**被动**观察移动中的可见敌对匪徒；一旦出现就发一次单独记录的原生 Pause，并把 `FailureCode = "native-visible-hostile-bandit-interrupted-settlement-move"` 交回调用方，让 EYC 父级把新地图状态送进 BattleSimulation 循环。也就是说这个码的本意是**交接信号**，不是“切片失败”。
+
+由此澄清 7.758/7.759 的两次尝试为什么都没用：贸易循环把交接信号当成终止条件（以及 7.759 在错误的地方插入等待），而不是像 EYC 父级那样先看地图新状态属于哪一类遭遇，再决定“交战斗”或“清状态重规划”。
+
+下一增量的具体设计（尚未实现）：
+
+1. 在 `AgentHostTownTradeLoop` 的移动等待处识别该 StopReason，不抛终止，而是回读原生状态；
+2. 若地图处于遭遇/战斗可路由状态 → 交给既有 battle mission / BattleSimulation 子流程（与 EYC 父级同一入口，不新造动作）；
+3. 若遭遇已被清除（地图自由） → 清 `moveTargetId`、重挑安全城镇并重发 move，全程写 trace（例如 `town-trade-encounter-handoff-*`）；
+4. 有界：单个切片内只允许有限次交接（与 `MaxEncounterWaits` 相同量级），超出仍以原码终止，不静默循环。
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：
