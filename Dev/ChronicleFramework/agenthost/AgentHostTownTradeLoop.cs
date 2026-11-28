@@ -206,7 +206,11 @@ internal static class AgentHostTownTradeLoop
                     {
                         ["stage"] = "town-trade-passive-move-wait",
                         ["targetSettlementId"] = movingTarget,
-                        ["nativeActionSent"] = false
+                        ["nativeActionSent"] = false,
+                        ["attempt"] = passiveMoveWaits,
+                        ["timeControlMode"] = ReadString(currentNative, "timeControlMode"),
+                        ["partyIsMoving"] = ReadBoolean(state["party"] as JsonObject, "isMoving"),
+                        ["campaignDay"] = ReadDouble(currentNative, "campaignDay", double.NaN)
                     });
                     await Task.Delay(1000, elapsed.Token);
                     using (var movingFresh = await stateClient.ReadStateAsync(elapsed.Token)) currentNative = ParseObject(movingFresh.RootElement);

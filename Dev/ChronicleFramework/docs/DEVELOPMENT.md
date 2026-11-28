@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.767
+Contract version: 7.768
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -329,6 +329,25 @@ mission-conversation-surface|type=TaleWorlds.CampaignSystem.Conversation.Convers
 
 未完成且明确留待下一增量：Host 侧的有界循环（读 `mission.conversation` 组目录、交给 provider 或规则选原生选项、直到会话结束回到地图）。本契约只保证“能看到原生选项、能按原生选项执行”，不声称已经能通过对话场景。
 
+## Contract 7.768 — 移动不推进的确切事实：`partyIsMoving=false` 且 Campaign 日不动
+
+给被动等待加了实况字段后，真机（`TestResults/20261128-193022`）给出 45 条一致的记录：
+
+```
+targetSettlementId = town_ES3
+timeControlMode   = StoppablePlay
+partyIsMoving     = false
+campaignDay       = 91077.375（45 次全部相同）
+```
+
+而决策观察里的 `timeControlMode` 是 `Stop`。也就是说：`move` 回执是 completed，但队伍**没有进入移动状态**，同时 Campaign 时间没有推进。
+
+这条事实排除了上一轮的两个猜测（菜单、路上被打断），指向“时钟/移动没有真正启动”。EYC 的 run 里 `campaignDay` 是会变的（例如 91077.489），说明那边的移动链路会真正推进时间；贸易切片这边缺的就是这一步。
+
+下一步两条候选（都需要真机判定，选一条实现）：
+
+1. 夹具/循环在发起 `move` 前把时钟从 `Stop` 恢复到可推进状态（并记录这个显式动作），让原生移动真的跑起来；
+2. 若产品契约不允许切片动时钟，则改为“只购买当前已开市城镇的报价”，把移动需求从这条切片里去掉，另设地图移动切片。
 ## Contract 7.745 — 遭遇直接进入 MissionState：统一任务入口与对话场景边界
 
 从零开局真机（`TestResults/20261128-121956` 起）暴露：劫匪遭遇可以直接把 Native 从 MapState 推进到 `MissionState`，此时地图上已经没有遭遇菜单，`ShouldRouteToBattleSimulation` 的 Map 分类器认不出来，父循环判死整轮。
