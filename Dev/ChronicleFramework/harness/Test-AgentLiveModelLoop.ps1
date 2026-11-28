@@ -468,7 +468,16 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
                 # instead of guessing. The receipt is recorded in the live result.
                 $townTradeMenuToOpen = if ($townTradeMenuId) { $townTradeMenuId } else { 'village' }
                 $townTradeOpen = $null
-                try { $townTradeActivated = Invoke-AgentCli 'harnessActivateSettlementMenu' @('-MenuId', $townTradeMenuToOpen); if ($townTradeActivated.status -ne 'completed') { throw ('activate failed: ' + [string]$townTradeActivated.error) }; $townTradeOpen = Invoke-AgentCli 'menuSelect' @('-MenuId', $townTradeMenuToOpen, '-OptionId', 'trade') }
+                try {
+                    $townTradeActivated = Invoke-AgentCli 'harnessActivateSettlementMenu' @('-MenuId', $townTradeMenuToOpen)
+                    if ($townTradeActivated.status -ne 'completed') { throw ('activate failed: ' + [string]$townTradeActivated.error) }
+                    # Read the ids Native actually published instead of assuming 'trade': the menu id and
+                    # option id differ per settlement type and Native version.
+                    $townTradeMenuOptionIds = @($townTradeActivated.data.optionIds | ForEach-Object { [string]$_ })
+                    $townTradeTradeOptionId = @($townTradeMenuOptionIds | Where-Object { $_ -match 'trade' })[0]
+                    if (-not $townTradeTradeOptionId) { throw ('activated menu ' + $townTradeMenuToOpen + ' published no trade option; ids=' + ($townTradeMenuOptionIds -join ',')) }
+                    $townTradeOpen = Invoke-AgentCli 'menuSelect' @('-MenuId', $townTradeMenuToOpen, '-OptionId', $townTradeTradeOptionId)
+                }
                 catch { $townTradeActivationError = $_
                     # A loaded save can sit inside a settlement with no current menu. Re-issuing the
                     # approved Native move to the same settlement makes Native show its menu again.
