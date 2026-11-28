@@ -2322,6 +2322,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.748 事实（未验证）：入口门改按**会话表面**放行（`HasHandledMissionConversation`：`mission.conversation` 的 `inProgress`／`sentenceText`／clickable 选项任一存在即算可行动），Stealth 等非 Conversation 模式只要发布会话就进入同一有界分支；会话表面中途消失写 `objective-mission-conversation-surface-ended` 重新规划。真机 `TestResults/20261128-141945` 复跑仍以 `native-mission-entry-mode-unavailable` 结束（18 决策/24 动作），失败 detail 同时显示 `mode=Stealth` 与两个 clickable 选项——代码判定未经验证，先要固定“运行中的 Host 是哪个二进制”的证据链。
 
+
+
 契约 7.747 事实：Host `ResolveMissionConversationAsync` 用原生 clickable 选项驱动 Mission 会话（上限 16 决策，只接受目录内 OptionId），`NativeMailboxClient` 白名单新增 `missionConversationSelect/Continue`。真机 `TestResults/20261128-140539`：6 决策 6 动作 `returnedToMap=true`，对话首次走通。随后 `mode=Stealth`（`villa_singular_c`）场景 60s 无受支持模式 → `native-mission-entry-mode-unavailable`，`missionLeave` 只接受友好地点 Mission，Stealth 无有界动作面。
 
 契约 7.746 Mission 会话事实：Mission 内会话管理器是 `TaleWorlds.CampaignSystem.Conversation.ConversationManager` 的**另一个实例**（地图会话同类不同实例），`dialogueSelect` 打不到，`missionLeave` 只对 Tavern 生效。Mission 观察新增 `conversation{inProgress,sentenceText,hero,options}`；mod 新增 `missionConversationSelect`/`missionConversationContinue` 动作。Host 有界循环待接入。
