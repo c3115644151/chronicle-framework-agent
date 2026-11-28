@@ -2320,6 +2320,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.739 接管事实：玩家按 F10 接管身体时，mod 写 `agent-control.json`（`hold=true`，`reason=player-takeover`），Host 在写下一个原生动作命令前等待该文件释放，`reason=escape-menu` 用于 ESC 菜单打开期间；F10 再按一次交还，F9 结束 Agent。Agent 拥有输入时 `GameKey.IsDown/IsPressed` 在 `MapHotKeyCategory` 上被前缀拦截（`MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`），ESC 不在拦截范围。真机截图取证见 TestResults/20261128-081358 与 20261128-081633。
 
+契约 7.760 追加核对：`TownTradeActions` 常量与 Host catalog 的 `town-trade` profile **完全一致**（9 个：mapSettlementTargets, move, menuSelect, tradeOptions, trade, tradeConfirm, tradeCancel, tradeCancelChanges, inventoryDone），所以上一轮“集合不相等”的推断不成立；但加上“请求含 TownTradeActions 即走贸易循环”的覆盖后真机仍跑 EYC（`resultKind=storymode-establish-your-clan-autonomy-loop`），说明实际请求里携带的动作名并非这 9 个（覆盖未触发即为证据）。下一步要抓请求侧的真实 `allowedActionNames`（例如在 Host 落盘请求体），而不是继续猜条件。该覆盖改动已 `git stash`（可恢复），未提交。
+
 契约 7.760 已证实（证据 `TestResults/20261128-160403` 的 `AgentHostCampaignLoopResult.json`）：`resultKind = storymode-establish-your-clan-autonomy-loop`，`goalClassification` 无值——那次运行执行的是 **EYC autonomy 循环**，城镇贸易循环从未被调用。因此 7.758 的“贸易切片跑起来了”正式撤回；`-TownTradeFromStoryMode` 在 StoryMode 存档上只会跑 EYC。要拿到买入收据，必须改用**不带原版 EYC 任务的自由战役夹具**（或先关闭该 Quest），并确认 `resultKind` 是 town-trade。
 
 契约 7.760 补充（重要）：`AgentHostTownTradeLoop` 的被动等待显式传 `monitorVisibleBandits: false`（`AgentHostTownTradeLoop.cs:152`），真正会产出该打断码的是父级 `AgentHostCampaignLoop.cs:1040-1058`，且仅在 `HasObservedEstablishYourClanQuest(...)` 为真时开启。配合“本轮无任何 `town-trade-*` 阶段记录”，最可能的真相是：StoryMode 夹具下 Host 把目标分类成 autonomy 路线，实际跑的是 EYC 父循环（含 gold 子流程），贸易循环根本没被调用——之前的“贸易切片跑起来了（9 决策/16 动作）”应据此降级为未证实。下一步必须先看 `goalClassification` 与 `objectiveRuns` 再判定。
