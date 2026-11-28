@@ -199,6 +199,17 @@ internal static class AgentHostTownTradeLoop
                     (!string.IsNullOrWhiteSpace(movingTarget) && !string.Equals(ReadString(state["location"] as JsonObject, "currentSettlementId"), movingTarget, StringComparison.Ordinal));
                 if (movingNow && passiveMoveWaits >= MaxPassiveMoveWaits)
                     throw new AgentHostException("town-trade-move-never-arrived", "The bounded Native settlement move did not arrive within the passive watch window; no purchase was attempted and Campaign time was not changed explicitly.");
+                if (movingNow && moveTargetId is not null && AgentHostNativeMapMovementMonitor.IsStalledNativeSettlementMove(currentNative, moveTargetId))
+                {
+                    // A stalled move only advances when Campaign time runs; resume the Native clock once,
+                    // traced, then keep watching passively (the EYC move monitor relies on the same fact).
+                    ledger.Trace.Add(new JsonObject { ["stage"] = "town-trade-move-resumed", ["timeControlModeBefore"] = ReadString(currentNative, "timeControlMode") });
+                    using var resumeResponse = await actionClient.ExecuteTownTradeActionAsync("resume", new JsonObject(), elapsed.Token);
+                    currentNative = ParseObject(resumeResponse.RootElement);
+                    if (ReadString(currentNative, "status") != "completed")
+                        throw new AgentHostException("town-trade-move-resume-rejected", "Native rejected the resume needed to advance a stalled settlement move; no purchase was attempted.");
+                    continue;
+                }
                 if (movingNow && moveTargetId is not null && passiveMoveWaits < MaxPassiveMoveWaits)
                 {
                     passiveMoveWaits++;

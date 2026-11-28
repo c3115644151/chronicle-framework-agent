@@ -314,7 +314,7 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
 
         var valid = action switch
         {
-            "mapSettlementTargets" or "tradeOptions" or "tradeConfirm" or "tradeCancel" or "tradeCancelChanges" or "inventoryDone" => arguments.Count == 0,
+            "mapSettlementTargets" or "resume" or "tradeOptions" or "tradeConfirm" or "tradeCancel" or "tradeCancelChanges" or "inventoryDone" => arguments.Count == 0,
             "move" => HasOnlyKeys(arguments, "settlementId") && HasText(arguments, "settlementId"),
             "menuSelect" => HasOnlyKeys(arguments, "menuId", "optionId") && HasText(arguments, "menuId") && HasText(arguments, "optionId"),
             "trade" => HasOnlyKeys(arguments, "direction", "itemViewModelId", "inventorySide", "amount") &&

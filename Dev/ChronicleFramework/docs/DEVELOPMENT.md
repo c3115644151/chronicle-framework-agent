@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.768
+Contract version: 7.769
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -348,7 +348,21 @@ campaignDay       = 91077.375（45 次全部相同）
 
 1. 夹具/循环在发起 `move` 前把时钟从 `Stop` 恢复到可推进状态（并记录这个显式动作），让原生移动真的跑起来；
 2. 若产品契约不允许切片动时钟，则改为“只购买当前已开市城镇的报价”，把移动需求从这条切片里去掉，另设地图移动切片。
-## Contract 7.745 — 遭遇直接进入 MissionState：统一任务入口与对话场景边界
+## Contract 7.769 — 给循环加了 `resume`，但触发条件真的没命中
+
+按 7.768 的第 1 条候选实现：`TownTradeActions` 增加 `resume`，`NativeMailboxClient.ValidateTownTradeAction` 白名单放行 `resume{}`，循环在 `AgentHostNativeMapMovementMonitor.IsStalledNativeSettlementMove(...)` 为真时发一次原生 `resume` 并写 `town-trade-move-resumed`。
+
+真机（`TestResults/20261128-193905`）：
+
+```
+resultKind = town-trade-buy, decisions = 3, actionsExecuted = 2
+failureCode = town-trade-move-never-arrived
+trace stages = town-trade-passive-move-wait（没有 town-trade-move-resumed）
+```
+
+即 `resume` 分支**从未进入**：`IsStalledNativeSettlementMove` 要求 `timeControlMode == "Stop"`（`AgentHostNativeMapMovementMonitor.cs:196`），而运行期读到的是 `StoppablePlay`。所以“停滞”这个既有判定与贸易切片的真实状态不一致——时间显示在走，但 `campaignDay` 不动、`isMoving=false`。
+
+下一步不应继续加动词，而要先弄清 `StoppablePlay` 但时间不推进的成因（例如 Harness 的时钟暂停用的是别的开关，或原生移动在等一次输入）：读 `timeControlMode` 的设置方与 `move` 回执在 mod 侧的落地，再做一次针对性真机。`resume` 能力本身已实现、白名单已放行，但**未被触发**，文档按此记录。## Contract 7.745 — 遭遇直接进入 MissionState：统一任务入口与对话场景边界
 
 从零开局真机（`TestResults/20261128-121956` 起）暴露：劫匪遭遇可以直接把 Native 从 MapState 推进到 `MissionState`，此时地图上已经没有遭遇菜单，`ShouldRouteToBattleSimulation` 的 Map 分类器认不出来，父循环判死整轮。
 

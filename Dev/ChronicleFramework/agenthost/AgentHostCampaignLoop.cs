@@ -22,7 +22,7 @@ internal static class AgentHostCampaignLoop
     internal static readonly HashSet<string> CaptivityRecoveryActions = new(StringComparer.Ordinal) { "resume", "menuSelect" };
     internal static readonly HashSet<string> GoldSaleActions = new(StringComparer.Ordinal)
     {
-        "mapSettlementTargets", "move", "menuSelect", "tradeOptions", "trade", "tradeConfirm", "tradeCancel", "tradeCancelChanges",
+        "mapSettlementTargets", "move", "menuSelect", "resume", "tradeOptions", "trade", "tradeConfirm", "tradeCancel", "tradeCancelChanges",
         "sellPrisonerOne", "partyScreenDone", "partyScreenCancel"
     };
     internal static readonly HashSet<string> RecruitmentActions = new(StringComparer.Ordinal) { "recruitOptions", "recruit", "recruitAll", "prisonerRecruitmentOptions", "recruitPrisoner" };
