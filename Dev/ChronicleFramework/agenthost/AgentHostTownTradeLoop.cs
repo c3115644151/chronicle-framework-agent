@@ -34,6 +34,8 @@ internal static class AgentHostTownTradeLoop
         var actionCount = 0;
         var buyActionCount = 0;
         string? moveTargetId = null;
+        var encounterWaits = 0;
+        const int MaxEncounterWaits = 20;
         var moveStartPending = false;
         var rejectedProviderDecisions = 0;
         JsonArray? safeTowns = null;
@@ -85,7 +87,26 @@ internal static class AgentHostTownTradeLoop
                 if (ReadBoolean((state["context"] as JsonObject), "inquiryOpen"))
                     throw new AgentHostException("town-trade-inquiry-out-of-scope", "The bounded buy profile does not resolve Native inquiries or capacity warnings; no unverified confirmation was sent.");
                 if (IsActiveEncounter(state) || ReadBoolean((state["context"] as JsonObject)?["captivity"] as JsonObject, "isCaptive"))
-                    throw new AgentHostException("town-trade-encounter-out-of-scope", "A new encounter or Captivity interrupted the bounded Native buy path; no battle or recovery was started.");
+                {
+                    // A visible hostile bandit can interrupt a settlement move without becoming a fight.
+                    // Wait a bounded number of reads for the encounter to clear, then replan; a Captivity
+                    // or a sustained encounter still stops the slice without starting a battle.
+                    var captiveNow = ReadBoolean((state["context"] as JsonObject)?["captivity"] as JsonObject, "isCaptive");
+                    if (captiveNow || encounterWaits >= MaxEncounterWaits)
+                        throw new AgentHostException("town-trade-encounter-out-of-scope", "A new encounter or Captivity interrupted the bounded Native buy path; no battle or recovery was started.");
+                    encounterWaits++;
+                    ledger.Trace.Add(new JsonObject
+                    {
+                        ["stage"] = "town-trade-encounter-waited",
+                        ["attempt"] = encounterWaits,
+                        ["battleStarted"] = false,
+                        ["moveReplayed"] = false
+                    });
+                    await Task.Delay(1000, elapsed.Token);
+                    using (var cleared = await stateClient.ReadStateAsync(elapsed.Token)) currentNative = ParseObject(cleared.RootElement);
+                    continue;
+                }
+                encounterWaits = 0;
 
                 if (IsInterruptedMapMove(state, moveTargetId, moveStartPending))
                 {

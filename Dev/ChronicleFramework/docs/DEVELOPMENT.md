@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.758
+Contract version: 7.759
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -186,6 +186,13 @@ failureCode = native-visible-hostile-bandit-interrupted-settlement-move
 这是这条切片第一次跑到“原生真的在移动并接近交易”的阶段；卡点是遭遇打断，而 `AgentHostTownTradeLoop` 目前对遭遇只有 `town-trade-encounter-out-of-scope` 的显式拒绝，没有像 EYC 父流程那样“打断后重发 move/换目标”的收敛。
 
 下一步：给贸易循环加有界遭遇处理（复用 EYC 的 `objective-encounter-interruption-already-cleared-replanned` 思路，或挑另一个安全城镇），再复跑取买入收据。
+## Contract 7.759 — 有界等待没能救回被打断的移动
+
+`AgentHostTownTradeLoop` 加有界遭遇等待：可见敌对匪徒打断移动时最多等 20 次（每次 1 秒，写 `town-trade-encounter-waited`），期间不发起战斗、不重放 move；持续存在或进入 Captivity 才抛原有的 `town-trade-encounter-out-of-scope`。
+
+真机（`TestResults/20261128-160403`）：仍在 10 决策 / 17 动作以 `native-visible-hostile-bandit-interrupted-settlement-move` 结束，且本轮没有出现贸易循环自己的 `town-trade-*` 阶段记录——说明这次打断发生在**进入循环之前**（父级分派/规划阶段），等待逻辑根本没被走到。
+
+结论：贸易切片要跑通，必须先让“进入循环前的移动/遇敌”具备和 EYC 父流程一样的打断收敛，否则循环内的等待只是局部补丁。
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：
