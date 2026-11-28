@@ -446,6 +446,21 @@ internal static class ChronicleAgentRuntimeController
                               ",\"nativeSessionId\":\"" + EscapeJson(nativeSessionId) + "\"" + providerConfiguration +
                               ",\"goal\":\"" + EscapeJson(goal.Trim()) +
                               "\",\"maxDecisions\":2048,\"maxElapsedSeconds\":86400,\"allowedActionNames\":[\"mapSettlementTargets\",\"move\",\"menuSelect\",\"talkToSettlementHero\",\"dialogueSelect\",\"dialogueContinue\",\"questDetails\",\"tradeOptions\",\"trade\",\"tradeConfirm\",\"tradeCancel\",\"tradeCancelChanges\",\"barterOptions\",\"barterAutoBalance\",\"barterOffer\",\"barterCancel\",\"inventoryOpen\",\"heroEquipmentOptions\",\"inventoryCancel\",\"incidentSelect\",\"partyUpgradeOptions\",\"upgradeTroop\",\"mapPartyTargets\",\"pursue\",\"battleSkip\",\"battleFinish\",\"partyTakeAll\",\"partyLootTransferOne\",\"sellPrisonerOne\",\"partyScreenCancel\",\"partyScreenDone\",\"inventoryTakeAll\",\"inventoryDone\",\"recruitOptions\",\"recruit\",\"recruitAll\",\"prisonerRecruitmentOptions\",\"recruitPrisoner\",\"missionSceneAgents\",\"missionNavigateToAgent\",\"missionInteract\",\"missionLeave\"]}";
+            // The Harness owns the per-slice action set. Without an override the mod would send its
+            // own full list, the Host would classify the request as the wider route, and a bounded
+            // slice (town trade) could never be selected (contract 7.761).
+            var allowedActionsOverride = Environment.GetEnvironmentVariable("CHRONICLE_AGENT_ALLOWED_ACTIONS");
+            if (!string.IsNullOrWhiteSpace(allowedActionsOverride))
+            {
+                var setStart = requestJson.IndexOf("\"allowedActionNames\":[", StringComparison.Ordinal);
+                var setEnd = setStart < 0 ? -1 : requestJson.IndexOf(']', setStart);
+                var overrideNames = Array.FindAll(allowedActionsOverride.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries), name => name.Trim().Length > 0);
+                if (setStart >= 0 && setEnd > setStart && overrideNames.Length > 0)
+                {
+                    var overrideJson = string.Join(",", Array.ConvertAll(overrideNames, name => "\"" + name.Trim() + "\""));
+                    requestJson = requestJson.Substring(0, setStart) + "\"allowedActionNames\":[" + overrideJson + requestJson.Substring(setEnd);
+                }
+            }
             _hostInput.WriteLine(requestJson);
             _hostInput.Flush();
             _stopSignalSent = false;

@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.761
+Contract version: 7.762
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -223,6 +223,15 @@ townTradeSetMatched = false
 于是 7.758–7.760 的连续失效全部得到解释：改 profile、改请求集、在分派里加“请求等于 TownTradeActions 就走贸易循环”的覆盖，都不会触发——因为请求里从来就不是那套动作。
 
 下一增量的正确位置：让 mod 侧启动 Host 时使用 Harness 指定的动作集（例如由 Harness 通过环境变量/启动参数覆盖 `AgentHostRuntimeController` 的默认清单），或让 Harness 直接接管 Host 启动而绕过 mod。修改 harness 的 `$allowedActions` 属于无效动作，不再尝试。
+## Contract 7.762 — 环境变量下发没生效；请求仍来自 mod 默认清单
+
+按 7.761 的结论实现第一步：`mod/AgentHostRuntimeController.cs` 在写 Host 请求前支持 `CHRONICLE_AGENT_ALLOWED_ACTIONS` 覆盖（字符串替换 `allowedActionNames` 数组）；live 测试在**启动游戏之前**写入该变量。
+
+真机复核（`TestResults/20261128-181659`）：请求里仍是 42 个动作（`townTradeSetMatched=false`），`resultKind` 仍是 `storymode-establish-your-clan-autonomy-loop`。即环境变量没有到达 mod 的读取点。
+
+结合 `harness/Agent-Cli.ps1` 里找不到 `Start-Process`/`Process.Start` 的启动代码，最可能的解释是：游戏进程由 Harness 之外的路径拉起，环境变量不随这条链路继承。继续在这一层试是浪费时间。
+
+下一增量：改走 Harness 已经能写的配置面——run Temp 下的 `MCM/Global/ChronicleFramework/ChronicleAgentSettings.json`（评测脚本本来就会写 `ProviderBaseUrl`/`ModelId`/`OutputMode`），在里面加一个“每切片动作集”字段，由 mod 读取后覆盖请求；这比注入环境变量可靠，也便于在收据里记录。
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：

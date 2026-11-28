@@ -372,6 +372,10 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
     $env:CHRONICLE_LLM_MAX_HTTP_REQUESTS_PER_DECISION = [string]$MaxHttpRequestsPerDecision
     $loadArguments = @('-SaveName', $LoadSaveName)
     if ($EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop -or $CaptivityRecoveryLoop -or $EstablishClanGoldSaleLoop -or $TownTradeLoop -or $TournamentLoop) { $loadArguments += '-IncludeChronicleFramework' }
+    # The Host request is built by the mod runtime controller, so the per-slice action set must be
+    # in the game environment before it launches; otherwise a bounded slice is silently widened
+    # to the mod default and the Host classifies the run as the wider route (contract 7.761).
+    if ($allowedActions) { $env:CHRONICLE_AGENT_ALLOWED_ACTIONS = $allowedActions }
     $start = Invoke-AgentCli 'load' $loadArguments
     $sessionStarted = $true
     $baseline = Invoke-AgentCli 'state'
