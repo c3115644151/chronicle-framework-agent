@@ -1,4 +1,19 @@
-# Chronicle Framework 运行日志
+# Chroni
+
+## 2026-11-28 窗口交还（契约 7.742）
+
+- 玩家实测：窗口钉在左上角 840x472、拉不动、点击不置顶，只能 ESC 抢回鼠标。
+- 定位：`harness/Test-WindowLayout.ps1` 强制 `SetWindowPos(0,0,840,472,0x0074)` 且每轮重试；同时改写 `engine_config.txt` 的 `display_mode/display_width/display_height/max_framerate`；`WS_EX_NOACTIVATE` 让点击既不激活也不置顶。
+- 改动：捕获只保留 `0x0057`（不移动/不改大小/不改 z 序/不激活），不再改写显示设置；新增 `harness/Reset-GameWindow.ps1` 清除 `WS_EX_NOACTIVATE` 并复位 1600x900/60fps；门禁 17 同步断言。
+- 验证：`harness/Check-Docs.ps1` 通过（ContractVersion 7.742，Catalog 126/126、ACT 183、OBS 74、NA 23 不变）；`harness/Reset-GameWindow.ps1` 在本机无游戏进程时输出 `ProcessCount=0`、`EngineConfigRepaired=true`，`engine_config.txt` 实测为 `display_mode=0 / 1600x900 / max_framerate=60`。
+## 2026-11-28 从零开局 EYC 闭环：十二轮真机边界（契约 7.741）
+
+- 起点：`ChronicleEycDev-opening-20261126`（1000 金、1 名成员、声望 20、四目标全部未达成），确定性 provider（`harness/Test-AgentDeterministicProvider.ps1`）+ 真实 Host + 真实 Native，夹具不注入敌对队伍。
+- 逐轮修复（全部是真机回执暴露的机制缺口，不是脚本口径）：① 家族名询问没有 `text` 参数 → `storymode-clan-name-decision-invalid`；② 单人队伍每战必败被俘 → `Test-ShouldAttack` 只在人数占优时 Send Troops；③ 巡游被劫匪反复打断 → 小队优先最近安全据点；④ 一次遭遇终结整轮 → 卖出切片把遭遇交回父循环；⑤ 遭遇在父循环重读时已消失仍判死 → `objective-encounter-interruption-already-cleared-replanned`；⑥ Native 拒绝保存检查点时整轮终止 → 改为延后重试。
+- 结果：`TestResults/20261128-112900-deterministic-eyc-ChronicleEycDev-opening-20261126` 等运行仍在 10–60 决策内以 `objective-subflow-failed` 结束，`gold 1000/2000`、`partySize 1/25`、`renown 20/50`、`companions 0/1`。**四目标闭环未达成**。
+- 结论（须带着看）：单人流亡起点要先“村庄募兵 → 攒兵 → 打劫匪 → 卖战利品”，当前确定性策略没有形成这条序列；同时“遇到无法归类的遭遇形状（如 encounter_meeting 未列 Leave）”仍会升级为整轮失败。这两条是阶段①的剩余工作量，不能用既有 `renown-47153` 检查点的 3/4 或 4/4 结果冒充“从零”。
+- 既有可复现事实不变：`TestResults/20261128-054224-deterministic-eyc` 在 **renown 检查点**（renown 47/50）上四目标全 met、`termination.reason=native-establish-your-clan-quest-success-verified`。
+cle Framework 运行日志
 
 ## 2026-11-28 输入门禁改为按键+鼠标全拦，修 Host 启动崩溃（契约 7.740）
 触发：玩家实测 Agent 持有时仍能点地图移动、按时间键暂停，且看不到 Agent 真正停手。根因三条：旧门禁只拦 MapHotKeyCategory 时间键（地图点击走 InputKey.LeftMouseButton，其余操作走别的键路径）；ChronicleAgentControlChannel.SetHold 的缓存键漏了 hold 本身，交接时写不出 hold=true；交接键不在白名单里，玩家按了也读不到（上一版 F10 失效真因）。修复：Input.* 与 Key.* 全键前缀门禁（白名单 Escape、F6、F7、F9、当前绑定交接键），诊断 agent-input-guard|blocked=；SetHold 缓存键加入 hold 状态；Host 启动前 NormalizeCaseDuplicateEnvironmentNames 折叠 NO_PROXY 与 no_proxy 重复名（原崩溃为 ArgumentException: Item has already been added. Key in dictionary NO_PROXY），并给 StartOwnedHost 包异常兜底。验证：TestResults/20261128-101606（-LifecycleScenario InputToggle）Passed=true，requests=1、resumes=1、holdEntered=1、holdReleased=2、hostStarts=1、probePass 行 blockedSpace=True|blockedMouse=True；期间 20261128-091726、093532、094225、095011、095827、100825 六轮失败逐条留档（Host 未启动、hold 未写、恢复事件正则多锚 $）。附带修复：capture 阶段强杀会残留 840x472 窗口，harness/Reset-EngineDisplayConfig.ps1 已归档，并已把玩家窗口改回 1600x900/60fps。

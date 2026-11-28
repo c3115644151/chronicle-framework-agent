@@ -1,8 +1,4 @@
 #Requires -Version 7.0
-$script:ChronicleTestWindowWidth = 840
-$script:ChronicleTestWindowHeight = 472
-$script:ChronicleTestWindowX = 0
-$script:ChronicleTestWindowY = 0
 $script:ChronicleTempDirectory = if ([string]::IsNullOrWhiteSpace($env:CHRONICLE_HARNESS_TEMP)) {
     Join-Path (Split-Path -Parent $PSScriptRoot) 'TestResults\Temp'
 } else {
@@ -64,6 +60,17 @@ namespace ChronicleFramework
             return HasNoActivateExtendedStyle(actualStyle);
         }
 
+        public static bool RemoveNoActivate(IntPtr hWnd)
+        {
+            if (hWnd == IntPtr.Zero) return false;
+            const int GWL_EXSTYLE = -20;
+            var currentStyle = GetWindowLongPtr(hWnd, GWL_EXSTYLE).ToInt64();
+            var requestedStyle = currentStyle & ~0x08000000L;
+            if (requestedStyle != currentStyle) SetWindowLongPtr(hWnd, GWL_EXSTYLE, new IntPtr(requestedStyle));
+            var actualStyle = GetWindowLongPtr(hWnd, GWL_EXSTYLE).ToInt64();
+            return !HasNoActivateExtendedStyle(actualStyle);
+        }
+
         public static int GetForegroundProcessId()
         {
             var foreground = GetForegroundWindow();
@@ -109,10 +116,8 @@ if (-not (Get-Command Restore-ChroniclePreLaunchForeground -ErrorAction Silently
 function Set-ChronicleTestDisplayConfig([string]$EngineConfigPath) {
     if (-not (Test-Path $EngineConfigPath)) { return }
     $text = Get-Content $EngineConfigPath -Raw
-    $text = $text -replace '(?m)^display_mode\s*=.*$', 'display_mode = 0'
-    $text = $text -replace '(?m)^display_width\s*=.*$', "display_width = $script:ChronicleTestWindowWidth"
-    $text = $text -replace '(?m)^display_height\s*=.*$', "display_height = $script:ChronicleTestWindowHeight"
-    $text = $text -replace '(?m)^max_framerate\s*=.*$', 'max_framerate = 30'
+    # Never rewrite the player's display mode, size or frame cap: capture reads the live window, and a
+    # forced layout used to survive a killed run as a tiny non-movable window at the top-left corner.
     $text = $text -replace '(?m)^safely_exited\s*=\s*0$', 'safely_exited = 1'
     Set-Content -Path $EngineConfigPath -Value $text -NoNewline
 }
@@ -188,7 +193,9 @@ function Set-ChronicleTestWindow([int]$ProcessId, [object]$CursorClipBaseline = 
         $nonActivating = [ChronicleFramework.WindowApi]::EnsureNoActivate($handle)
         [ChronicleFramework.WindowApi]::ShowWindowAsync($handle, 4) | Out-Null
         # Keep the game visible for capture, but do not activate it or raise it above the user's windows.
-        $rawApplied = [ChronicleFramework.WindowApi]::SetWindowPos($handle, [IntPtr]::Zero, $script:ChronicleTestWindowX, $script:ChronicleTestWindowY, $script:ChronicleTestWindowWidth, $script:ChronicleTestWindowHeight, 0x0074)
+        # Bring the window up without activation and without touching its geometry: the player keeps the
+        # position and size they chose (SWP_NOSIZE|SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW).
+        $rawApplied = [ChronicleFramework.WindowApi]::SetWindowPos($handle, [IntPtr]::Zero, 0, 0, 0, 0, 0x0057)
         Start-Sleep -Milliseconds 100
         $foregroundProcessId = [ChronicleFramework.WindowApi]::GetForegroundProcessId()
         # Window foreground must not belong to the harness client, including during 3D Missions.
@@ -238,12 +245,10 @@ function Set-ChronicleTestWindow([int]$ProcessId, [object]$CursorClipBaseline = 
     $measured = [ChronicleFramework.WindowApi]::GetWindowRect($handle, [ref]$rect)
     $width = $rect.Right - $rect.Left
     $height = $rect.Bottom - $rect.Top
-    $withinExpectedBounds = [Math]::Abs($rect.Left - $script:ChronicleTestWindowX) -le 1 -and
-        [Math]::Abs($rect.Top - $script:ChronicleTestWindowY) -le 1 -and
-        [Math]::Abs($width - $script:ChronicleTestWindowWidth) -le 1 -and
-        [Math]::Abs($height - $script:ChronicleTestWindowHeight) -le 1
+    # The harness must leave the window usable: any real client area is enough for capture.
+    $geometryPreserved = $measured -and $width -ge 320 -and $height -ge 200
     [pscustomobject]@{
-        Applied = ($rawApplied -and $nonActivating -and $notForeground -and $cursorUnrestrictedAcrossDesktop -and $measured -and $visible -and -not $iconic -and $withinExpectedBounds)
+        Applied = ($rawApplied -and $nonActivating -and $notForeground -and $cursorUnrestrictedAcrossDesktop -and $measured -and $visible -and -not $iconic -and $geometryPreserved)
         NonActivating = $nonActivating
         NotForeground = $notForeground
         ForegroundProcessId = $foregroundProcessId

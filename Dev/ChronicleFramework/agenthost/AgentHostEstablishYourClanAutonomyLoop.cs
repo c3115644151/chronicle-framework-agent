@@ -67,6 +67,11 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             !ShouldReplanAfterIncidentBattleNoSafeAction(failedLostBandit, pausedSettlementMoveAfterDeferredBandit.RootElement) ||
             ShouldReplanAfterIncidentBattleNoSafeAction(failedLostBandit, pausedPartyMoveWithoutSettlementTarget.RootElement))
             throw new AgentHostException("establish-clan-incident-lost-target-safe-map-replan-gate-failed", "A no-safe-action hostile interruption may reopen EYC planning from a free nonmoving Map or a stopped Native settlement move that the parent can safely reissue; an active encounter, unanchored paused move, or ended quest must remain blocked.");
+        if (!IsEncounterInterruptionTermination("campaign-interruption") ||
+            !IsEncounterInterruptionTermination(AgentHostNativeMapMovementMonitor.FailureCode) ||
+            IsEncounterInterruptionTermination("no-safe-action") ||
+            IsEncounterInterruptionTermination(null) || MaxEncounterClearedReplans < 1)
+            throw new AgentHostException("establish-clan-encounter-cleared-replan-gate-failed", "Only a real encounter/captivity interruption termination may be treated as already cleared for replanning; ordinary objective failures must keep their own route.");
         var snapshot = new JsonObject
         {
             ["gold"] = new JsonObject { ["current"] = 32, ["target"] = 2000, ["met"] = false },
@@ -789,7 +794,19 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             var updatedCheckpoint = AgentHostEycObjectiveAttemptMemory.Store(campaignCheckpoint, objectiveAttemptMemory);
             using var receipt = await checkpointClient.WriteCampaignCheckpointAsync(updatedCheckpoint.ToJsonString(), elapsed.Token);
             if (ReadString(receipt.RootElement, "status") != "completed")
-                throw new AgentHostException("eyc-objective-attempt-checkpoint-write-failed", "Native did not confirm saving the EYC objective-attempt checkpoint; the Host will not rely on an unpersisted attempt outcome.");
+            {
+                // The attempt memory is advisory routing state, not quest progress. Native refuses a save in some
+                // transient map states; keep the memory dirty and retry from the next safe state instead of
+                // killing an otherwise healthy run.
+                ledger.Trace.Add(new JsonObject
+                {
+                    ["stage"] = "eyc-objective-attempt-checkpoint-write-deferred",
+                    ["nativeStatus"] = ReadString(receipt.RootElement, "status") ?? "unknown",
+                    ["attemptCount"] = AgentHostEycObjectiveAttemptMemory.Count(objectiveAttemptMemory),
+                    ["campaignBound"] = true
+                });
+                return;
+            }
 
             campaignCheckpoint = updatedCheckpoint;
             objectiveAttemptCheckpointDirty = false;
@@ -862,6 +879,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             // shared cumulative decision limit instead of imposing a second 20-cycle
             // ceiling that can stop a healthy long campaign before its budget ends.
             var safeSettlementRefreshAttempts = 0;
+            var encounterClearedReplans = 0;
         for (var cycle = 0; cycle < maxDecisions && ledger.Decisions < maxDecisions; cycle++)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
@@ -1458,6 +1476,29 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     }
                     var freeMap = IsFreeMapForObjectiveReplan(failedState.RootElement);
                     var childFailureCode = ReadString(child, "failureCode");
+
+                    // By the time the parent re-reads Native state the encounter that interrupted the child
+                    // can already be gone (the party left, or Native closed it). Treating that as a fatal
+                    // objective failure killed the whole run; the objective is still reachable, so replan.
+                    if (IsEncounterInterruptionTermination(termination) && freeMap &&
+                        AgentHostEstablishYourClanGoalLoop.HasActiveQuest(failedState.RootElement))
+                    {
+                        if (encounterClearedReplans >= MaxEncounterClearedReplans)
+                            return BuildResult("failed", "objective-encounter-interruption-looping", false,
+                                "The same encounter interruption kept clearing before Native actions could run; the parent stopped instead of spinning.",
+                                "objective-encounter-interruption-looping", journalObjectives, snapshot, differences);
+                        encounterClearedReplans++;
+                        ledger.Trace.Add(new JsonObject
+                        {
+                            ["stage"] = "objective-encounter-interruption-already-cleared-replanned",
+                            ["objectiveId"] = objectiveId,
+                            ["childTermination"] = termination,
+                            ["childFailureCode"] = childFailureCode,
+                            ["replayedChildActions"] = false,
+                            ["explicitClockAction"] = false
+                        });
+                        continue;
+                    }
 
                     // A hostile Bandit can interrupt ordinary Campaign travel. The child
                     // objective must not reinterpret that encounter as a Companion/Gold
@@ -2286,6 +2327,12 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         return string.Join("|", settlementId, ReadInt(party, "members", -1), ReadInt(party, "healthy", -1),
             ReadInt(party, "wounded", -1), ReadInt(party, "foodInventory", -1), ReadInt(state?["economy"] as JsonObject, "gold", -1));
     }
+
+    internal const int MaxEncounterClearedReplans = 12;
+
+    internal static bool IsEncounterInterruptionTermination(string? termination) =>
+        termination is "campaign-interruption" or AgentHostNativeMapMovementMonitor.FailureCode or
+        "native-encounter-left-no-battle" or "native-captivity-interrupted-settlement-move";
 
     internal static bool IsFreeMapForObjectiveReplan(JsonElement native)
     {

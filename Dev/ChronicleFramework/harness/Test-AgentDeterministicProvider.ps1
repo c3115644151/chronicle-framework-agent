@@ -27,13 +27,32 @@ function Choose-ArgValue($action, [string]$name) {
         # Encounter menu: str_order_attack is the original Send Troops/BattleSimulation
         # route and the only way to advance the EYC Renown objective; prefer it over leave.
         $attack = @($values | Where-Object { [string]$_ -cmatch 'str_order_attack' })
-        if ($attack.Count -gt 0) { return $attack[0] }
+        if ($attack.Count -gt 0 -and (Test-ShouldAttack $script:CurrentObs)) { return $attack[0] }
         $safe = @($values | Where-Object { [string]$_ -match '(?i)leave|exit|back|done|finish|decline|reject' })
         if ($safe.Count -gt 0) { return $safe[0] }
     }
     return $values[0]
 }
+# A lone, wounded hero loses every 1v3 bandit fight and ends up captured, which resets the whole loop.
+# Only take the Send Troops route when the party outnumbers the encountered bandits.
+function Test-ShouldAttack($obs) {
+    $state = Get-Arg $obs 'state'
+    $party = Get-Arg $state 'party'
+    $members = [double](Get-Arg $party 'members')
+    $hero = [double](Get-Arg $party 'heroHitPoints')
+    $ctx = Get-Arg $state 'context'
+    $enemyId = [string](Get-Arg $ctx 'encounteredPartyId')
+    $enemyMembers = 0.0
+    foreach ($p in @(Get-Arg $state 'nearbyParties')) {
+        if ([string](Get-Arg $p 'id') -ceq $enemyId) { $enemyMembers = [double](Get-Arg $p 'members') }
+    }
+    if ($members -le 0) { return $false }
+    if ($hero -lt 50 -and $enemyMembers -ge $members) { return $false }
+    return ($members + 1) -ge ($enemyMembers + 2)
+}
+
 function Build-Arguments($action, $obs = $null) {
+    $script:CurrentObs = $obs
     $argsObj = [ordered]@{}
     foreach ($n in @(Get-Arg $action 'arguments')) {
         $v = Choose-ArgValue $action ([string]$n)
@@ -52,7 +71,13 @@ function Build-Arguments($action, $obs = $null) {
         })
         $towns = @($safe | Where-Object { [string](Get-Arg $_ 'type') -ceq 'town' })
         $pick = $null
-        if ($towns.Count -gt 0) { $pick = $towns[0] } elseif ($safe.Count -gt 0) { $pick = $safe[0] }
+        # A one-member party that crosses the map gets intercepted by every nearby bandit. While the
+        # party is still small, take the closest safe settlement (villages recruit volunteers too).
+        $members = [double](Get-Arg (Get-Arg (Get-Arg $obs 'state') 'party') 'members')
+        if ($members -lt 6 -and $safe.Count -gt 0) {
+            $near = @($safe | Sort-Object { [double](Get-Arg $_ 'distance') } | Select-Object -First 1)
+            $pick = $near[0]
+        } elseif ($towns.Count -gt 0) { $pick = $towns[0] } elseif ($safe.Count -gt 0) { $pick = $safe[0] }
         if ($null -ne $pick) { $argsObj['SettlementId'] = [string](Get-Arg $pick 'id') }
     }
     # pursue needs a PartyId; derive the weakest currently visible hostile bandit
@@ -69,6 +94,18 @@ function Build-Arguments($action, $obs = $null) {
             $argsObj['PartyId'] = [string](Get-Arg $weakest 'id')
         }
     }
+# StoryMode clan-name inquiry: the Native question supplies no argument values, only the suggested
+    # input text. Returning an empty text is rejected as storymode-clan-name-decision-invalid.
+    if (($argNames0 -ccontains 'text') -and [string]$argsObj['text'] -eq '') {
+        $ctx = Get-Arg (Get-Arg $obs 'state') 'context'
+        $inquiry = Get-Arg $ctx 'inquiry'
+        $suggested = [string](Get-Arg $inquiry 'inputText')
+        if ([string]::IsNullOrWhiteSpace($suggested)) { $suggested = [string](Get-Arg $inquiry 'defaultInputText') }
+        if ([string]::IsNullOrWhiteSpace($suggested)) { $suggested = 'Chronica' }
+        if ($suggested.Length -gt 64) { $suggested = $suggested.Substring(0, 64) }
+        $argsObj['text'] = $suggested
+    }
+
     # Prefer a complete legal tuple for cross-field-constrained actions (recruit).
     $tuples = Get-Arg $action 'legalTuples'
     if ($null -ne $tuples -and @($tuples).Count -gt 0) {
@@ -103,6 +140,23 @@ function Pick-Decision($decisionInput) {
     $actions = @(Get-Arg $decisionInput 'allowedActions')
     $controls = @(Get-Arg $decisionInput 'allowedControls')
     $obs = Get-Arg $decisionInput 'observation'
+# Goal controls are published by the Host in camel case; the harness goal ids are kebab case. Keep one
+# explicit mapping so the stub rationale names the same goal the Harness layer reports.
+function Get-GoalControlSlug([string]$control) {
+    switch ($control) {
+        'supportedMapArrivalGoal' { return 'supported-map-arrival' }
+        'supportedVillageToolsQuestGoal' { return 'supported-village-tools-quest' }
+        'supportedBattleSimulationGoal' { return 'supported-battle-simulation' }
+        'supportedBattleAndCaptivityGoal' { return 'supported-battle-and-captivity' }
+        'supportedEstablishYourClanGoal' { return 'supported-establish-your-clan' }
+        'supportedCaptivityRecoveryGoal' { return 'supported-captivity-recovery' }
+        'supportedEstablishClanGoldSaleGoal' { return 'supported-establish-clan-gold-sale' }
+        'supportedTownTradeGoal' { return 'supported-town-trade' }
+        'supportedTournamentGoal' { return 'supported-tournament' }
+        default { return 'unsupported-goal' }
+    }
+}
+
     $goalNames = @('supportedMapArrivalGoal','supportedVillageToolsQuestGoal','supportedBattleSimulationGoal','supportedBattleAndCaptivityGoal','supportedEstablishYourClanGoal','supportedCaptivityRecoveryGoal','supportedEstablishClanGoldSaleGoal','supportedTownTradeGoal','supportedTournamentGoal','unsupportedGoal')
     $listedGoals = @($controls | Where-Object { $goalNames -ccontains [string]$_ })
     # Classification phase: goal controls are listed and the Host asks for scope classification.
@@ -114,7 +168,7 @@ function Pick-Decision($decisionInput) {
         if ($listedGoals -ccontains 'supportedEstablishYourClanGoal') { $chosen = 'supportedEstablishYourClanGoal' }
         elseif ($listedGoals -ccontains 'supportedMapArrivalGoal') { $chosen = 'supportedMapArrivalGoal' }
         else { $chosen = [string]$listedGoals[0] }
-        return @{ control = $chosen; rationale = 'deterministic: first listed supported goal control' }
+        return @{ control = $chosen; rationale = ('deterministic: goal control ' + (Get-GoalControlSlug ([string]$chosen))) }
     }
     # Bounded observe-again control: wait 1-10 seconds, Host-side only.
     if ($controls -ccontains 'observeAgain' -and ($actions.Count -eq 0 -or $actions.Count -eq 1)) {

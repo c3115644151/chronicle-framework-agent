@@ -713,7 +713,14 @@ internal static class AgentHostEstablishClanGoldSaleLoop
 
             var postRecoveryState = currentNative["state"] as JsonObject ?? new JsonObject();
             if (!IsFreeCampaignMap(postRecoveryState))
+            {
+                // An encounter that is still open when the sale slice starts is an interruption the EYC parent
+                // owns; failing the child ended the whole run instead of routing the encounter.
+                if (IsActiveEncounter(postRecoveryState))
+                    return BuildFailure(AgentHostNativeMapMovementMonitor.FailureCode,
+                        "A Native encounter was already open when the sale slice started; the EYC parent must resolve it before any sale action.");
                 throw new AgentHostException("gold-sale-free-map-required", "The Gold sale slice requires a free Campaign Map after any approved Captivity recovery.");
+            }
             if (!HasActiveQuest(postRecoveryState) || ReadString(postRecoveryState["storyModeEstablishClanStatus"] as JsonObject, "status") != "active")
                 throw new AgentHostException("gold-sale-storymode-quest-no-longer-active", "The exact original StoryMode quest is no longer active after recovery.");
 
@@ -823,8 +830,13 @@ internal static class AgentHostEstablishClanGoldSaleLoop
                     }
                     continue;
                 }
-                if (IsActiveEncounter(state) || ReadBoolean((state["context"] as JsonObject)?["captivity"] as JsonObject, "isCaptive"))
-                    throw new AgentHostException("gold-sale-encounter-out-of-scope", "A new encounter or Captivity interrupted the sale path; no battle or unverified recovery was started.");
+                // An open Native encounter is an interruption the EYC parent already routes through the
+                // BattleSimulation subflow; failing the whole sale here killed the parent run instead.
+                if (IsActiveEncounter(state))
+                    return BuildFailure(AgentHostNativeMapMovementMonitor.FailureCode,
+                        "A Native encounter interrupted the sale path before any sale action; the EYC parent must route it through BattleSimulation or Native Leave.");
+                if (ReadBoolean((state["context"] as JsonObject)?["captivity"] as JsonObject, "isCaptive"))
+                    throw new AgentHostException("gold-sale-encounter-out-of-scope", "A new Captivity interrupted the sale path; no battle or unverified recovery was started.");
 
                 if (IsInterruptedMapMove(state, moveTargetId, moveStartPending))
                 {

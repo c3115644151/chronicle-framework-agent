@@ -1,6 +1,28 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.740
+Contract version: 7.742
+
+## Contract 7.742 — 把游戏窗口交还给玩家（不再强制几何，仍不抢光标）
+
+玩家反馈：游戏窗口被固定在左上角、拉不动、点它也压不到最上层，必须先 ESC 才能拿回鼠标。根因是 `harness/Test-WindowLayout.ps1` 每次启动都把窗口 `SetWindowPos` 到 `(0,0)` + `840x472`（flags `0x0074`，每 100ms 重试 12 次），并把 `engine_config.txt` 的 `display_mode/display_width/display_height/max_framerate` 改写成 0/840/472/30；这些设置在被强杀时不会恢复，玩家端就一直是一块钉在左上角的小窗。窗口还被加了 `WS_EX_NOACTIVATE`（捕获期间不抢光标），所以点击既不激活也抬不到最前。
+
+本契约的取舍：**几何完全交还玩家，非激活语义保留**。
+
+- `Set-ChronicleTestWindow` 只用 `SWP_NOSIZE|SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE|SWP_SHOWWINDOW`（`0x0057`）把窗口显示出来，不移动、不改大小、不改 z 序；`Applied` 的几何条件从“必须等于 840x472@(0,0)”改为 `$geometryPreserved`（实测客户区 ≥ 320x200 即可捕获）。
+- `Set-ChronicleTestDisplayConfig` 不再改写 `display_mode/display_width/display_height/max_framerate`，只保留 `safely_exited` 崩溃标记修复。
+- 新增 `harness/Reset-GameWindow.ps1`：对正在运行的 `Bannerlord.BLSE.Standalone` 清除 `WS_EX_NOACTIVATE`（`RemoveNoActivate`）、`SWP_FRAMECHANGED` 应用样式、把窗口抬到前台，并把 `engine_config.txt` 复位为 1600x900/窗口化/60fps。玩家可随时自己运行它拿回窗口。
+- 门禁 `harness/gate/17-runtime-loops.ps1` 同步：断言 `0x0057`、`geometryPreserved`、`RemoveNoActivate`、`Reset-GameWindow.ps1` 存在，并断言 `Test-WindowLayout.ps1` 里不再出现 `display_width = $script:ChronicleTestWindow` 与 `max_framerate`。
+
+## Contract 7.741 — 从零开局闭环：遭遇交接、检查点延后与确定性 provider 策略
+
+阶段①（从零把 EYC 四目标跑到原版任务完成）在真实开局检查点 `ChronicleEycDev-opening-20261126`（1000 金、1 名成员、声望 20）上暴露出四类结构性缺口，本契约把它们修在机制层，而不是绕开：
+
+1. **卖出切片不再吞掉遭遇**：`agenthost/AgentHostEstablishClanGoldSaleLoop.cs` 在入口与每次轮询遇到打开的 Native 遭遇时返回携带 `AgentHostNativeMapMovementMonitor.FailureCode` 的失败回执，交回 EYC 父循环路由；此前是 `throw gold-sale-encounter-out-of-scope` / `gold-sale-free-map-required`，一次遭遇直接终结整轮。
+2. **遭遇已消失时父循环重新规划**：`agenthost/AgentHostEstablishYourClanAutonomyLoop.cs` 新增 `IsEncounterInterruptionTermination` 与 `MaxEncounterClearedReplans = 12`：子流程报遭遇/停滞中断，但父循环重读到的地图已经自由且原版任务仍在时，写 `objective-encounter-interruption-already-cleared-replanned` 后继续规划，而不是判死整个目标。
+3. **检查点保存失败改为延后重试**：`eyc-objective-attempt-checkpoint-write` 是**建议性路由记忆**，不是任务进度。Native 在部分瞬时状态下拒绝保存时，写 `eyc-objective-attempt-checkpoint-write-deferred`（含 `nativeStatus`）并保持 dirty，下次安全状态再试，不再 `eyc-objective-attempt-checkpoint-write-failed` 终止整轮。
+4. **确定性 provider 不再自杀**：`harness/Test-AgentDeterministicProvider.ps1` 增加 `Test-ShouldAttack`（队伍人数不占优时不选 `str_order_attack`，改用 Native Leave）与小队优先最近安全据点（`members < 6` 时按 `distance` 取最近安全点），并补齐 `submitStoryModeClanName` 的 `text` 参数（取当前询问的 `inputText`/`defaultInputText`）。此前单人流亡开局每战必败被俘、越境必被劫匪打断。
+
+真机取证：开局检查点连续十二轮真机运行，`TestResults/20261128-112900-deterministic-eyc-ChronicleEycDev-opening-20261126` 等每轮的 `AgentHostCampaignLoopResult.json` 记录 `failureCode` 与 `objectiveRuns`。四目标仍未完成：单人流亡起点在 renown 20／party 1 时要先靠村庄募兵与劫匪战斗积累，而当前确定性策略尚未形成“先养兵再战、以战养金”的完整序列；该边界写入 `docs/RUNLOG.md`，不当作已达成。
 
 ## Contract 7.740 — 真正的玩家输入门禁（按键 + 鼠标）与 Host 启动修复
 

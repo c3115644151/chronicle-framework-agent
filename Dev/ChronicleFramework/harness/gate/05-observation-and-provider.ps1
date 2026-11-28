@@ -450,6 +450,7 @@ if (-not (Test-Path -LiteralPath $decisionTimelineExporterPath -PathType Leaf) -
     $harnessScript -notmatch 'DecisionTimelineRunDirectory') {
     throw 'Contract 7.727 requires a discoverable, reproducible model-decision timeline viewer: a self-contained dark HTML export of the run progress log, registered as the DecisionTimeline Harness phase and driven by -DecisionTimelineRunDirectory.'
 
+    }
 $decisionTimelineExporterBody = Get-Content -LiteralPath $decisionTimelineExporterPath -Raw -Encoding UTF8
 $decisionTimelineStageBody = Get-Content -LiteralPath $decisionTimelineStagePath -Raw -Encoding UTF8
 if ($decisionTimelineExporterBody -notmatch '\-AllRuns' -or
@@ -460,6 +461,7 @@ if ($decisionTimelineExporterBody -notmatch '\-AllRuns' -or
     $decisionTimelineStageBody -notmatch 'No run specified') {
     throw 'Contract 7.728 requires the decision timeline to be one persistent frontend: a fixed TestResults/DecisionTimeline.html panel that scans every run, offers a run switcher with deep links, and can be refreshed by the DecisionTimeline phase without -DecisionTimelineRunDirectory.'
 
+    }
 $deterministicProviderPath = Join-Path $stageRoot 'Test-AgentDeterministicProvider.ps1'
 if (-not (Test-Path -LiteralPath $deterministicProviderPath -PathType Leaf)) {
     throw 'Contract 7.729 requires a deterministic, zero-credential provider stub harness script.'
@@ -474,13 +476,16 @@ if ($deterministicProviderBody -notmatch '\[switch\]\$SelfTest' -or
     $deterministicProviderBody -notmatch 'selectEstablishYourClanObjective') {
     throw 'Contract 7.729 requires the deterministic provider to self-test its goal classification, objective planner, legal-tuple argument binding, and OpenAI-compatible HTTP endpoints before driving the real Host.'
 
+    }
 if ($deterministicProviderBody -notmatch 'supportedMapArrivalGoal' -or
     $deterministicProviderBody -notmatch 'Arg-Values' -or
     $deterministicProviderBody -notmatch 'Choose-ArgValue' -or
     $deterministicProviderBody -notmatch 'objective-planner-skips-met-goal' -or
     $deterministicProviderBody -notmatch 'state.*objectiveSnapshot') {
+
     throw 'Contract 7.730 requires the deterministic provider to select only currently listed goal controls (including safe-settlement arrival), skip already-met EYC objectives, and choose safe menu options, so it can drive the real Host across classification, bootstrap, planner and campaign phases.'
 
+    }
 if ($deterministicProviderBody -notmatch 'nearbySettlements' -or
     $deterministicProviderBody -notmatch 'nearbyParties' -or
     $deterministicProviderBody -notmatch 'Get-ObserveWaitSeconds' -or
@@ -488,6 +493,7 @@ if ($deterministicProviderBody -notmatch 'nearbySettlements' -or
     $deterministicProviderBody -notmatch 'PartyId') {
     throw 'Contract 7.731 requires the deterministic provider to derive move SettlementId from nearbySettlements, pursue PartyId from nearbyParties, and read observeAgain wait bounds from controlArguments, so it can drive real Native map movement and battle pursuit without empty-argument loops.'
 
+    }
 if ($deterministicProviderBody -notmatch 'str_order_attack' -or
     $deterministicProviderBody -notmatch '@\(\$pv\)\.Count -eq 1' -or
     $deterministicProviderBody -notmatch "'recruit','recruitOptions'") {
@@ -536,6 +542,9 @@ if (-not (Test-Path -LiteralPath $agentHostLiveStatusPath -PathType Leaf) -or
 }
 $agentHostLiveStatusSource = Get-Content -LiteralPath $agentHostLiveStatusPath -Raw -Encoding UTF8
 $agentStatusPanelSource = Get-Content -LiteralPath $agentStatusPanelPath -Raw -Encoding UTF8
+$agentHostRuntimeControllerSource = Get-Content -LiteralPath (Join-Path $modRoot 'AgentHostRuntimeController.cs') -Raw -Encoding UTF8
+$agentPlayerInputOwnershipSource = Get-Content -LiteralPath (Join-Path $modRoot 'AgentPlayerInputOwnership.cs') -Raw -Encoding UTF8
+$agentHostLifecycleHarness = Get-Content -LiteralPath (Join-Path $stageRoot 'Test-AgentHostLifecycleEvaluation.ps1') -Raw -Encoding UTF8
 $agentStatusPrefabSource = Get-Content -LiteralPath $agentStatusPrefabPath -Raw -Encoding UTF8
 if ($agentHostLiveStatusSource -notmatch 'agent-live-status\.json' -or
     $agentHostLiveStatusSource -notmatch 'MaximumDebugObservationBytes' -or
@@ -601,17 +610,12 @@ if ($agentControlChannelSource -notmatch 'agent-control\.json' -or
         $harnessScript -notmatch 'Copy-Item -LiteralPath \$packageEntry\.FullName -Destination \$runtimeModuleRoot -Recurse -Force' -or
 $agentStatusPanelSource -notmatch 'F9 ' ) {
     throw 'Contract 7.739 requires F10 to hand control over and back, F9 to stop the agent, and the agent-owned clock to reject player pause keys while ESC stays available.'
-}
 
 
 
 
 
 
-}
-}
-}
-}
 }
 if ($harnessScript -notmatch "'AgentHostBattleSimulationEvaluation' \{ @\('Preflight', 'Build', 'Smoke', 'AgentHostPackage', 'AgentHostBattleSimulationEvaluation'\) \}" -or
     $harnessScript -match "'All' \{[^\r\n]*'AgentHostBattleSimulationEvaluation'" -or
@@ -872,3 +876,19 @@ if ($agentProtocolSource -notmatch 'case "spendSkillFocus"' -or $agentProtocolSo
 if ($agentObserverSource -notmatch 'BuildQuestDetailsJson' -or $agentObserverSource -notmatch 'BuildQuestTerminalOutcomeJson' -or $agentObserverSource -notmatch 'terminalStatus' -or $agentObserverSource -notmatch 'IsRemainingTimeHidden' -or $agentObserverSource -notmatch 'JournalEntries' -or $agentProtocolSource -notmatch 'case "questDetails"' -or $agentProtocolSource -notmatch 'FindObservedOngoingQuest' -or $agentProtocolSource -notmatch 'FindQuestTerminalOutcomeJson' -or $subModuleSource -notmatch 'OnQuestCompletedEvent.AddNonSerializedListener' -or $subModuleSource -notmatch 'OnQuestCompleted\(' -or $subModuleSource -notmatch 'chronicle_quest_terminal_outcomes_v1' -or $agentCliSource -notmatch "'questDetails'" -or $agentDecisionLoopSource -notmatch "questDetails = @\('QuestId'\)" -or $agentHostDecisionCycleSource -notmatch 'terminalStatus=Success' -or $agentProtocolSource -notmatch 'harnessQuestDetailsDiagnostics is restricted to a visual Harness run' -or $agentProtocolSource -notmatch 'harnessQuestDeadlinePrivacyDiagnostics is restricted to a visual Harness run' -or $agentDecisionLoopSource -match 'harnessQuestDetailsDiagnostics|harnessQuestDeadlinePrivacyDiagnostics') { throw 'Quest Journal reads must support active details and event-backed terminal outcomes, preserve hidden deadlines, and keep diagnostics Harness-only.' }
 if ($agentObserverSource -notmatch 'BuildPartyRosterJson' -or $agentObserverSource -notmatch 'MemberRoster' -or $agentObserverSource -notmatch 'PrisonRoster' -or $agentProtocolSource -notmatch 'case "partyRoster"' -or $agentProtocolSource -notmatch 'harnessPartyRosterDiagnostics is restricted to a visual Harness run' -or $agentCliSource -notmatch "'partyRoster'" -or $agentDecisionLoopSource -notmatch 'partyRoster = @\(\)' -or $agentDecisionLoopSource -match 'harnessPartyRosterDiagnostics') { throw 'MainParty rosters must be an on-demand read-only query with isolated Harness comparison only.' }
 if ($agentCliSource -notmatch "'mapSettlementTargets'" -or $agentDecisionLoopSource -notmatch 'mapSettlementTargets = @\(\)' -or $agentProtocolSource -notmatch 'settlement.IsVisible') { throw 'The on-demand map target query must be callable by the agent and the movement adapter must reject hidden settlement IDs.' }
+
+$agentHostAutonomyLoopSource = Get-Content -LiteralPath (Join-Path $agentHostRoot 'AgentHostEstablishYourClanAutonomyLoop.cs') -Raw -Encoding UTF8
+$agentHostGoldSaleLoopSource = Get-Content -LiteralPath (Join-Path $agentHostRoot 'AgentHostEstablishClanGoldSaleLoop.cs') -Raw -Encoding UTF8
+$deterministicProviderSource = Get-Content -LiteralPath (Join-Path $stageRoot 'Test-AgentDeterministicProvider.ps1') -Raw -Encoding UTF8
+if ($agentHostAutonomyLoopSource -notmatch 'IsEncounterInterruptionTermination' -or
+    $agentHostAutonomyLoopSource -notmatch 'MaxEncounterClearedReplans' -or
+    $agentHostAutonomyLoopSource -notmatch 'objective-encounter-interruption-already-cleared-replanned' -or
+    $agentHostAutonomyLoopSource -notmatch 'eyc-objective-attempt-checkpoint-write-deferred' -or
+    $agentHostGoldSaleLoopSource -notmatch 'must route it through BattleSimulation or Native Leave' -or
+    $agentHostGoldSaleLoopSource -notmatch 'the EYC parent must resolve it before any sale action' -or
+    $deterministicProviderSource -notmatch 'function Test-ShouldAttack' -or
+    $deterministicProviderSource -notmatch '\$members -lt 6' -or
+    $deterministicProviderSource -notmatch 'inputText') {
+    throw 'Contract 7.741 requires the sale slice to hand an open Native encounter back to the EYC parent, the parent to replan when that encounter already cleared, the objective-attempt checkpoint to defer instead of failing, and the deterministic provider to stop sending a lone party into a lost battle.'
+}
+
