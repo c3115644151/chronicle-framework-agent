@@ -9,6 +9,7 @@ param(
     [switch]$EstablishYourClanAutonomyLoop,
     [switch]$CaptivityRecoveryFromExisting,
     [switch]$EstablishClanGoldSaleFromStoryMode,
+[switch]$TownTradeFromStoryMode,
     [string]$PlannerSourceSaveName = 'save002',
     [switch]$BattleSimulationLoop,
     [switch]$BattleAndCaptivityLoop,
@@ -19,7 +20,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $HarnessPowerShell = Join-Path $PSHOME 'pwsh.exe'
 . (Join-Path $PSScriptRoot 'Get-FreeLLMAPIProfile.ps1')
-if (@($VillageToolsQuest, $EstablishYourClanGoalPlanner, $EstablishYourClanAutonomyLoop, $CaptivityRecoveryFromExisting, $EstablishClanGoldSaleFromStoryMode, $BattleSimulationLoop, $BattleAndCaptivityLoop | Where-Object { $_ }).Count -gt 1) { throw 'Select only one Agent Host Campaign evaluation slice per run.' }
+if (@($VillageToolsQuest, $EstablishYourClanGoalPlanner, $EstablishYourClanAutonomyLoop, $CaptivityRecoveryFromExisting, $EstablishClanGoldSaleFromStoryMode, $TownTradeFromStoryMode, $BattleSimulationLoop, $BattleAndCaptivityLoop | Where-Object { $_ }).Count -gt 1) { throw 'Select only one Agent Host Campaign evaluation slice per run.' }
 $liveTest = Join-Path $PSScriptRoot 'Test-AgentLiveModelLoop.ps1'
 $outerTemp = $env:CHRONICLE_HARNESS_TEMP
 if ([string]::IsNullOrWhiteSpace($CleanupPreparedSaveName)) {
@@ -94,7 +95,7 @@ if ($BattleSimulationLoop -or $BattleAndCaptivityLoop) {
         throw 'Battle evaluation source must be one Game Saves basename without a path or extension; no Host or model was started.'
     }
 }
-if (($EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop -or $CaptivityRecoveryFromExisting -or $EstablishClanGoldSaleFromStoryMode) -and $PlannerSourceSaveName -notmatch '^[A-Za-z0-9_-]{1,48}$') { throw 'StoryMode source must be one Game Saves basename; no model or game process was started.' }
+if (($EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop -or $CaptivityRecoveryFromExisting -or $EstablishClanGoldSaleFromStoryMode -or $TownTradeFromStoryMode) -and $PlannerSourceSaveName -notmatch '^[A-Za-z0-9_-]{1,48}$') { throw 'StoryMode source must be one Game Saves basename; no model or game process was started.' }
 
 if (Test-Path -LiteralPath $sessionPath -PathType Leaf) {
     $staleSession = Get-Content -LiteralPath $sessionPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -188,7 +189,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             $preparedSaveName = [string]$fixturePreparation.PreparedSaveName
             $childOutput = & $HarnessPowerShell -NoProfile -File $liveTest -LoadSaveName $preparedSaveName -VillageToolsQuestLoop -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
         }
-        elseif ($EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop -or $CaptivityRecoveryFromExisting -or $EstablishClanGoldSaleFromStoryMode) {
+        elseif ($EstablishYourClanGoalPlanner -or $EstablishYourClanAutonomyLoop -or $CaptivityRecoveryFromExisting -or $EstablishClanGoldSaleFromStoryMode -or $TownTradeFromStoryMode) {
             . (Join-Path $PSScriptRoot 'Agent-SaveMetadata.ps1')
             $saveRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
             $plannerSourceSavePath = [IO.Path]::GetFullPath((Join-Path $saveDirectory ($PlannerSourceSaveName + '.sav')))
@@ -200,7 +201,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             $unexpectedPlannerModules = @($plannerSourceModules | Where-Object { $_ -notin $allowedPlannerModules })
             if ($missingPlannerModules.Count -gt 0 -or $unexpectedPlannerModules.Count -gt 0) { throw 'StoryMode planner source has a missing required Native/StoryMode module or an unsupported third-party module; source was not loaded.' }
             $plannerSourceHashBefore = (Get-FileHash -LiteralPath $plannerSourceSavePath -Algorithm SHA256).Hash
-            $plannerFixturePrefix = if ($EstablishClanGoldSaleFromStoryMode -or $EstablishYourClanAutonomyLoop) { 'ChronicleW7P-' } elseif ($CaptivityRecoveryFromExisting) { 'ChronicleW7O-' } else { 'ChronicleW7N-' }
+            $plannerFixturePrefix = if ($EstablishClanGoldSaleFromStoryMode -or $EstablishYourClanAutonomyLoop -or $TownTradeFromStoryMode) { 'ChronicleW7P-' } elseif ($CaptivityRecoveryFromExisting) { 'ChronicleW7O-' } else { 'ChronicleW7N-' }
             $plannerFixtureSaveName = $plannerFixturePrefix + [Guid]::NewGuid().ToString('N').Substring(0,16)
             $plannerFixtureSavePath = [IO.Path]::GetFullPath((Join-Path $saveDirectory ($plannerFixtureSaveName + '.sav')))
             if (-not $plannerFixtureSavePath.StartsWith($saveRoot, [StringComparison]::OrdinalIgnoreCase) -or (Test-Path -LiteralPath $plannerFixtureSavePath)) { throw 'Unique W7-N disposable StoryMode save path was not safe/available.' }
@@ -209,7 +210,7 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             if ($plannerCloneHash -cne $plannerSourceHashBefore) { throw 'The W7-N disposable save copy does not match its read-only source hash.' }
             [ordered]@{ SourceSaveName = $PlannerSourceSaveName; SourceSha256Before = $plannerSourceHashBefore; SourceModuleIds = $plannerSourceModules; RuntimeLoadModuleAugment = @('ChronicleFramework'); DisposableCloneName = $plannerFixtureSaveName; DisposableClonePrefix = $plannerFixturePrefix; DisposableCloneSha256 = $plannerCloneHash; IsByteForByteCopy = $true; NoGameWorldStateInjected = (-not $FixtureOpponent); InjectedWorldState = if ($FixtureOpponent) { 'one disposable hostile looter party (visual-opponent-fixture) so the Renown route has an opportunity; save bytes are copied unchanged' } else { $null } } |
                 ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $runTemp 'EstablishYourClanSourceFixture.json') -Encoding UTF8
-            $storyModeLoopSwitch = if ($EstablishClanGoldSaleFromStoryMode) { '-EstablishClanGoldSaleLoop' } elseif ($CaptivityRecoveryFromExisting) { '-CaptivityRecoveryLoop' } elseif ($EstablishYourClanAutonomyLoop) { '-EstablishYourClanAutonomyLoop' } else { '-EstablishYourClanGoalPlanner' }
+            $storyModeLoopSwitch = if ($EstablishClanGoldSaleFromStoryMode) { '-EstablishClanGoldSaleLoop' } elseif ($TownTradeFromStoryMode) { '-TownTradeLoop' } elseif ($CaptivityRecoveryFromExisting) { '-CaptivityRecoveryLoop' } elseif ($EstablishYourClanAutonomyLoop) { '-EstablishYourClanAutonomyLoop' } else { '-EstablishYourClanGoalPlanner' }
             # The opponent fixture is a disposable-save harness privilege, not game progress: it only guarantees
             # that one hostile party is visible so a Renown route has an opportunity. The fixture receipt states it.
             $childFixtureSwitch = @()

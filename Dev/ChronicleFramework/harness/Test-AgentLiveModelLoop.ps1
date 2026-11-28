@@ -440,6 +440,16 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
         if ($baseline.state.context.captivity.isCaptive -ne $true -or [string]$baseline.state.context.menuId -cne 'prisoner_wait') { throw 'Existing-captivity recovery fixture must start at Native prisoner_wait with MainHero captive; no model decision was sent.' }
         if ([string]$baseline.state.context.timeControlMode -cne 'Stop' -or $baseline.state.context.isWaitMenu -ne $true -or $baseline.state.context.isWaitActive -ne $true -or @($baseline.state.availableMenuOptions | Where-Object { $_.available -and $_.enabled }).Count -ne 0) { throw 'Existing-captivity recovery fixture must start stopped with a no-option active Native Wait menu; no model decision was sent.' }
     }
+    elseif ($TownTradeLoop) {
+        # The bounded Town trade profile starts on a free Campaign Map or in a settlement
+        # whose Native menu already publishes the trade option; any other settlement state
+        # would need an unverified menu guess.
+        $townTradeMenuId = [string]$baseline.state.context.menuId
+        $townTradeOption = @($baseline.state.availableMenuOptions | Where-Object { $_.available -and $_.enabled -and ([string]$_.id -match 'trade') }).Count -gt 0
+        if (-not [string]::IsNullOrWhiteSpace([string]$baseline.state.location.currentSettlementId) -and -not $townTradeOption) {
+            throw 'TownTradeLoop requires a free Campaign Map or a settlement menu that publishes the Native trade option; no model action was sent.'
+        }
+    }
     elseif ($baseline.state.location.currentSettlementId) {
         throw 'Non-quest live-model map fixtures must remain unobstructed with no current settlement.'
     }

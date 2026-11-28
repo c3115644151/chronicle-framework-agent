@@ -1,5 +1,11 @@
 # Chroni
 
+## 2026-11-28 城镇贸易评测入口（契约 7.752）
+
+- 新增 `-TownTradeFromStoryMode`（evaluation）+ TownTrade 前置条件（live test）：自由地图或已发布 trade 选项的定居点菜单才放行。
+- 真机：`TestResults/20261128-152713` 新入口工作，前置检查确定性拒绝——`TownTradeLoop requires a free Campaign Map or a settlement menu that publishes the Native trade option`（未发模型动作）。
+- 缺口：现成开局夹具停在定居点但菜单关闭，既非自由地图也非 trade 屏；需要专门的 trade 屏或自由地图夹具才能产出买入收据。
+
 ## 2026-11-28 StartUp 地点任务与自测恢复（契约 7.751）
 
 - 发现：`--provider-self-test` 在 b96b29d 已失败（`companion-provider-failure-recovery-selftest-failed`），非本轮引入（`git stash` 对照证明）。

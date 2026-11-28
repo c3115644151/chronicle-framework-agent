@@ -945,3 +945,10 @@ if ($agentHostAutonomyLoopSource -notmatch 'IsStartUpLocationMission' -or
     $agentHostAutonomyLoopSource -notmatch 'mode != "StartUp" && HasHandledMissionConversation') {
     throw 'Contract 7.751 requires the encounter entry gate to leave StartUp location Missions to their own paths, so a provider failure inside a Tavern keeps the Native Leave contract.'
 }
+
+$agentHostEvaluationSource = Get-Content -LiteralPath (Join-Path $stageRoot 'Test-AgentHostCampaignLoopEvaluation.ps1') -Raw -Encoding UTF8
+if ($agentHostEvaluationSource -notmatch 'TownTradeFromStoryMode' -or
+    $agentHostEvaluationSource -notmatch "'-TownTradeLoop'" -or
+    $agentLiveModelLoopSource -notmatch 'TownTradeLoop requires a free Campaign Map or a settlement menu that publishes the Native trade option') {
+    throw 'Contract 7.752 requires the town-trade slice to have an evaluation entry that passes the bounded loop switch and a live precondition that refuses fixtures which are neither a free map nor a settlement trade menu.'
+}

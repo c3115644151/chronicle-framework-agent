@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.751
+Contract version: 7.752
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -91,6 +91,21 @@ objective-mission-conversation-resolved|decisionsUsed=6|nativeActionsUsed=6|retu
 验证：`dotnet agenthost/bin/Release/net8.0/ChronicleAgentHost.dll --provider-self-test` → `EXIT=0`（此前同一命令打印 failed JSON）。同一轮的 EYC 控制跑（`TestResults/20261128-152133`）在 11 决策时以 `native-visible-hostile-bandit-interrupted-settlement-move` 结束，本轮没有触发会话分支，不能作为会话路径的回归证据——这是一个未覆盖点，下次会话相关改动仍需专门的零模型用例。
 
 未完成：town-trade slice 仍没有 evaluation wrapper（`Test-AgentHostCampaignLoopEvaluation.ps1` 无 `-TownTradeLoop` 开关），直跑 live 测试又会因“地图夹具必须无当前定居点”而被拒；要拿到 #143 的可复现收据，下一步必须补一个准备自由地图夹具的城镇贸易评测入口。
+## Contract 7.752 — 城镇贸易有了评测入口（夹具仍缺）
+
+7.751 记录的缺口开始补：`harness/Test-AgentHostCampaignLoopEvaluation.ps1` 新增 `-TownTradeFromStoryMode`，与其它 StoryMode 切片一样克隆只读源存档，并把它作为 `-TownTradeLoop` 传给 live 测试；互斥校验、源存档模块校验、夹具前缀（`ChronicleW7P-`）与 `$storyModeLoopSwitch` 都已接上（语法解析通过）。
+
+`harness/Test-AgentLiveModelLoop.ps1` 新增 TownTrade 前置条件：允许自由地图，或允许“当前定居点菜单已发布 trade 选项”的夹具；其它定居点状态直接拒绝，并说明“不发任何模型动作”。
+
+验证（`TestResults/20261128-152713-deterministic-towntrade-eval-ChronicleEycDev-opening-20261126`）：新入口跑通到 live 测试，并在前置检查处以预期消息结束——
+
+```
+TownTradeLoop requires a free Campaign Map or a settlement menu that publishes the Native trade option; no model action was sent.
+```
+
+也就是说入口本身可用且确定性地拒绝不合适的夹具；**还没有**一次真正的买入收据。原因已查清：现成夹具（`ChronicleEycDev-opening-20261126`）虽然停在定居点，但读档后菜单是关闭的（`menuId` 为空），既不是自由地图也不是 trade 屏；而 Host 的城镇贸易循环按合同只在“自由地图或当前定居点的原生 Trade 屏”启动。
+
+下一步：给 TownTrade 切片准备一个真正的夹具——要么读档后立刻用原生菜单进入 trade 屏，要么把队伍置于定居点外的自由地图；然后才能产出 #143 需要的“买入收据 + 金币/货物变化”证据。
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：
