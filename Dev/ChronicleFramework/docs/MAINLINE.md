@@ -2320,6 +2320,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.739 接管事实：玩家按 F10 接管身体时，mod 写 `agent-control.json`（`hold=true`，`reason=player-takeover`），Host 在写下一个原生动作命令前等待该文件释放，`reason=escape-menu` 用于 ESC 菜单打开期间；F10 再按一次交还，F9 结束 Agent。Agent 拥有输入时 `GameKey.IsDown/IsPressed` 在 `MapHotKeyCategory` 上被前缀拦截（`MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`），ESC 不在拦截范围。真机截图取证见 TestResults/20261128-081358 与 20261128-081633。
 
+契约 7.747 事实：Host `ResolveMissionConversationAsync` 用原生 clickable 选项驱动 Mission 会话（上限 16 决策，只接受目录内 OptionId），`NativeMailboxClient` 白名单新增 `missionConversationSelect/Continue`。真机 `TestResults/20261128-140539`：6 决策 6 动作 `returnedToMap=true`，对话首次走通。随后 `mode=Stealth`（`villa_singular_c`）场景 60s 无受支持模式 → `native-mission-entry-mode-unavailable`，`missionLeave` 只接受友好地点 Mission，Stealth 无有界动作面。
+
 契约 7.746 Mission 会话事实：Mission 内会话管理器是 `TaleWorlds.CampaignSystem.Conversation.ConversationManager` 的**另一个实例**（地图会话同类不同实例），`dialogueSelect` 打不到，`missionLeave` 只对 Tavern 生效。Mission 观察新增 `conversation{inProgress,sentenceText,hero,options}`；mod 新增 `missionConversationSelect`/`missionConversationContinue` 动作。Host 有界循环待接入。
 
 契约 7.745 任务场景事实：遭遇可直接进入 `MissionState`；`IsNativeMissionScene`+`WaitForHandledMissionModeAsync`（60s 等 `Deployment`/`Battle`/`Conversation`）统一入口，战斗交给 `AgentHostBattleMissionLoop`。Mission 内 `Conversation` 场景下 `missionLeave` 被 Native 拒绝（`TestResults/20261128-132409`，四次 rejected），`dialogueSelect`/`dialogueContinue` 只作用于 `Campaign.Current.ConversationManager`，故当前无法通过对话场景；下一步是 mod 侧 Mission 会话表面。

@@ -889,7 +889,7 @@ if ($agentHostAutonomyLoopSource -notmatch 'IsEncounterInterruptionTermination' 
     $agentHostAutonomyLoopSource -notmatch 'objective-subflow-failed-parent-gate' -or
     $agentHostAutonomyLoopSource -notmatch 'IsNativeMissionScene' -or
     $agentHostAutonomyLoopSource -notmatch 'WaitForHandledMissionModeAsync' -or
-    $agentHostAutonomyLoopSource -notmatch 'objective-conversation-mission-left' -or
+    $agentHostAutonomyLoopSource -notmatch 'objective-mission-conversation-resolved' -or
     $agentHostGoldSaleLoopSource -notmatch 'must route it through BattleSimulation or Native Leave' -or
     $agentHostGoldSaleLoopSource -notmatch 'the EYC parent must resolve it before any sale action' -or
     $deterministicProviderSource -notmatch 'function Test-ShouldAttack' -or
@@ -898,3 +898,18 @@ if ($agentHostAutonomyLoopSource -notmatch 'IsEncounterInterruptionTermination' 
     throw 'Contract 7.741 requires the sale slice to hand an open Native encounter back to the EYC parent, the parent to replan when that encounter already cleared, the objective-attempt checkpoint to defer instead of failing, and the deterministic provider to stop sending a lone party into a lost battle.'
 }
 
+
+$agentMissionDialogueSource = Get-Content -LiteralPath (Join-Path $modRoot 'Actions/ChronicleAgentProtocol.Actions.Dialogue.cs') -Raw -Encoding UTF8
+if ($agentMissionDialogueSource -notmatch 'HandleMissionConversationSelect' -or
+    $agentMissionDialogueSource -notmatch 'HandleMissionConversationContinue' -or
+    $agentHostCampaignTransportSource -notmatch '"missionConversationSelect"' -or
+    $agentHostCampaignTransportSource -notmatch '"missionConversationContinue"' -or
+    $agentHostAutonomyLoopSource -notmatch 'ResolveMissionConversationAsync' -or
+    $agentHostAutonomyLoopSource -notmatch 'MaxMissionConversationDecisions' -or
+    $agentHostAutonomyLoopSource -notmatch 'mission-conversation-option-not-listed' -or
+    $agentHostAutonomyLoopSource -notmatch 'mission-conversation-native-action-rejected' -or
+    $agentHostAutonomyLoopSource -notmatch 'objective-mission-conversation-resolved' -or
+    $agentHostAutonomyLoopSource -notmatch 'missionConversationContinue' -or
+    $deterministicProviderSource -notmatch '离开\|结束\|拒绝') {
+    throw 'Contract 7.747 requires the Host to drive the Native mission conversation through the option directory the mod exposes, reject invented answers, and let the deterministic provider pick a leaving option.'
+}

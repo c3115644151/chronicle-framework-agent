@@ -1,6 +1,30 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.746
+Contract version: 7.747
+
+## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
+
+接 7.746 的 mod 表面，Host 侧新增 `ResolveMissionConversationAsync`（`agenthost/AgentHostEstablishYourClanAutonomyLoop.cs`）：
+
+- 每步重读 Native 状态；不在 `MissionState` 或已回地图即返回 `returnedToMap=true`；
+- 从 `conversation.options` 取 **当前 clickable 的原生选项** 组目录（`missionConversationSelect{optionId}`，并把选项文本一并交给 provider）；没有选项但有 `sentenceText` 时给 `missionConversationContinue`；两者都没有则返回 null（不编造）；
+- provider 决策必须落在目录内的 `OptionId` 上，否则 `mission-conversation-option-not-listed` 直接停；动作被 Native 拒绝则 `mission-conversation-native-action-rejected`；
+- 上限 `MaxMissionConversationDecisions = 16`，全程不改变游戏时钟、不重放子流程动作、不编造台词。
+
+接线：`NativeMailboxClient.ValidateCompanionHiringAction` 增加 `missionConversationSelect{optionId}` / `missionConversationContinue{}` 两个白名单动作，并补两个自测条目；确定性 provider 的 `OptionId` 选择扩展到 `refuse|end|离开|结束|拒绝` 语义。
+
+真机（`TestResults/20261128-140539-deterministic-eyc-ChronicleEycDev-opening-20261126`）：
+
+```
+mission-conversation-native-action|missionConversationContinue|step=1
+mission-conversation-native-action|missionConversationSelect|optionId=adg:124|step=2
+mission-conversation-native-action|missionConversationSelect|optionId=adg:128|step=4
+objective-mission-conversation-resolved|decisionsUsed=6|nativeActionsUsed=6|returnedToMap=true|dialogueAnswerInvented=false
+```
+
+这是框架第一次**用原生选项真实走完遭遇对话并回到地图**。
+
+同轮暴露的下一个边界：随后一次遭遇把 Native 带进 `mode=Stealth`（`villa_singular_c`）场景，`WaitForHandledMissionModeAsync` 60s 内等不到 Deployment/Battle/Conversation，终态 `native-mission-entry-mode-unavailable`。`missionLeave` 只接受友好地点 Mission（`AgentMissionInputPatch.IsSupportedLocationLeaveMission` + `IsFriendlyMission`），Stealth 不在其中，因此 Host 目前对该场景没有有界动作面。下一步二选一：给 mod 加非友好 Stealth 场景的有界离场，或在决策层避免把队伍送进会触发 Stealth 的路线。
 
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 

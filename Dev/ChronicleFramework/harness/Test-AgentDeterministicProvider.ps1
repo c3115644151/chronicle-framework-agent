@@ -28,7 +28,7 @@ function Choose-ArgValue($action, [string]$name) {
         # route and the only way to advance the EYC Renown objective; prefer it over leave.
         $attack = @($values | Where-Object { [string]$_ -cmatch 'str_order_attack' })
         if ($attack.Count -gt 0 -and (Test-ShouldAttack $script:CurrentObs)) { return $attack[0] }
-        $safe = @($values | Where-Object { [string]$_ -match '(?i)leave|exit|back|done|finish|decline|reject' })
+        $safe = @($values | Where-Object { [string]$_ -match '(?i)leave|exit|back|done|finish|decline|reject|refuse|end|离开|结束|拒绝' })
         if ($safe.Count -gt 0) { return $safe[0] }
     }
     return $values[0]

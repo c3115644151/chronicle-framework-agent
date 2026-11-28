@@ -194,6 +194,8 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
                 (!arguments.ContainsKey("durationSeconds") || arguments["durationSeconds"] is JsonValue durationNode && durationNode.TryGetValue<int>(out var duration) && duration is >= 1 and <= 20),
             "missionInteract" => HasOnlyKeys(arguments, "agentIndex") && IsIndex(arguments, "agentIndex"),
             "dialogueSelect" => HasOnlyKeys(arguments, "optionId") && HasText(arguments, "optionId"),
+            "missionConversationSelect" => HasOnlyKeys(arguments, "optionId") && HasText(arguments, "optionId"),
+            "missionConversationContinue" => arguments.Count == 0,
             _ => false
         };
         if (!valid)
@@ -210,7 +212,9 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
             ("missionInteract", "{\"agentIndex\":4}"),
             ("dialogueSelect", "{\"optionId\":\"player_companion_hire_response_1\"}"),
             ("dialogueContinue", "{}"),
-            ("missionLeave", "{}")
+            ("missionLeave", "{}"),
+            ("missionConversationSelect", "{\"optionId\":\"conversation_leave_1\"}"),
+            ("missionConversationContinue", "{}")
         };
         foreach (var item in valid) ValidateCompanionHiringAction(item.Action, JsonNode.Parse(item.Json)!.AsObject());
         foreach (var item in new (string Action, string Json)[]

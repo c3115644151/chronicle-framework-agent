@@ -769,6 +769,116 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
 
+        async Task<JsonObject?> ResolveMissionConversationAsync(CancellationToken token)
+        {
+            if (client is not IAgentHostCompanionHiringNativeClient conversationClient) return null;
+            var decisions = 0;
+            var actions = 0;
+            for (var step = 0; step < MaxMissionConversationDecisions; step++)
+            {
+                using var fresh = await client.ReadStateAsync(token);
+                var state = fresh.RootElement.TryGetProperty("state", out var stateNode) && stateNode.ValueKind == JsonValueKind.Object
+                    ? JsonNode.Parse(stateNode.GetRawText())?.AsObject()
+                    : null;
+                var context = state?["context"] as JsonObject;
+                if (string.Equals(ReadString(context, "gameState"), "MissionState", StringComparison.Ordinal) == false ||
+                    context?["conversation"] is not JsonObject)
+                    return new JsonObject { ["decisions"] = decisions, ["actions"] = actions, ["returnedToMap"] = true };
+                if (!IsNativeConversationMissionScene(fresh.RootElement))
+                    return new JsonObject { ["decisions"] = decisions, ["actions"] = actions, ["returnedToMap"] = true };
+                var missionConversation = state?["conversation"] as JsonObject ?? state?["mission"]?["conversation"] as JsonObject;
+                if (missionConversation is null) return null;
+                var clickableIds = (missionConversation["options"] as JsonArray ?? new JsonArray()).OfType<JsonObject>()
+                    .Where(option => ReadBoolean(option, "clickable"))
+                    .Select(option => ReadString(option, "id"))
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Distinct(StringComparer.Ordinal)
+                    .Cast<string>()
+                    .ToArray();
+                JsonArray catalog;
+                if (clickableIds.Length > 0)
+                {
+                    catalog = new JsonArray(new JsonObject
+                    {
+                        ["action"] = "missionConversationSelect",
+                        ["arguments"] = new JsonArray("OptionId"),
+                        ["argumentValues"] = new JsonObject { ["OptionId"] = new JsonArray(clickableIds.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()) },
+                        ["optionTexts"] = new JsonArray((missionConversation["options"] as JsonArray ?? new JsonArray()).OfType<JsonObject>()
+                            .Select(option => (JsonNode?)new JsonObject { ["id"] = ReadString(option, "id"), ["text"] = ReadString(option, "text") }).ToArray())
+                    });
+                }
+                else if (!string.IsNullOrWhiteSpace(ReadString(missionConversation, "sentenceText")))
+                {
+                    catalog = new JsonArray(new JsonObject { ["action"] = "missionConversationContinue", ["arguments"] = new JsonArray() });
+                }
+                else
+                {
+                    return null;
+                }
+
+                var request = new JsonObject
+                {
+                    ["goal"] = "Choose one currently listed Native mission-conversation option. Only the option ids above exist in the game; do not invent dialogue, payment or persuasion.",
+                    ["observation"] = new JsonObject
+                    {
+                        ["scope"] = "native-mission-conversation",
+                        ["state"] = state?.DeepClone()
+                    },
+                    ["allowedActions"] = catalog,
+                    ["allowedControls"] = new JsonArray()
+                };
+                ProviderDecisionResult? decision = null;
+                try
+                {
+                    decision = await AgentHostDecisionCycle.DecideCampaignAsync(provider, request, token);
+                }
+                catch (Exception exception)
+                {
+                    ledger.Trace.Add(new JsonObject
+                    {
+                        ["stage"] = "mission-conversation-decision-failed",
+                        ["failureType"] = exception.GetType().Name,
+                        ["message"] = exception.Message
+                    });
+                    return null;
+                }
+                ledger.RecordDecision(decision);
+                decisions++;
+                var actionName = ReadString(decision.Decision, "action");
+                var arguments = decision.Decision["arguments"] as JsonObject ?? new JsonObject();
+                if (actionName is not ("missionConversationSelect" or "missionConversationContinue"))
+                {
+                    ledger.Trace.Add(new JsonObject { ["stage"] = "mission-conversation-decision-unsupported", ["action"] = actionName });
+                    return null;
+                }
+                if (actionName == "missionConversationSelect" &&
+                    (arguments["OptionId"] is not JsonValue optionValue || !optionValue.TryGetValue<string>(out var optionId) ||
+                     !clickableIds.Contains(optionId, StringComparer.Ordinal)))
+                {
+                    ledger.Trace.Add(new JsonObject { ["stage"] = "mission-conversation-option-not-listed", ["arguments"] = arguments.DeepClone() });
+                    return null;
+                }
+                var nativeArguments = actionName == "missionConversationSelect"
+                    ? new JsonObject { ["optionId"] = ReadString(arguments, "OptionId") }
+                    : new JsonObject();
+                using var response = await conversationClient.ExecuteCompanionHiringActionAsync(actionName, nativeArguments, token);
+                var receipt = JsonNode.Parse(response.RootElement.GetRawText())?.AsObject() ?? new JsonObject();
+                if (ReadString(receipt, "status") != "completed")
+                {
+                    ledger.Trace.Add(new JsonObject { ["stage"] = "mission-conversation-native-action-rejected", ["action"] = actionName, ["nativeReceipt"] = receipt.DeepClone() });
+                    return null;
+                }
+                actions++;
+                ledger.Trace.Add(new JsonObject
+                {
+                    ["stage"] = "mission-conversation-native-action",
+                    ["action"] = actionName,
+                    ["optionId"] = ReadString(nativeArguments, "optionId"),
+                    ["step"] = step
+                });
+            }
+            return null;
+        }
         async Task<JsonDocument?> WaitForHandledMissionModeAsync(CancellationToken token)
         {
             var deadline = DateTime.UtcNow.AddSeconds(60);
@@ -915,7 +1025,6 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             // ceiling that can stop a healthy long campaign before its budget ends.
             var safeSettlementRefreshAttempts = 0;
             var encounterClearedReplans = 0;
-            var conversationLeaves = 0;
         for (var cycle = 0; cycle < maxDecisions && ledger.Decisions < maxDecisions; cycle++)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
@@ -1563,27 +1672,22 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         }
                         if (IsNativeConversationMissionScene(missionEntry.RootElement))
                         {
-                            if (client is not IAgentHostCompanionHiringNativeClient conversationClient)
-                                return BuildResult("failed", "native-conversation-leave-client-unavailable", false,
-                                    "Native opened a conversation scene but this Host transport cannot issue the original Leave action.",
-                                    "native-conversation-leave-client-unavailable", journalObjectives, snapshot, differences);
-                            if (conversationLeaves >= MaxConversationLeaves)
-                                return BuildResult("failed", "native-conversation-leave-looping", false,
-                                    "Native kept opening conversation scenes after the bounded Leave allowance; the parent stopped instead of answering a dialogue.",
-                                    "native-conversation-leave-looping", journalObjectives, snapshot, differences);
-                            conversationLeaves++;
-                            using var leaveResponse = await conversationClient.ExecuteCompanionHiringActionAsync("missionLeave", new JsonObject(), elapsed.Token);
-                            var leaveReceipt = JsonNode.Parse(leaveResponse.RootElement.GetRawText())?.AsObject() ?? new JsonObject();
-                            nativeActions++;
+                            var conversationResult = await ResolveMissionConversationAsync(elapsed.Token);
+                            if (conversationResult is null)
+                                return BuildResult("failed", "native-mission-conversation-unresolved", false,
+                                    "The Native mission conversation never offered a selectable Native option or a continuable line; the Host stopped instead of inventing dialogue.",
+                                    "native-mission-conversation-unresolved", journalObjectives, snapshot, differences);
                             ledger.Trace.Add(new JsonObject
                             {
-                                ["stage"] = "objective-conversation-mission-left",
+                                ["stage"] = "objective-mission-conversation-resolved",
                                 ["objectiveId"] = objectiveId,
-                                ["nativeStatus"] = ReadString(leaveReceipt, "status"),
-                                ["leaveIndex"] = conversationLeaves,
+                                ["decisionsUsed"] = conversationResult["decisions"]?.DeepClone(),
+                                ["nativeActionsUsed"] = conversationResult["actions"]?.DeepClone(),
+                                ["returnedToMap"] = conversationResult["returnedToMap"]?.DeepClone(),
                                 ["dialogueAnswerInvented"] = false,
                                 ["replayedChildActions"] = false
                             });
+                            nativeActions += ReadInt(conversationResult, "actions", 0);
                             continue;
                         }
                         if (client is not IAgentHostBattleMissionNativeClient incidentMissionClient ||
@@ -2467,6 +2571,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
     internal const int MaxEncounterClearedReplans = 12;
     internal const int MaxConversationLeaves = 4;
+    internal const int MaxMissionConversationDecisions = 16;
 
     internal static bool IsEncounterInterruptionTermination(string? termination) =>
         termination is "campaign-interruption" or AgentHostNativeMapMovementMonitor.FailureCode or

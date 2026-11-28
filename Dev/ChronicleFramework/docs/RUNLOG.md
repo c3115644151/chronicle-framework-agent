@@ -1,5 +1,12 @@
 # Chroni
 
+## 2026-11-28 Mission 会话真机走通（契约 7.747）
+
+- Host：`ResolveMissionConversationAsync` 有界（16 决策）驱动 `missionConversationSelect/Continue`，只用原生列出的 clickable 选项。
+- 真机：`TestResults/20261128-140539`：6 决策 / 6 原生动作 / `returnedToMap=true` / `dialogueAnswerInvented=false`，遭遇对话首次走通。
+- 新边界：随后 `mode=Stealth`（`villa_singular_c`）场景 60s 无 Deployment/Battle/Conversation → `native-mission-entry-mode-unavailable`；`missionLeave` 只支持友好地点 Mission，Stealth 无有界动作面。
+- 四目标仍 1000/2000 金、1/25 兵、20/50 声望、0/1 同伴。
+
 ## 2026-11-28 Mission 会话表面（契约 7.746）
 
 - 取事实：`mission-conversation-surface|type=TaleWorlds.CampaignSystem.Conversation.ConversationManager|mode=Conversation|members=…CurOptions…DoOptionContinue…IsConversationInProgress…`（pid=9916）。
