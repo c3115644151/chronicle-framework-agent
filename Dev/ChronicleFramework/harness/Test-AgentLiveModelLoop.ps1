@@ -721,10 +721,10 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
         # A StoryMode fixture keeps the original Establish Your Clan Quest, so the Host classifies
         # the goal as the autonomy route and only accepts the full approved set; a non-StoryMode
         # fixture takes the narrower town-trade profile. Both are the Host's published sets.
-        $allSupportedProfile = @($catalog.profiles | Where-Object { [string]$_.name -ceq 'all-supported' })
-        $townTradeSet = if ($allSupportedProfile.Count -eq 1) { $allSupportedProfile[0] } elseif ($townTradeProfile.Count -eq 1) { $townTradeProfile[0] } else { $null }
-        if ($null -eq $townTradeSet) { throw 'The current Agent Host action catalog published no single town-trade or full approved profile; no game was launched.' }
-        $allowedActions = [string]::Join(',', @($townTradeSet.actions | ForEach-Object { [string]$_ }))
+        # The slice is the Host's own town-trade profile: the Host routes a request whose set equals
+        # TownTradeActions into the bounded buy loop even when the save carries the StoryMode Quest.
+        if ($townTradeProfile.Count -ne 1) { throw 'The current Agent Host action catalog published no single town-trade profile; no game was launched.' }
+        $allowedActions = [string]::Join(',', @($townTradeProfile[0].actions | ForEach-Object { [string]$_ }))
         Set-LiveModelProviderTimeout 360
         $env:CHRONICLE_LLM_MAX_TOKENS = '2048'
     }

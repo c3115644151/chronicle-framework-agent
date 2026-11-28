@@ -450,6 +450,8 @@ internal static class ChronicleAgentRuntimeController
             // own full list, the Host would classify the request as the wider route, and a bounded
             // slice (town trade) could never be selected (contract 7.761).
             var allowedActionsOverride = Environment.GetEnvironmentVariable("CHRONICLE_AGENT_ALLOWED_ACTIONS");
+            ChronicleDiagnostics.Write("agent-host-allowed-actions-override|present=" + (!string.IsNullOrWhiteSpace(allowedActionsOverride) ? "true" : "false") + "|length=" + (allowedActionsOverride?.Length ?? 0) + "|harnessMode=" + (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") ?? "none"));
+
             if (!string.IsNullOrWhiteSpace(allowedActionsOverride))
             {
                 var setStart = requestJson.IndexOf("\"allowedActionNames\":[", StringComparison.Ordinal);

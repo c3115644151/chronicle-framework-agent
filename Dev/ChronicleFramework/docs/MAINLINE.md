@@ -2320,6 +2320,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.739 接管事实：玩家按 F10 接管身体时，mod 写 `agent-control.json`（`hold=true`，`reason=player-takeover`），Host 在写下一个原生动作命令前等待该文件释放，`reason=escape-menu` 用于 ESC 菜单打开期间；F10 再按一次交还，F9 结束 Agent。Agent 拥有输入时 `GameKey.IsDown/IsPressed` 在 `MapHotKeyCategory` 上被前缀拦截（`MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`），ESC 不在拦截范围。真机截图取证见 TestResults/20261128-081358 与 20261128-081633。
 
+契约 7.763 事实（已达成）：根因是 `harness/Test-AgentLiveModelLoop.ps1` 的 town-trade 分支残留“优先 all-supported”逻辑，导致请求恒为 42 个动作；改回只用 catalog `town-trade` profile 后，真机 `TestResults/20261128-182551` 得到 `allowedActionNames=9`、`townTradeSetMatched=true`、`resultKind=town-trade-buy`，切片**首次真正进入循环**（决策 1/动作 0），随后以 `town-trade-free-map-or-native-trade-required` 停止——夹具没真正进入原生 Trade 屏。
+
 契约 7.762 事实：mod 支持 `CHRONICLE_AGENT_ALLOWED_ACTIONS` 覆盖（字符串替换请求里的 `allowedActionNames`），live 测试在启动游戏前设置该变量；真机 `TestResults/20261128-181659` 仍收到 42 个动作（`townTradeSetMatched=false`，`resultKind` 仍为 autonomy）——环境变量未到达 mod。Agent-Cli 内无 `Start-Process`/`Process.Start`，游戏可能由 Harness 之外的路径拉起。下一步改走 Harness 能写的 `MCM/Global/ChronicleFramework/ChronicleAgentSettings.json` 增加“每切片动作集”字段。
 
 契约 7.761 事实（决定性）：Host trace `campaign-request-action-set` 显示真机收到的 `allowedActionNames` 与 `mod/AgentHostRuntimeController.cs:448` 的请求串逐项一致（含 missionSceneAgents/partyLootTransferOne/barterAutoBalance），`townTradeSetMatched=false`——即 Host 由 **mod 运行时控制器**启动并携带它自己的动作集，Harness live 测试里的 `$allowedActions` 从未生效。这解释了 7.758–7.760 的全部失效。修复方向：让 mod 启动 Host 时接受 Harness 指定的动作集，或由 Harness 直接接管 Host 启动。

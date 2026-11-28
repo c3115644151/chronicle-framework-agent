@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.762
+Contract version: 7.763
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -232,6 +232,19 @@ townTradeSetMatched = false
 结合 `harness/Agent-Cli.ps1` 里找不到 `Start-Process`/`Process.Start` 的启动代码，最可能的解释是：游戏进程由 Harness 之外的路径拉起，环境变量不随这条链路继承。继续在这一层试是浪费时间。
 
 下一增量：改走 Harness 已经能写的配置面——run Temp 下的 `MCM/Global/ChronicleFramework/ChronicleAgentSettings.json`（评测脚本本来就会写 `ProviderBaseUrl`/`ModelId`/`OutputMode`），在里面加一个“每切片动作集”字段，由 mod 读取后覆盖请求；这比注入环境变量可靠，也便于在收据里记录。
+## Contract 7.763 — 城镇贸易切片第一次真的跑起来了（`resultKind=town-trade-buy`）
+
+真正的根因在 Harness 自己身上：`harness/Test-AgentLiveModelLoop.ps1` 的 town-trade 分支残留着 7.758 时的“优先用 `all-supported` profile”逻辑，于是请求一直是 42 个动作，Host 把这份存档判为 autonomy 路线。把它改回“只用 catalog 的 `town-trade` profile”后：
+
+```
+campaign-request-action-set: allowedActionNames = 9 个, townTradeSetMatched = true
+resultKind = town-trade-buy
+failureCode = town-trade-free-map-or-native-trade-required (decisions=1, actions=0)
+```
+
+（`TestResults/20261128-182551`）这是这条切片**第一次真的被 Host 选中并进入循环**；7.758–7.762 的所有“覆盖不生效”其实是同一个 Harness 分支没改掉，加上 mod 默认清单这条弯路——现在两条都清了：映射由请求的 9 个动作名决定（`TownTradeActions` 完全匹配），mod 侧的 `CHRONICLE_AGENT_ALLOWED_ACTIONS` 覆盖保留但不再是必需。
+
+当前卡点：循环在第一轮就要求“自由地图或当前定居点原生 Trade 屏”，而夹具落在定居点菜单里、没有真的进入 trade 屏。下一步把夹具准备的结果（`harnessActivateSettlementMenu` 回执 + `partyScreenMode`）落进 live 结果，确认是“菜单激活后没进 trade 屏”还是“进屏失败”，再决定补原生入口还是换夹具。
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：
