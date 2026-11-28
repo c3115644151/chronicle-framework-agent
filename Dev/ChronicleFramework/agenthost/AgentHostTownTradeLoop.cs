@@ -63,7 +63,26 @@ internal static class AgentHostTownTradeLoop
                 IsActiveEncounter(initialState))
                 throw new AgentHostException("town-trade-encounter-out-of-scope", "The town-trade buy profile requires a free Campaign Map; an encounter or captivity was present before any model decision.");
             if (!IsSupportedStartingState(initialState))
-                throw new AgentHostException("town-trade-free-map-or-native-trade-required", "The town-trade buy profile starts on a free Campaign Map or in the current settlement's Native Trade screen.");
+            {
+                // Report the exact starting fact: the slice only starts on a free map or in InventoryState/Trade,
+                // and the caller must see which of those conditions failed.
+                var startingInventory = initialState["inventoryScreen"] as JsonObject;
+                throw new AgentHostException("town-trade-free-map-or-native-trade-required", "The town-trade buy profile starts on a free Campaign Map or in the current settlement's Native Trade screen."
+                    + " gameState=" + ReadString(initialState["context"] as JsonObject, "gameState")
+                    + " inventoryMode=" + ReadString(startingInventory, "mode")
+                    + " hasHandler=" + ReadBoolean(startingInventory, "hasHandler")
+                    + " currentSettlementId=" + ReadString(initialState["location"] as JsonObject, "currentSettlementId")
+                    + " encounteredPartyId=" + ReadString(initialState["context"] as JsonObject, "encounteredPartyId")
+                    + " menuId=" + ReadString(initialState["context"] as JsonObject, "menuId")
+                    + " partyScreenNull=" + (initialState["partyScreen"] is null)
+                    + " inventoryNull=" + (initialState["inventoryScreen"] is null)
+                    + " battleSim=" + (!((initialState["context"] as JsonObject)?["battleSimulation"] is null))
+                    + " encounter=" + IsActiveEncounter(initialState)
+                    + " captive=" + ReadBoolean((initialState["context"] as JsonObject)?["captivity"] as JsonObject, "isCaptive")
+                    + " escape=" + ReadBoolean(initialState["context"] as JsonObject, "escapeMenuOpen")
+                    + " inquiry=" + ReadBoolean(initialState["context"] as JsonObject, "inquiryOpen")
+                    + " partyScreenMode=" + ReadString(initialState["partyScreen"] as JsonObject, "mode"));
+            }
 
             moveTargetId = ReadExistingNativeSettlementMoveTarget(currentNative);
             if (moveTargetId is not null)
@@ -980,7 +999,16 @@ internal static class AgentHostTownTradeLoop
             !ReadBoolean(context?["captivity"] as JsonObject, "isCaptive") &&
             !IsActiveEncounter(state) && context?["battleSimulation"] is null &&
             !ReadBoolean(context, "escapeMenuOpen") && !ReadBoolean(context, "inquiryOpen") &&
-            state["inventoryScreen"] is null && state["partyScreen"] is null;
+            state["inventoryScreen"] is null && IsInactivePartyScreen(state["partyScreen"] as JsonObject);
+    }
+
+    // The mod publishes the party-screen node even when no screen is active, with an empty mode.
+    // Treat that as "no party screen" so a free map is not rejected by an empty placeholder.
+    private static bool IsInactivePartyScreen(JsonObject? partyScreen)
+    {
+        if (partyScreen is null) return true;
+        var mode = ReadString(partyScreen, "mode");
+        return string.IsNullOrWhiteSpace(mode) || string.Equals(mode, "None", StringComparison.Ordinal);
     }
 
     private static bool IsActiveEncounter(JsonObject state)

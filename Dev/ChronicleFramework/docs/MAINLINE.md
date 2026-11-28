@@ -2320,6 +2320,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.739 接管事实：玩家按 F10 接管身体时，mod 写 `agent-control.json`（`hold=true`，`reason=player-takeover`），Host 在写下一个原生动作命令前等待该文件释放，`reason=escape-menu` 用于 ESC 菜单打开期间；F10 再按一次交还，F9 结束 Agent。Agent 拥有输入时 `GameKey.IsDown/IsPressed` 在 `MapHotKeyCategory` 上被前缀拦截（`MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`），ESC 不在拦截范围。真机截图取证见 TestResults/20261128-081358 与 20261128-081633。
 
+契约 7.765 事实（进展）：贸易循环起始判定报出确切事实后，真正拦住它的是打开的 Native 询问（`inquiry=True`）；夹具用 `respondInquiry -InquiryToken -InquiryChoice` 解析后，真机 `TestResults/20261128-184706` 首次执行原生动作：`decisions=4, actionsExecuted=2`，停在 `town-trade-no-safe-native-action`（`buyOfferCount=0`，自由地图无报价）。另修：mod 发布的空 `partyScreen` 节点按无屏处理（`IsInactivePartyScreen`）。
+
 契约 7.764 事实：夹具改为按 `harnessActivateSettlementMenu` 回执的 `optionIds` 选 trade 项并校验 `partyScreenMode`；真机 `TestResults/20261128-183050` 仍然 `resultKind=town-trade-buy` + `failureCode=town-trade-free-map-or-native-trade-required`（1 决策/0 动作），而夹具侧 `partyScreenMode` 匹配 `Trade` 未抛错——循环前置判定与夹具判定用的不是同一事实源，需对齐观察字段。
 
 契约 7.763 事实（已达成）：根因是 `harness/Test-AgentLiveModelLoop.ps1` 的 town-trade 分支残留“优先 all-supported”逻辑，导致请求恒为 42 个动作；改回只用 catalog `town-trade` profile 后，真机 `TestResults/20261128-182551` 得到 `allowedActionNames=9`、`townTradeSetMatched=true`、`resultKind=town-trade-buy`，切片**首次真正进入循环**（决策 1/动作 0），随后以 `town-trade-free-map-or-native-trade-required` 停止——夹具没真正进入原生 Trade 屏。

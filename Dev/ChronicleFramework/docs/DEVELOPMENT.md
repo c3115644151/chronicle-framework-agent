@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.764
+Contract version: 7.765
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -259,6 +259,25 @@ failureCode = town-trade-free-map-or-native-trade-required (decisions=1, actions
 夹具准备没有再抛错（说明 `partyScreenMode` 确实匹配到 `Trade`），但贸易循环仍然判定“不在自由地图、也不在原生 Trade 屏”，于是在第一轮就停。这条差异是下一步的核心：夹具看到的 `partyScreenMode=Trade` 与循环的前置判定用的不是同一个事实源。
 
 下一步：把循环 `town-trade-free-map-or-native-trade-required` 的判定条件与 `partyScreenMode`/`trade` 观察字段逐条对齐（读 `AgentHostTownTradeLoop` 的初始状态检查），再决定是补观察字段还是修正夹具判定。
+## Contract 7.765 — 贸易循环真的动了：4 决策 / 2 原生动作
+
+两处修正让切片从“第一轮就拒”变成“真的在跑”：
+
+1. `AgentHostTownTradeLoop` 的起始判定报出确切事实（`gameState/inventoryMode/hasHandler/currentSettlementId/encounteredPartyId/menuId/partyScreenNull/inventoryNull/battleSim/encounter/captive/escape/inquiry`），据此找到真正拦住它的是**打开的 Native 询问**（`inquiry=True`），不是地图状态；顺带把“mod 发布的空 `partyScreen` 节点”按无屏处理（`IsInactivePartyScreen`）。
+2. live 测试的夹具准备先解析该询问（`respondInquiry` 需要 `-InquiryToken` 与 `-InquiryChoice`，此前只传了 choice）。
+
+真机（`TestResults/20261128-184706`）：
+
+```
+resultKind = town-trade-buy
+decisions = 4, actionsExecuted = 2
+failureCode = town-trade-no-safe-native-action
+failure = No safe town-trade action is available: gameState=MapState; menuId=<none>; buyOfferCount=0
+```
+
+这是这条切片**第一次真正执行原生动作**（此前一直是 1 决策 / 0 动作）。当前停在“自由地图且没有任何报价（buyOfferCount=0）时，循环找不到下一步安全动作”。
+
+下一步：读 `town-trade-no-safe-native-action` 的判定，确认在“自由地图 + 无报价”时它期望哪个动作（大概率是 `mapSettlementTargets` 选城镇，或 `move` 到已知城镇），再决定是补动作目录还是补确定性 provider 的优先级。
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：

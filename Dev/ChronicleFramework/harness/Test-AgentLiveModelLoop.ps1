@@ -461,6 +461,16 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
             $townTradeOption = @($baseline.state.availableMenuOptions | Where-Object { $_.available -and $_.enabled -and ([string]$_.id -match 'trade') }).Count -gt 0
             $townTradeSettlementId = [string]$baseline.state.location.currentSettlementId
         }
+            # A Native inquiry can stay open from the StoryMode setup; the bounded buy loop refuses a
+            # map with a modal, so the fixture resolves it with the plain affirmative choice first.
+            $townTradePreState = Invoke-AgentCli 'state'
+            if ([bool]$townTradePreState.state.context.inquiryOpen) {
+                $townTradeInquiryToken = [string]$townTradePreState.state.context.inquiry.token
+                if (-not $townTradeInquiryToken) { throw 'TownTradeLoop sees an open Native inquiry without a token; no model action was sent.' }
+                $townTradeInquiry = Invoke-AgentCli 'respondInquiry' @('-InquiryToken', $townTradeInquiryToken, '-InquiryChoice', 'affirmative')
+                if ($townTradeInquiry.status -ne 'completed') { throw ('TownTradeLoop could not resolve the open Native inquiry: ' + [string]$townTradeInquiry.error) }
+                $townTradePreState = Invoke-AgentCli 'state'
+                if ([bool]$townTradePreState.state.context.inquiryOpen) { throw 'TownTradeLoop still has an open Native inquiry after the affirmative response; no model action was sent.' }
         if (-not [string]::IsNullOrWhiteSpace($townTradeSettlementId)) {
             if (-not $townTradeOption) {
                 # Harness fixture preparation: open the settlement trade screen through the same
@@ -492,6 +502,7 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
                 $townTradeScreenMode = [string]$townTradeOpenedState.partyScreenMode
                 if ($townTradeScreenMode -notmatch 'Trade') { throw ('TownTradeLoop opened the settlement menu but the Native Trade screen did not appear (partyScreenMode=' + $townTradeScreenMode + '); no model action was sent.') }
                 $townTradeFixtureReceipt = [ordered]@{ MenuId = $townTradeMenuToOpen; OptionId = 'trade'; PartyScreenMode = $townTradeScreenMode; SettlementId = $townTradeSettlementId }
+            }
             }
             elseif ($townTradeMenuId) {
                 throw 'TownTradeLoop requires the settlement trade screen to be open before the bounded run; the fixture only published the trade menu option.'
