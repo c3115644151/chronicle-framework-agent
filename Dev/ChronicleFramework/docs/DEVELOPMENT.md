@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.773
+Contract version: 7.774
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -2197,7 +2197,32 @@ Native Barter目录按当前VM会话和成功回执逐阶段开放：没有当�
 
 时间模式运行时世界自然推进；移动不补发 `advance`。地图点击副作用和 WaitMenu 自管时钟按原版复现。`advance/pause/resume` 仅显式 Harness 时钟工具，不嵌入普通动作。
 
-## 验收阶梯
+## Contract 7.774 — 答掉那只通知询问后，`move` 终于被 Native 接受
+
+两处改动：
+
+1. `mod/AgentObserver.cs`：`inquiryOpen` 不再按“当前 GameState 属于 Map/Mission/Inventory/Party”过滤，直接取 `ChronicleInquiryAdapter.IsInquiryOpen`（守卫读的就是这个值），并新增 `inquiryActiveGameState` 便于诊断；
+2. `HandleMove` 的前置守卫把每一条件写进拒绝消息（`inquiryOpen/escapeMenuOpen/playerEncounterActive/currentSettlement/atMenu/cameraInput/menuId`）。
+
+探针实测（`TestResults/_tmp/probe-training-clear.log`）：清掉训练场后，隐藏询问是一则 StoryMode 通知——
+
+```
+kind=YesNoInquiry, token=8d6193f3…, storyModeStartupKind=tutorial-skip-notification
+text=离开训练场几小时后，你发现有个受伤的人躺在树下…
+affirmative=好（visible/enabled）, negative 不可见
+```
+
+调用 `respondInquiry -InquiryToken … -InquiryChoice affirmative` 后：
+
+```
+INQUIRY_AFTER: False
+MOVE: completed        ← 之前一直是 rejected
+AFTER: lock=False moving=False day=91077.375 tc=StoppablePlay target=town_ES3
+```
+
+即移动指令第一次被原生接受（目标已设定），但队伍仍未进入移动、Campaign 日仍未推进。保持游戏窗口前台再测同样结果（`TestResults/_tmp/probe-focus.log`），所以焦点不是原因。
+
+下一步：解释“`StoppablePlay` + 有效移动指令却不推进”的机制。EYC 的 run 里 5 分钟内 `campaignDay` 只走了 0.114（91077.375→91077.489），说明正常推进也很慢；需要先量出一条基线（例如自由地图上等 60 秒能走多少），再判断这里是“另有暂停源”还是“推进极慢”。## 验收阶梯
 
 | 层级 | 必须证明 | 自动证据 |
 | --- | --- | --- |

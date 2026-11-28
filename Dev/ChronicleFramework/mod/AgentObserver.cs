@@ -153,8 +153,12 @@ internal static class ChronicleAgentObserver
         json.Append(",\"isWaitActive\":").Append(Bool(menu?.IsWaitActive == true));
         json.Append(",\"escapeMenuOpen\":").Append(Bool(Game.Current?.GameStateManager?.ActiveState is MapState && MapScreen.Instance?.IsEscapeMenuOpened == true));
         var activeGameState = Game.Current?.GameStateManager?.ActiveState;
-        var nativeInquiryOpen = (activeGameState is MapState || activeGameState is MissionState || activeGameState is InventoryState || activeGameState is PartyState) && ChronicleInquiryAdapter.IsInquiryOpen;
+        // The move/action guards read ChronicleInquiryAdapter.IsInquiryOpen directly, so the observation
+        // must publish the same fact: gating it by the active game state made the two disagree and hid
+        // an open Native inquiry behind inquiryOpen=false (contract 7.773).
+        var nativeInquiryOpen = ChronicleInquiryAdapter.IsInquiryOpen;
         json.Append(",\"inquiryOpen\":").Append(Bool(nativeInquiryOpen));
+        Property(json, "inquiryActiveGameState", activeGameState?.GetType().Name, true);
         json.Append(",\"inquiry\":").Append(nativeInquiryOpen ? ChronicleInquiryAdapter.BuildMapInquiryJson() : "null");
         json.Append(",\"sceneNotification\":").Append(ChronicleAgentSceneNotification.BuildJson(includeClockAudit: false));
         json.Append(",\"mapIncident\":").Append(ChronicleAgentMapIncidentAdapter.BuildJson());
