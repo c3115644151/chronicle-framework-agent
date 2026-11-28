@@ -885,8 +885,11 @@ if ($agentHostAutonomyLoopSource -notmatch 'IsEncounterInterruptionTermination' 
     $agentHostAutonomyLoopSource -notmatch 'objective-encounter-interruption-already-cleared-replanned' -or
     $agentHostAutonomyLoopSource -notmatch 'eyc-objective-attempt-checkpoint-write-deferred' -or
     $agentHostAutonomyLoopSource -notmatch 'IsNativeBattleMissionScene' -or
-    $agentHostAutonomyLoopSource -notmatch 'WaitForBattleMissionEntryAsync' -or
+    $agentHostAutonomyLoopSource -notmatch 'native-mission-entry-mode-unavailable' -or
     $agentHostAutonomyLoopSource -notmatch 'objective-subflow-failed-parent-gate' -or
+    $agentHostAutonomyLoopSource -notmatch 'IsNativeMissionScene' -or
+    $agentHostAutonomyLoopSource -notmatch 'WaitForHandledMissionModeAsync' -or
+    $agentHostAutonomyLoopSource -notmatch 'objective-conversation-mission-left' -or
     $agentHostGoldSaleLoopSource -notmatch 'must route it through BattleSimulation or Native Leave' -or
     $agentHostGoldSaleLoopSource -notmatch 'the EYC parent must resolve it before any sale action' -or
     $deterministicProviderSource -notmatch 'function Test-ShouldAttack' -or

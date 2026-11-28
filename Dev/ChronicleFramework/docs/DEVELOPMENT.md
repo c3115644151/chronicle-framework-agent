@@ -1,6 +1,20 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.744
+Contract version: 7.745
+
+## Contract 7.745 — 遭遇直接进入 MissionState：统一任务入口与对话场景边界
+
+从零开局真机（`TestResults/20261128-121956` 起）暴露：劫匪遭遇可以直接把 Native 从 MapState 推进到 `MissionState`，此时地图上已经没有遭遇菜单，`ShouldRouteToBattleSimulation` 的 Map 分类器认不出来，父循环判死整轮。
+
+本契约把任务入口统一成一条：`IsNativeMissionScene`（`MissionState` + `mission` 未结束）→ `WaitForHandledMissionModeAsync`（最多 60s，等到 `Deployment`/`Battle`/`Conversation` 或回到地图）→ 分派：
+
+- `Deployment`/`Battle` → `AgentHostBattleMissionLoop.RunAsync`（现有战斗任务控制器）；
+- `Conversation` → 先尝试原生离场；
+- 回到地图 → 重新规划，不重放子流程动作。
+
+真机结论（必须带着看）：`missionLeave` 在遭遇对话场景里被 Native **拒绝**（`TestResults/20261128-132409` 四次 `objective-conversation-mission-left|nativeStatus=rejected`，终态 `native-conversation-leave-looping`）。原因在 mod 侧可核实：`mod/Actions/ChronicleAgentProtocol.Actions.Dialogue.cs` 的 `dialogueSelect`/`dialogueContinue` 操作的是 `Campaign.Current.ConversationManager`（地图会话），而遭遇场景是 Mission 内部会话（`mission.mode=Conversation`，`sceneName=conversation_scene_green_valley`，`nativeConversationReady=true`），两者不是同一个会话管理器；`missionLeave` 又只在 Tavern 场景通过校验。
+
+因此下一增量明确：**Mission 会话表面**——mod 需要暴露并执行 Mission 内部会话的选项（列出现有 clickable 选项、选择、继续），Host 才能在不编造台词的条件下走完真实选项回到地图。当前契约只保证“不判死整轮、把真实回执记进 trace”，不声称能通过对话场景。
 
 ## Contract 7.744 — 玩家窗口的第二轮：引擎原生样式、点击激活与边缘缩放
 

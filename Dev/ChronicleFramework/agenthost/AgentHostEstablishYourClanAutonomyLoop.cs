@@ -769,7 +769,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
 
-        async Task<JsonDocument?> WaitForBattleMissionEntryAsync(CancellationToken token)
+        async Task<JsonDocument?> WaitForHandledMissionModeAsync(CancellationToken token)
         {
             var deadline = DateTime.UtcNow.AddSeconds(60);
             JsonObject? lastMission = null;
@@ -787,7 +787,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 var ended = ReadBoolean(mission, "missionEnded");
                 if (ReadString(context, "gameState") != "MissionState" || ended)
                     return JsonDocument.Parse(fresh.RootElement.GetRawText());
-                if (mode is "Deployment" or "Battle")
+                if (mode is "Deployment" or "Battle" or "Conversation")
                     return JsonDocument.Parse(fresh.RootElement.GetRawText());
                 lastMission = mission?.DeepClone() as JsonObject;
                 lastContext = context?.DeepClone() as JsonObject;
@@ -795,7 +795,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             }
             ledger.Trace.Add(new JsonObject
             {
-                ["stage"] = "native-battle-mission-entry-timeout-detail",
+                ["stage"] = "native-mission-entry-mode-unavailable-detail",
                 ["gameState"] = ReadString(lastContext, "gameState"),
                 ["menuId"] = ReadString(lastContext, "menuId"),
                 ["encounterActive"] = ReadBoolean(lastContext, "encounterActive"),
@@ -915,6 +915,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
             // ceiling that can stop a healthy long campaign before its budget ends.
             var safeSettlementRefreshAttempts = 0;
             var encounterClearedReplans = 0;
+            var conversationLeaves = 0;
         for (var cycle = 0; cycle < maxDecisions && ledger.Decisions < maxDecisions; cycle++)
             {
                 elapsed.Token.ThrowIfCancellationRequested();
@@ -1545,18 +1546,44 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     // Native can already sit inside a running battle Mission. The Map-only BattleSimulation
                     // loop has no bounded action there; that state belongs to the Battle Mission controller,
                     // which finishes the Native mission and returns to the Campaign Map.
-                    if (IsNativeBattleMissionScene(failedState.RootElement))
+                    // Native can move straight from a Map encounter into a MissionState scene: a battle mission
+                    // (Deployment/Battle) or an encounter conversation. Both hide the Map encounter, so the Map
+                    // classifier cannot route them; handle the mission itself with the bounded Native actions.
+                    if (IsNativeMissionScene(failedState.RootElement))
                     {
-                        // Native reports MissionState before the mission publishes Deployment/Battle. Poll the
-                        // live state for a bounded window instead of failing on the transient entry shape.
-                        using var missionEntry = await WaitForBattleMissionEntryAsync(elapsed.Token);
+                        using var missionEntry = await WaitForHandledMissionModeAsync(elapsed.Token);
                         if (missionEntry is null)
-                            return BuildResult("failed", "native-battle-mission-entry-timeout", false,
-                                "Native stayed in MissionState without a Deployment/Battle mission mode; the parent did not guess an action.",
-                                "native-battle-mission-entry-timeout", journalObjectives, snapshot, differences);
-                        if (!IsNativeBattleMissionScene(missionEntry.RootElement))
+                            return BuildResult("failed", "native-mission-entry-mode-unavailable", false,
+                                "Native stayed in a MissionState scene without publishing a handled mode (Deployment/Battle/Conversation); the parent did not guess an action.",
+                                "native-mission-entry-mode-unavailable", journalObjectives, snapshot, differences);
+                        if (!IsNativeMissionScene(missionEntry.RootElement))
                         {
                             ledger.Trace.Add(new JsonObject { ["stage"] = "objective-replanned-after-native-mission-returned-to-map", ["objectiveId"] = objectiveId });
+                            continue;
+                        }
+                        if (IsNativeConversationMissionScene(missionEntry.RootElement))
+                        {
+                            if (client is not IAgentHostCompanionHiringNativeClient conversationClient)
+                                return BuildResult("failed", "native-conversation-leave-client-unavailable", false,
+                                    "Native opened a conversation scene but this Host transport cannot issue the original Leave action.",
+                                    "native-conversation-leave-client-unavailable", journalObjectives, snapshot, differences);
+                            if (conversationLeaves >= MaxConversationLeaves)
+                                return BuildResult("failed", "native-conversation-leave-looping", false,
+                                    "Native kept opening conversation scenes after the bounded Leave allowance; the parent stopped instead of answering a dialogue.",
+                                    "native-conversation-leave-looping", journalObjectives, snapshot, differences);
+                            conversationLeaves++;
+                            using var leaveResponse = await conversationClient.ExecuteCompanionHiringActionAsync("missionLeave", new JsonObject(), elapsed.Token);
+                            var leaveReceipt = JsonNode.Parse(leaveResponse.RootElement.GetRawText())?.AsObject() ?? new JsonObject();
+                            nativeActions++;
+                            ledger.Trace.Add(new JsonObject
+                            {
+                                ["stage"] = "objective-conversation-mission-left",
+                                ["objectiveId"] = objectiveId,
+                                ["nativeStatus"] = ReadString(leaveReceipt, "status"),
+                                ["leaveIndex"] = conversationLeaves,
+                                ["dialogueAnswerInvented"] = false,
+                                ["replayedChildActions"] = false
+                            });
                             continue;
                         }
                         if (client is not IAgentHostBattleMissionNativeClient incidentMissionClient ||
@@ -1564,7 +1591,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                             return BuildResult("failed", "native-battle-mission-controller-unavailable", false,
                                 "Native is inside a battle Mission but this Host transport cannot drive it; no action was invented.",
                                 "native-battle-mission-controller-unavailable", journalObjectives, snapshot, differences);
-                        var missionProcessId = failedState.RootElement.TryGetProperty("processId", out var missionPid) && missionPid.ValueKind == JsonValueKind.Number
+                        var missionProcessId = missionEntry.RootElement.TryGetProperty("processId", out var missionPid) && missionPid.ValueKind == JsonValueKind.Number
                             ? missionPid.GetInt32()
                             : 0;
                         var incidentMission = await AgentHostBattleMissionLoop.RunAsync(missionMapClient, incidentMissionClient, missionProcessId, elapsed.Token);
@@ -2439,6 +2466,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
     }
 
     internal const int MaxEncounterClearedReplans = 12;
+    internal const int MaxConversationLeaves = 4;
 
     internal static bool IsEncounterInterruptionTermination(string? termination) =>
         termination is "campaign-interruption" or AgentHostNativeMapMovementMonitor.FailureCode or
@@ -2446,6 +2474,28 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
 
     // Native has already entered a battle mission scene (an encounter that resolved into a real MissionState
     // battle). The BattleSimulation subflow owns that state; the Map-only encounter classifier does not.
+    // An encounter that opens a conversation scene is a Native MissionState with mode Conversation, not a battle.
+    // The bounded way out is the original Leave action, never an invented dialogue answer.
+    internal static bool IsNativeMissionScene(JsonElement native)
+    {
+        if (native.ValueKind != JsonValueKind.Object || !native.TryGetProperty("state", out var stateElement) || stateElement.ValueKind != JsonValueKind.Object)
+            return false;
+        var state = JsonNode.Parse(stateElement.GetRawText())?.AsObject();
+        if (state is null || ReadString(state["context"] as JsonObject, "gameState") != "MissionState") return false;
+        var mission = state["mission"] as JsonObject;
+        return mission is not null && !ReadBoolean(mission, "missionEnded");
+    }
+
+    internal static bool IsNativeConversationMissionScene(JsonElement native)
+    {
+        if (native.ValueKind != JsonValueKind.Object || !native.TryGetProperty("state", out var stateElement) || stateElement.ValueKind != JsonValueKind.Object)
+            return false;
+        var state = JsonNode.Parse(stateElement.GetRawText())?.AsObject();
+        if (state is null || ReadString(state["context"] as JsonObject, "gameState") != "MissionState") return false;
+        var mission = state["mission"] as JsonObject;
+        return mission is not null && ReadBoolean(mission, "active") && !ReadBoolean(mission, "missionEnded") &&
+               string.Equals(ReadString(mission, "mode"), "Conversation", StringComparison.Ordinal);
+    }
     internal static bool IsNativeBattleMissionScene(JsonElement native)
     {
         if (native.ValueKind != JsonValueKind.Object || !native.TryGetProperty("state", out var stateElement) || stateElement.ValueKind != JsonValueKind.Object)

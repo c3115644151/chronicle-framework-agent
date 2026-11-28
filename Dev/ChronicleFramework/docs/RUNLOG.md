@@ -1,5 +1,12 @@
 # Chroni
 
+## 2026-11-28 遭遇直接进任务场景（契约 7.745）
+
+- 真机：`TestResults/20261128-121956`…`20261128-132409` 连续复现“Map 遭遇 → MissionState”，旧代码在 Map 分类器处判死整轮。
+- 改动：`IsNativeMissionScene` + `WaitForHandledMissionModeAsync`（60s，等 Deployment/Battle/Conversation）统一入口；战斗任务交给 `AgentHostBattleMissionLoop`；对话场景先试原生 `missionLeave`。
+- 结果：`20261128-132409-deterministic-eyc-ChronicleEycDev-opening-20261126` 里 `missionLeave` 四次 `nativeStatus=rejected`，终态 `native-conversation-leave-looping`（15 决策、22 动作、25s）。
+- 结论：Mission 内部会话（`mission.mode=Conversation`）没有可用的 Host 动作面；`dialogueSelect` 走的是 `Campaign.Current.ConversationManager`，`missionLeave` 只对 Tavern 生效。下一增量是给 mod 加 Mission 会话选项表面；本轮只交付“不判死整轮 + 真实回执入 trace”。四目标仍未达成。
+
 ## 2026-11-28 玩家窗口第二轮（契约 7.744）
 
 - 玩家反馈：启动即全屏、任务栏仍无图标、点击不置顶；拖动已好、缩放仍不行。

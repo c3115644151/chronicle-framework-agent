@@ -2320,6 +2320,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.739 接管事实：玩家按 F10 接管身体时，mod 写 `agent-control.json`（`hold=true`，`reason=player-takeover`），Host 在写下一个原生动作命令前等待该文件释放，`reason=escape-menu` 用于 ESC 菜单打开期间；F10 再按一次交还，F9 结束 Agent。Agent 拥有输入时 `GameKey.IsDown/IsPressed` 在 `MapHotKeyCategory` 上被前缀拦截（`MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`），ESC 不在拦截范围。真机截图取证见 TestResults/20261128-081358 与 20261128-081633。
 
+契约 7.745 任务场景事实：遭遇可直接进入 `MissionState`；`IsNativeMissionScene`+`WaitForHandledMissionModeAsync`（60s 等 `Deployment`/`Battle`/`Conversation`）统一入口，战斗交给 `AgentHostBattleMissionLoop`。Mission 内 `Conversation` 场景下 `missionLeave` 被 Native 拒绝（`TestResults/20261128-132409`，四次 rejected），`dialogueSelect`/`dialogueContinue` 只作用于 `Campaign.Current.ConversationManager`，故当前无法通过对话场景；下一步是 mod 侧 Mission 会话表面。
+
 契约 7.744 玩家窗口事实：引擎 `display_mode=0` 的原生窗口是 `style=0x14CA0000`（有标题栏、无 `WS_THICKFRAME`）+ `exStyle=0x08000100`（自带 `WS_EX_NOACTIVATE`）；`display_mode=1/2` 是 `0x94000000` 无边框 popup。玩家默认固定 `display_mode=0 / 1600x900 / 60fps`。`mod/AgentGameWindow.cs` 追加 `WM_MOUSEACTIVATE→MA_ACTIVATE`（点击置顶）、`ITaskbarList::AddTab`（任务栏）、`WM_NCHITTEST` 边缘 6px 缩放钩子，且不再保留 `WS_EX_NOACTIVATE`；捕获期的非激活由 harness 通过 `CHRONICLE_HARNESS_NONACTIVATING_WINDOW` 自己加撤。真机样本 `2026-11-28T05:09:46Z|pid=34808`。
 
 契约 7.743 玩家窗口事实：`mod/AgentGameWindow.cs` 在加载后把本进程主窗口规范化为可交互窗口——去 `WS_POPUP`，补 `WS_CAPTION|WS_THICKFRAME|WS_SYSMENU|WS_MINIMIZEBOX|WS_MAXIMIZEBOX`，加 `WS_EX_APPWINDOW`、去 `WS_EX_TOOLWINDOW`；`WS_EX_NOACTIVATE` 只在 `CHRONICLE_HARNESS_MODE` 非空（捕获运行）时保留，玩家会话移除。诊断行 `agent-window-style|caption=…|thickFrame=…|appWindow=…|toolWindow=…|noActivate=…|captureMode=…`；真机样本 `2026-11-28T04:39:00Z|pid=41776`（captureMode=True）。
