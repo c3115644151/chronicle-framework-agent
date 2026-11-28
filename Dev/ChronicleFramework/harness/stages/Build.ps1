@@ -23,12 +23,17 @@ Invoke-Stage -Name 'Build' -Action {
     $sourceManifestHash = (Get-FileHash -LiteralPath $sourceManifestPath -Algorithm SHA256).Hash
     $runtimeManifestHash = if (Test-Path -LiteralPath $manifestPath) { (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash } else { '' }
     if ($sourceManifestHash -ne $runtimeManifestHash) { Copy-Item -LiteralPath $sourceManifestPath -Destination $manifestPath -Force }
-    $sourceModuleData = Join-Path $modulePackageRoot 'ModuleData'
-    $runtimeModuleData = Join-Path (Split-Path -Parent $manifestPath) 'ModuleData'
-    if (-not (Test-Path -LiteralPath $sourceModuleData -PathType Container)) { throw 'Chronicle ModuleData source is missing.' }
-    New-Item -ItemType Directory -Path $runtimeModuleData -Force | Out-Null
-    foreach ($moduleDataEntry in Get-ChildItem -LiteralPath $sourceModuleData -Force) {
-        Copy-Item -LiteralPath $moduleDataEntry.FullName -Destination $runtimeModuleData -Recurse -Force
+    # Deploy the whole module package (ModuleData, GUI prefabs, and anything added later), not one hardcoded folder:
+    # a prefab that never reaches the game silently disables the in-game panel.
+    $sourceModulePackage = $modulePackageRoot
+    $runtimeModuleRoot = Split-Path -Parent $manifestPath
+    if (-not (Test-Path -LiteralPath $sourceModulePackage -PathType Container)) { throw 'Chronicle module package source is missing.' }
+    foreach ($packageEntry in Get-ChildItem -LiteralPath $sourceModulePackage -Force) {
+        if ($packageEntry.Name -eq 'SubModule.xml') { continue }
+        Copy-Item -LiteralPath $packageEntry.FullName -Destination $runtimeModuleRoot -Recurse -Force
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $runtimeModuleRoot 'ModuleData\global_strings.xml') -PathType Leaf)) {
+        throw 'Chronicle native key display strings were not deployed to ModuleData.'
     }
     $modAssetsPath = Join-Path (Split-Path -Parent $projectPath) 'obj\project.assets.json'
     if (-not (Test-Path -LiteralPath $modAssetsPath)) {

@@ -1,0 +1,28 @@
+<Brushes>
+  <!-- Card surface for the in-game agent panel. 9-sliced blank sprite keeps the card crisp at any size. -->
+  <Brush Name="ChronicleAgentStatus.Card">
+    <Layers>
+      <BrushLayer Name="Default" Sprite="BlankWhiteSquare_9" Color="#0B1118F2" />
+    </Layers>
+    <Styles>
+      <Style Name="Default">
+        <BrushLayer Name="Default" AlphaFactor="0.94" />
+      </Style>
+    </Styles>
+  </Brush>
+  <Brush Name="ChronicleAgentStatus.Accent">
+    <Layers>
+      <BrushLayer Name="Default" Sprite="BlankWhiteSquare_9" Color="#C8A24DFF" />
+    </Layers>
+  </Brush>
+  <Brush Name="ChronicleAgentStatus.Title" Font="FiraSansExtraCondensed-Regular" TextHorizontalAlignment="Left">
+    <Styles>
+      <Style Name="Default" FontSize="26" FontColor="#E8C86AFF" TextOutlineAmount="0.12" TextGlowRadius="3" TextGlowColor="#000000FF" />
+    </Styles>
+  </Brush>
+  <Brush Name="ChronicleAgentStatus.Text" Font="FiraSansExtraCondensed-Regular" TextHorizontalAlignment="Left">
+    <Styles>
+      <Style Name="Default" FontSize="21" FontColor="#EFE6D6FF" TextOutlineAmount="0.1" TextGlowRadius="2" TextGlowColor="#000000FF" LineSpacing="1" />
+    </Styles>
+  </Brush>
+</Brushes>

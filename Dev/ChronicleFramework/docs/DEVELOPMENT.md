@@ -1,7 +1,21 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.736
+Contract version: 7.739
 
+## Contract 7.739 — 玩家接管与 Agent 时钟门禁（F10 交还 / F9 停止）
+
+玩家可以随时接管身体而不终止 Agent：mod 在 `AgentRuns/ChronicleAgent/agent-control.json` 写 `{hold, reason}`，Host 在每个原生动作写入邮箱之前（`agenthost/NativeMailboxClient.SendAsync`）调用 `AgentHostControlHold.WaitWhileHeldAsync` 等待，观察读取保持实时，因此接管不会与已发出的动作抢跑。`reason` 有两值：`player-takeover`（F10 交给玩家）与 `escape-menu`（ESC 菜单打开期间的自动保持）。状态快照在保持期间写 `status=held` 并保留上次进度，交还后写 `resuming`。Agent 拥有输入时，mod 通过 Harmony 前缀拦截 `GameKey.IsDown/IsPressed` 里 `MapHotKeyCategory` 的 `MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`，玩家无法暂停或改变时间；ESC 仍可用，关闭菜单后保持自动解除、Agent 继续。F9 结束 Agent（旧 F10 语义），F10 在 AI 接管 / 玩家接管之间切换。
+
+面板资产：`mod/module/GUI/Prefabs/ChronicleAgentStatus.xml` 用 `BrushWidget` 画卡片（普通 Widget 的 `Brush` 只选样式状态，不填充背景），`mod/module/GUI/Brushes/ChronicleAgentStatusBrushes.xml` 定义卡片、金色标题与正文画刷；`harness/stages/Build.ps1` 现在按整个 `module` 包部署（ModuleData、GUI/Prefabs、GUI/Brushes），不再只复制 ModuleData。
+
+Harness 专用可视开关（仅取证用，不影响产品路径）：`CHRONICLE_HARNESS_SHOW_STATUS_PANEL=1` 首次 Tick 自动打开面板，`CHRONICLE_HARNESS_STATUS_DETAIL=1` 同时打开并进入调试层，`CHRONICLE_HARNESS_STATUS_SNAPSHOT_PATH` 指向夹具快照以渲染确定内容。
+
+判据边界：本契约的输入门禁与面板目前只有编译与 Host 自测证据，尚未在真机可视运行中截图取证；面板不改变任何胜负或奖励事实。
+
+## Contract 7.738 — 游戏内 Agent 面板（普通 / 调试两种信息层）
+玩家反馈 HTML 决策时间线几乎不可用，要求把"Agent 在做什么"搬进游戏内，并区分普通与调试信息层。新增两件东西：①`agenthost/AgentHostLiveStatus.cs` 在每次 provider 决策与失败时，把一份小快照原子写入 `%Documents%\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\agent-live-status.json`，含 `status/phase/thinking/progress(gold,renown,members,gameState,menuId,campaignDay,focus)/budget(token,缓存命中,目录大小)/debug(请求字节、allowedActions、decision、观察，超 24KB 截断)`，写入用临时文件替换并自测原子性、截断与失败说明；②`mod/AgentStatusPanel.cs` + `mod/module/GUI/Prefabs/ChronicleAgentStatus.xml`，用 GlobalLayer 承载非焦点 Gauntlet 层（永不抢焦点、不阻塞输入），F7 显示/隐藏、F6 普通/调试切换，0.25 秒轮询快照；淘汰/卸载时移除图层。面板是只读观察窗：普通层只给"正在做/思考/进度/位置/目标"，调试层再给决策原文、目录、token 与缓存、观察字节、失败码；不替代原生回执与 Harness 证据。
+## Contract 7.737 — EYC 取证可用已标识的对手夹具供给机会
+阶段①取证卡在"地图上没有更多可见敌对 bandit"：renown 48/50、partySize 被容量锁挂在 renown<50，而刷新再多也等不到世界刷新。契约允许 EYC 取证路径显式使用已有的一次性对手夹具：`Test-AgentHostCampaignLoopEvaluation.ps1` 新增 `-FixtureOpponent` 并透传给 live-model 阶段（`visual-opponent-fixture`），`EstablishYourClanSourceFixture.json` 必须改写为 `NoGameWorldStateInjected=false` 且 `InjectedWorldState="one disposable hostile looter party …（存档字节未改动）"`。这只供给机会：看见、追击、进入原生战斗、获胜、renown 增量、招募与出售仍全部由 Host 驱动真实原生动作，不以夹具替代任何判定。
 ## Contract 7.736 — 一次空跑不足以认定路线耗尽
 `TestResults/20261128-060255-deterministic-eyc` 在同一起点只跑了 55 决策就报 `no-current-integrated-route-available`：renown `no-safe-action`、partySize 容量锁，唯一一次 safe-settlement 刷新在途中被可见劫匪打断（`native-visible-hostile-bandit-interrupted-settlement-move`），父循环没有路由进战斗，随后直接判定"每条整合路线都不可用"。一次刷新到达一个没有新机会的城镇并不能证明地图上没有招募/商品/劫匪，契约改为有界重试：`MaxSafeSettlementRefreshAttempts=3`，失败的刷新目的地记入已访问集合并按 `ShouldRetrySafeSettlementRefresh` 判定是否再换一个当前可见安全城镇；只有重试用尽才报 `no-current-integrated-route-available`。已到达或已路由进战斗都不再重试。
 ## Contract 7.735 — EYC 验收按完成证据判定，不再套用单次到达预算

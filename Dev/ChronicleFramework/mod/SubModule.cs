@@ -192,6 +192,7 @@ public sealed class SubModule : MBSubModuleBase
         TrySkipHarnessStartupVideo();
         ChronicleAgentRuntimeController.Tick();
         ChroniclePlayerInputOwnership.Tick();
+        ChronicleAgentStatusPanel.Tick(dt);
         if (AgentHostCampaignTransitionHarness.Tick()) return;
         var harnessStartState = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_START_STATE") == "InventoryState" ? "InventoryState" : "MapState";
         if (!_harnessAgentLifecycleStartRequested &&
@@ -354,6 +355,7 @@ public sealed class SubModule : MBSubModuleBase
         ChronicleDiagnostics.Write("submodule-unload");
         ChronicleAgentRuntimeController.StopForSubModuleUnload();
         ChroniclePlayerInputOwnership.Release();
+        ChronicleAgentStatusPanel.Release();
         base.OnSubModuleUnloaded();
     }
 }

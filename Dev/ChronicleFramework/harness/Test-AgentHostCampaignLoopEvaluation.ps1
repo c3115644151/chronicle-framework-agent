@@ -12,7 +12,8 @@ param(
     [string]$PlannerSourceSaveName = 'save002',
     [switch]$BattleSimulationLoop,
     [switch]$BattleAndCaptivityLoop,
-    [string]$BattleSourceSaveName = 'AgentBridgeLifecycle'
+    [string]$BattleSourceSaveName = 'AgentBridgeLifecycle',
+    [switch]$FixtureOpponent
 )
 
 $ErrorActionPreference = 'Stop'
@@ -206,10 +207,14 @@ for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
             [IO.File]::Copy($plannerSourceSavePath, $plannerFixtureSavePath, $false)
             $plannerCloneHash = (Get-FileHash -LiteralPath $plannerFixtureSavePath -Algorithm SHA256).Hash
             if ($plannerCloneHash -cne $plannerSourceHashBefore) { throw 'The W7-N disposable save copy does not match its read-only source hash.' }
-            [ordered]@{ SourceSaveName = $PlannerSourceSaveName; SourceSha256Before = $plannerSourceHashBefore; SourceModuleIds = $plannerSourceModules; RuntimeLoadModuleAugment = @('ChronicleFramework'); DisposableCloneName = $plannerFixtureSaveName; DisposableClonePrefix = $plannerFixturePrefix; DisposableCloneSha256 = $plannerCloneHash; IsByteForByteCopy = $true; NoGameWorldStateInjected = $true } |
+            [ordered]@{ SourceSaveName = $PlannerSourceSaveName; SourceSha256Before = $plannerSourceHashBefore; SourceModuleIds = $plannerSourceModules; RuntimeLoadModuleAugment = @('ChronicleFramework'); DisposableCloneName = $plannerFixtureSaveName; DisposableClonePrefix = $plannerFixturePrefix; DisposableCloneSha256 = $plannerCloneHash; IsByteForByteCopy = $true; NoGameWorldStateInjected = (-not $FixtureOpponent); InjectedWorldState = if ($FixtureOpponent) { 'one disposable hostile looter party (visual-opponent-fixture) so the Renown route has an opportunity; save bytes are copied unchanged' } else { $null } } |
                 ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $runTemp 'EstablishYourClanSourceFixture.json') -Encoding UTF8
             $storyModeLoopSwitch = if ($EstablishClanGoldSaleFromStoryMode) { '-EstablishClanGoldSaleLoop' } elseif ($CaptivityRecoveryFromExisting) { '-CaptivityRecoveryLoop' } elseif ($EstablishYourClanAutonomyLoop) { '-EstablishYourClanAutonomyLoop' } else { '-EstablishYourClanGoalPlanner' }
-            $childOutput = & $HarnessPowerShell -NoProfile -File $liveTest -LoadSaveName $plannerFixtureSaveName $storyModeLoopSwitch -AgentHostRuntime -FrameRate $FrameRate 2>&1 | Out-String
+            # The opponent fixture is a disposable-save harness privilege, not game progress: it only guarantees
+            # that one hostile party is visible so a Renown route has an opportunity. The fixture receipt states it.
+            $childFixtureSwitch = @()
+            if ($FixtureOpponent) { $childFixtureSwitch = @('-FixtureOpponent') }
+            $childOutput = & $HarnessPowerShell -NoProfile -File $liveTest -LoadSaveName $plannerFixtureSaveName $storyModeLoopSwitch -AgentHostRuntime -FrameRate $FrameRate @childFixtureSwitch 2>&1 | Out-String
         }
         elseif ($BattleSimulationLoop -or $BattleAndCaptivityLoop) {
             $battleSaveRoot = [IO.Path]::GetFullPath($saveDirectory).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar

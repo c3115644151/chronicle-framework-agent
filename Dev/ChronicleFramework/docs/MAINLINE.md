@@ -2314,6 +2314,12 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.736 路线耗尽事实：一次 safe-settlement 刷新到达一个没有新机会的定居点，不能证明 `renown`/`partySize` 路线在地图上不存在；`TestResults/20261128-060255-deterministic-eyc` 就是单次刷新被打断后立即报 `no-current-integrated-route-available`。父循环现在保有 `MaxSafeSettlementRefreshAttempts=3` 次有界刷新，失败的目的地进入 `excludedSettlementIds` 以免原地重试，已到达或已路由战斗时不重试。
 
+契约 7.737 取证供给事实：专属 save 克隆的字节不变不等于"世界状态未注入"——`visual-opponent-fixture` 会在运行时生成一支一次性敌对 bandit，用于保证 Renown 路线有可追击机会；夹具回执必须写 `NoGameWorldStateInjected=false` 与 `InjectedWorldState`，不能用文件哈希相同冒充无注入。机会供给由夹具负责，看见/追击/战斗/胜利/renown 增量/招募/出售仍必须由 Host 的真实原生动作与回执证明。
+
+契约 7.738 游戏内 UI 事实：玩家明确表示 HTML 决策时间线难用，要求游戏内专属 UI 并区分普通/调试信息层。Host 每次 provider 决策/失败写 `%Documents%\Mount and Blade II Bannerlord\AgentRuns\ChronicleAgent\agent-live-status.json`（原子替换、debug 观察截断 24KB）；mod 用非焦点 GlobalLayer 上的 GauntletLayer 读取它，F7 显示/隐藏、F6 普通/调试，面板永不抢焦点或阻塞输入（`ScreenManager.AddGlobalLayer(..., isFocusable: false)`）。面板只是观察窗：胜负/奖励仍以原生回执为准。
+
+契约 7.739 接管事实：玩家按 F10 接管身体时，mod 写 `agent-control.json`（`hold=true`，`reason=player-takeover`），Host 在写下一个原生动作命令前等待该文件释放，`reason=escape-menu` 用于 ESC 菜单打开期间；F10 再按一次交还，F9 结束 Agent。Agent 拥有输入时 `GameKey.IsDown/IsPressed` 在 `MapHotKeyCategory` 上被前缀拦截（`MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`），ESC 不在拦截范围。真机截图取证尚未取得。
+
 契约 7.732 修正：EYC Renown 停滞的真因不是世界死锁，而是确定性 provider 的"leave 优先"启发式在遭遇菜单每次选逃跑；原生遭遇菜单提供 `str_order_attack`（Send Troops/BattleSimulation）时该选项才是推进 Renown 的正当路径。修正后真机完成原生战斗全链并达成 renown 50/50。招募动作 legalTuples 中 `confirmPartySizeWarning` 可能编码为 `[0]`（单元素数组），provider 必须展开为标量 0 才能通过 Host schema。四目标闭环剩余 partySize 招募未达，属招募子流程选择逻辑，不虚报通过。
 
 契约 7.731 修正与边界：move 的 SettlementId 与 pursue 的 PartyId 实际在 decision request 的 observation.state.nearbySettlements / nearbyParties 中，无需跨步骤记忆；此前"目标不在 request"的结论已作废。确定性 provider 从当前 Native 观察推导目标后，真机首次完成原生城镇到达验证（safeSettlementRefresh completed native-settlement-arrival-verified）并处理途中劫匪中断。四目标闭环仍未达成的剩余原因是真实世界死锁：renown 停在 47-49/50、可见劫匪消耗完后反复 no-safe-action，partySize 容量锁需家族等级提升而家族等级需 renown 50。这是世界状态与 3B 小模型能力边界，确定性 provider 已完整驱动 Host→Native 链，不虚报闭环通过。

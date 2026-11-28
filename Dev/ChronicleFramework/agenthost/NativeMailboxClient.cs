@@ -977,6 +977,8 @@ internal sealed class NativeMailboxClient : IAgentHostVillageToolsQuestNativeCli
         bool acceptedResponseExpected,
         CancellationToken cancellationToken)
     {
+        if (AgentHostControlHold.AppliesToAction(action))
+            await AgentHostControlHold.WaitWhileHeldAsync(_root, cancellationToken).ConfigureAwait(false);
         var commandId = "host-" + Guid.NewGuid().ToString("N");
         var commandPath = Path.Combine(_root, "command.json");
         var temporaryPath = commandPath + "." + commandId + ".tmp";

@@ -42,6 +42,11 @@ internal static class ChroniclePlayerInputOwnership
     private static int _ownershipToggleHarnessProbeStage;
     private static bool _toggleKeyWasDown;
     private static bool _harnessInputLockReported;
+    private static bool _playerTakeover;
+    private static bool _pauseGuardInstalled;
+    private static bool _stopKeyWasDown;
+    private static readonly Harmony PauseGuardHarmony = new Harmony("ChronicleFramework.AgentPlayerInputPauseGuard");
+    private static readonly string[] BlockedPlayerTimeControlKeys = { "MapTimeStop", "MapTimeTogglePause", "MapTimeFastForward", "MapTimeNormal" };
 
     internal static bool IsLocked => _locked;
 
@@ -73,10 +78,12 @@ internal static class ChroniclePlayerInputOwnership
     {
         var inputProtectionReady = TryInitialize();
         TryInstallFocusGuard();
+        TryInstallPlayerPauseGuard();
 
         var runtimeOwnsInput = ChronicleAgentRuntimeController.ShouldOwnPlayerInput;
         var harnessOwnsInput = inputProtectionReady && IsHarnessAgentInputLockRequested();
-        var shouldLock = runtimeOwnsInput || harnessOwnsInput;
+        var takeover = _playerTakeover && ChronicleAgentRuntimeController.OwnsHost && !harnessOwnsInput;
+        var shouldLock = (runtimeOwnsInput || harnessOwnsInput) && !takeover;
         var runFocusProbe = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_AGENT_INPUT_FOCUS_TEST") == "1";
         if (runFocusProbe && !runtimeOwnsInput && !_focusProbeBaselineCaptured)
             TryCaptureNativeFocusPermissionBaseline();
@@ -107,6 +114,7 @@ internal static class ChroniclePlayerInputOwnership
 
         SetLocked(shouldLock, notifyPlayer: !harnessOwnsInput);
         SyncMissionInput(shouldLock);
+        SyncControlHold(takeover, harnessOwnsInput);
         if (harnessOwnsInput && !_harnessInputLockReported)
         {
             _harnessInputLockReported = true;
@@ -132,6 +140,8 @@ internal static class ChroniclePlayerInputOwnership
 
     internal static void Release()
     {
+        _playerTakeover = false;
+        ChronicleAgentControlChannel.ClearHold();
         SetLocked(false, notifyPlayer: false);
         RestoreMissionInput();
         if (_globalLayer == null) return;
@@ -557,6 +567,111 @@ internal static class ChroniclePlayerInputOwnership
     private static bool KeysOverlap(Key first, Key second) =>
         first != null && second != null && first.InputKey != InputKey.Invalid && first.InputKey == second.InputKey;
 
+    // The Host parks itself before its next Native action whenever the player holds the reins, so handing over
+    // never races an order that is already in flight.
+    private static void SyncControlHold(bool takeover, bool harnessOwnsInput)
+    {
+        if (harnessOwnsInput) return;
+        if (!ChronicleAgentRuntimeController.OwnsHost)
+        {
+            if (_playerTakeover) _playerTakeover = false;
+            ChronicleAgentControlChannel.ClearHold();
+            return;
+        }
+
+        var escapeMenuOpen = MapScreen.Instance?.IsEscapeMenuOpened == true;
+        if (takeover)
+            ChronicleAgentControlChannel.SetHold(true, ChronicleAgentControlChannel.PlayerTakeoverReason);
+        else if (escapeMenuOpen)
+            ChronicleAgentControlChannel.SetHold(true, ChronicleAgentControlChannel.EscapeMenuReason);
+        else
+            ChronicleAgentControlChannel.ClearHold();
+    }
+
+    private static void TryInstallPlayerPauseGuard()
+    {
+        if (_pauseGuardInstalled) return;
+        var patched = new System.Collections.Generic.List<string>();
+        var gameKeyGuard = AccessTools.Method(typeof(ChroniclePlayerInputOwnership), nameof(BlockPlayerTimeControlGameKey));
+        var keyGuard = AccessTools.Method(typeof(ChroniclePlayerInputOwnership), nameof(BlockPlayerTimeControlKey));
+        var inputGuard = AccessTools.Method(typeof(ChroniclePlayerInputOwnership), nameof(BlockPlayerTimeControlInput));
+
+        var gameKeyType = AccessTools.TypeByName("TaleWorlds.InputSystem.GameKey");
+        if (gameKeyType != null && gameKeyGuard != null)
+            foreach (var method in gameKeyType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                if (method.ReturnType == typeof(bool) && method.Name is "IsDown" or "IsDownImmediate" or "IsPressed" or "IsReleased")
+                    if (TryPatchTimeControlMethod(method, gameKeyGuard)) patched.Add("GameKey." + method.Name + "/" + method.GetParameters().Length);
+
+        var keyType = AccessTools.TypeByName("TaleWorlds.InputSystem.Key");
+        if (keyType != null && keyGuard != null)
+            foreach (var method in keyType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                if (method.ReturnType == typeof(bool) && method.GetParameters().Length == 0 && method.Name is "IsDown" or "IsDownImmediate" or "IsPressed" or "IsReleased")
+                    if (TryPatchTimeControlMethod(method, keyGuard)) patched.Add("Key." + method.Name);
+
+        var inputType = AccessTools.TypeByName("TaleWorlds.InputSystem.Input");
+        if (inputType != null && inputGuard != null)
+            foreach (var method in inputType.GetMethods(BindingFlags.Public | BindingFlags.Static))
+                if (method.ReturnType == typeof(bool) && method.GetParameters().Length == 1 && IsTimeControlInputMethodName(method.Name))
+                    if (TryPatchTimeControlMethod(method, inputGuard)) patched.Add("Input." + method.Name);
+
+        _pauseGuardInstalled = patched.Count > 0;
+        ChronicleDiagnostics.Write("agent-input-pause-guard|installed=" + _pauseGuardInstalled + "|methods=" + string.Join(",", patched));
+    }
+
+    // /// <summary>Game keys funnel down to the raw key queries, so the raw names matter as much as the game-key names.</summary>
+    private static bool IsTimeControlInputMethodName(string name) =>
+        name is "IsDown" or "IsDownImmediate" or "IsPressed" or "IsReleased" or
+                "IsKeyDown" or "IsKeyDownImmediate" or "IsKeyPressed" or "IsKeyReleased";
+
+    private static bool TryPatchTimeControlMethod(MethodInfo method, MethodInfo prefix)
+    {
+        try
+        {
+            PauseGuardHarmony.Patch(method, prefix: new HarmonyMethod(prefix));
+            return true;
+        }
+        catch (Exception exception)
+        {
+            ChronicleDiagnostics.Write("agent-input-pause-guard-patch-failed|method=" + method.Name + "|type=" + exception.GetType().Name);
+            return false;
+        }
+    }
+
+    // While the agent owns the clock the player cannot stop, fast-forward, or re-enable campaign time. GameKey identity
+    // comes from the Native key definition so rebinding the pause key does not silently reopen the pause.
+    private static bool BlockPlayerTimeControlGameKey(GameKey __instance, ref bool __result)
+    {
+        if (!_locked || _playerTakeover || __instance == null) return true;
+        if (!string.Equals(__instance.GroupId, "MapHotKeyCategory", StringComparison.Ordinal)) return true;
+        if (!IsBlockedPlayerTimeControlKey(__instance.StringId)) return true;
+        __result = false;
+        return false;
+    }
+
+    private static bool BlockPlayerTimeControlKey(Key __instance, ref bool __result)
+    {
+        if (!_locked || _playerTakeover || __instance == null) return true;
+        if (!string.Equals(__instance.InputKey.ToString(), "Space", StringComparison.Ordinal)) return true;
+        __result = false;
+        return false;
+    }
+
+    private static bool BlockPlayerTimeControlInput(InputKey key, ref bool __result)
+    {
+        if (!_locked || _playerTakeover) return true;
+        if (key != InputKey.Space) return true;
+        __result = false;
+        return false;
+    }
+
+    private static bool IsBlockedPlayerTimeControlKey(string stringId)
+    {
+        if (string.IsNullOrWhiteSpace(stringId)) return false;
+        foreach (var blocked in BlockedPlayerTimeControlKeys)
+            if (string.Equals(stringId, blocked, StringComparison.Ordinal)) return true;
+        return false;
+    }
+
     private static void SetLocked(bool locked, bool notifyPlayer = true)
     {
         if (_locked == locked)
@@ -657,10 +772,32 @@ internal static class ChroniclePlayerInputOwnership
 
     private static void HandleToggle()
     {
-        if (ChronicleAgentRuntimeController.ShouldOwnPlayerInput)
+        if (ChronicleAgentRuntimeController.OwnsHost && ChronicleAgentRuntimeController.ShouldOwnPlayerInput)
         {
-            ChronicleDiagnostics.Write("agent-input-toggle|direction=agent-to-player");
-            ChronicleAgentRuntimeController.RequestStop();
+            if (!_playerTakeover)
+            {
+                if (HasToggleBindingConflict())
+                {
+                    ShowSafetyMessage("控制权切换键与其他游戏按键冲突，请先在按键设置中修改。");
+                    return;
+                }
+                _playerTakeover = true;
+                ChronicleDiagnostics.Write("agent-input-toggle|direction=agent-to-player|mode=handover");
+                ChronicleAgentControlChannel.SetHold(true, ChronicleAgentControlChannel.PlayerTakeoverReason);
+                ShowSafetyMessage("玩家已接管；AI会暂停在下一步动作前。再按一次交还控制，按F9结束Agent。");
+                return;
+            }
+
+            if (!IsCampaignMapAvailable())
+            {
+                ShowSafetyMessage("请先关闭当前弹窗或菜单，再把控制交还给AI。");
+                return;
+            }
+
+            _playerTakeover = false;
+            ChronicleDiagnostics.Write("agent-input-toggle|direction=player-to-agent|mode=resume");
+            ChronicleAgentControlChannel.ClearHold();
+            ShowSafetyMessage("AI已恢复控制；玩家输入已锁定，按F9结束Agent。");
             return;
         }
 
@@ -708,6 +845,24 @@ internal static class ChroniclePlayerInputOwnership
         HandleToggle();
     }
 
+    private static void PollStopKey()
+    {
+        if (IsHarnessAgentInputLockRequested()) return;
+        if (!Input.IsKeyDown(InputKey.F9))
+        {
+            _stopKeyWasDown = false;
+            return;
+        }
+        if (_stopKeyWasDown) return;
+        _stopKeyWasDown = true;
+        if (!ChronicleAgentRuntimeController.OwnsHost && !ChronicleAgentRuntimeController.ShouldOwnPlayerInput) return;
+        ChronicleDiagnostics.Write("agent-input-stop-key|key=F9");
+        _playerTakeover = false;
+        ChronicleAgentControlChannel.ClearHold();
+        ChronicleAgentRuntimeController.RequestStop();
+        ShowSafetyMessage("已请求安全停止AI；Host退出后玩家控制恢复。");
+    }
+
     private static void AdvanceOwnershipToggleHarnessProbe()
     {
         if (_ownershipToggleHarnessProbeStage == 0 && ChronicleAgentRuntimeController.IsHostRunning)
@@ -722,7 +877,7 @@ internal static class ChroniclePlayerInputOwnership
             return;
         }
 
-        if (_ownershipToggleHarnessProbeStage == 1 && !ChronicleAgentRuntimeController.ShouldOwnPlayerInput && !ChronicleAgentRuntimeController.OwnsHost)
+        if (_ownershipToggleHarnessProbeStage == 1 && _playerTakeover && ChronicleAgentRuntimeController.ShouldOwnPlayerInput)
         {
             Input.ClearKeys();
             PollToggleKey();
@@ -736,24 +891,10 @@ internal static class ChroniclePlayerInputOwnership
             return;
         }
 
-        if (_ownershipToggleHarnessProbeStage == 2 && ChronicleAgentRuntimeController.IsHostRunning)
+        if (_ownershipToggleHarnessProbeStage == 2 && !_playerTakeover && ChronicleAgentRuntimeController.ShouldOwnPlayerInput)
         {
-            Input.ClearKeys();
-            PollToggleKey();
-            if (!PressHarnessToggleKey("agent-to-player"))
-            {
-                ChronicleDiagnostics.Write("agent-input-toggle-harness-probe|passed=False|reason=native-key-unavailable");
-                _ownershipToggleHarnessProbeStage = 4;
-                return;
-            }
+            ChronicleDiagnostics.Write("agent-input-toggle-harness-probe|passed=True|cycle=agent-player-agent");
             _ownershipToggleHarnessProbeStage = 3;
-            return;
-        }
-
-        if (_ownershipToggleHarnessProbeStage == 3 && !ChronicleAgentRuntimeController.ShouldOwnPlayerInput && !ChronicleAgentRuntimeController.OwnsHost)
-        {
-            ChronicleDiagnostics.Write("agent-input-toggle-harness-probe|passed=True|cycle=agent-player-agent-player");
-            _ownershipToggleHarnessProbeStage = 4;
         }
     }
 
@@ -777,7 +918,11 @@ internal static class ChroniclePlayerInputOwnership
             Layer = ControlLayer;
         }
 
-        protected override void OnTick(float dt) => PollToggleKey();
+        protected override void OnTick(float dt)
+        {
+            PollToggleKey();
+            PollStopKey();
+        }
     }
 
     private sealed class ChronicleInputOwnershipScreenLayer : ScreenLayer

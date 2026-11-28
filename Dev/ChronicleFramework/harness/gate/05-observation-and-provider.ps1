@@ -520,8 +520,87 @@ if ($agentHostEstablishClanAutonomySource -notmatch 'MaxSafeSettlementRefreshAtt
     $agentHostEstablishClanAutonomySource -notmatch 'ShouldRetrySafeSettlementRefresh' -or
     $agentHostEstablishClanAutonomySource -notmatch 'no-integrated-route-safe-settlement-refresh-retry' -or
     $agentHostEstablishClanAutonomySource -notmatch 'establish-clan-autonomy-retries-other-safe-settlements-before-declaring-no-route') {
-    throw 'Contract 7.736 requires the EYC parent to retry bounded safe-settlement refreshes to other currently visible settlements before declaring that every integrated route is unavailable; one empty arrival is not proof.'
 }
+if ($agentHostCampaignLoopEvaluationSource -notmatch '\[switch\]\$FixtureOpponent' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch '@childFixtureSwitch' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'NoGameWorldStateInjected = \(-not \$FixtureOpponent\)' -or
+    $agentHostCampaignLoopEvaluationSource -notmatch 'InjectedWorldState') {
+}
+$agentHostLiveStatusPath = Join-Path $agentHostRoot 'AgentHostLiveStatus.cs'
+$agentStatusPanelPath = Join-Path $modRoot 'AgentStatusPanel.cs'
+$agentStatusPrefabPath = Join-Path (Join-Path (Join-Path (Join-Path $modRoot 'module') 'GUI') 'Prefabs') 'ChronicleAgentStatus.xml'
+if (-not (Test-Path -LiteralPath $agentHostLiveStatusPath -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $agentStatusPanelPath -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $agentStatusPrefabPath -PathType Leaf)) {
+    throw 'Contract 7.738 requires an in-game agent status panel: a Host live-status snapshot writer, the mod panel implementation, and its Gauntlet prefab.'
+}
+$agentHostLiveStatusSource = Get-Content -LiteralPath $agentHostLiveStatusPath -Raw -Encoding UTF8
+$agentStatusPanelSource = Get-Content -LiteralPath $agentStatusPanelPath -Raw -Encoding UTF8
+$agentStatusPrefabSource = Get-Content -LiteralPath $agentStatusPrefabPath -Raw -Encoding UTF8
+if ($agentHostLiveStatusSource -notmatch 'agent-live-status\.json' -or
+    $agentHostLiveStatusSource -notmatch 'MaximumDebugObservationBytes' -or
+    $agentHostLiveStatusSource -notmatch 'File\.Move\(temporary, target, overwrite: true\)' -or
+    $agentHostLiveStatusSource -notmatch 'live-status-snapshot-is-small-atomic-and-capped' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'AgentHostLiveStatus\.RecordDecision' -or
+    $agentHostHarnessProgressTraceSource -notmatch 'AgentHostLiveStatus\.RecordFailure') {
+    throw 'Contract 7.738 requires the Host to publish one small atomically replaced live-status snapshot per decision and provider failure, with bounded debug payloads and a self-test.'
+}
+if ($agentStatusPanelSource -notmatch 'GauntletLayer' -or
+    $agentStatusPanelSource -notmatch 'LoadMovie\("ChronicleAgentStatus"' -or
+    $agentStatusPanelSource -notmatch 'ScreenManager\.AddGlobalLayer\(_globalLayer, isFocusable: false\)' -or
+    $agentStatusPanelSource -notmatch 'InputKey\.F7' -or
+    $agentStatusPanelSource -notmatch 'InputKey\.F6' -or
+    $agentStatusPanelSource -notmatch 'BuildNormalBody' -or
+    $agentStatusPanelSource -notmatch 'BuildDetailedBody' -or
+    $agentStatusPrefabSource -notmatch 'Text="@Body"' -or
+    $agentStatusPrefabSource -notmatch 'IsVisible="@IsVisible"' -or
+    $subModuleSource -notmatch 'ChronicleAgentStatusPanel\.Tick' -or
+    $subModuleSource -notmatch 'ChronicleAgentStatusPanel\.Release') {
+}
+$agentHostControlHoldPath = Join-Path $agentHostRoot 'AgentHostControlHold.cs'
+$agentControlChannelPath = Join-Path $modRoot 'AgentControlChannel.cs'
+if (-not (Test-Path -LiteralPath $agentHostControlHoldPath -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $agentControlChannelPath -PathType Leaf)) {
+    throw 'Contract 7.739 requires one Host side and one mod side of the agent control channel, so a player takeover holds the agent instead of racing it.'
+}
+$agentHostControlHoldSource = Get-Content -LiteralPath $agentHostControlHoldPath -Raw -Encoding UTF8
+$agentControlChannelSource = Get-Content -LiteralPath $agentControlChannelPath -Raw -Encoding UTF8
+if ($agentHostControlHoldSource -notmatch 'agent-control\.json' -or
+    $agentHostControlHoldSource -notmatch 'WaitWhileHeldAsync' -or
+    $agentHostControlHoldSource -notmatch 'control-hold-fails-safe-and-leaves-observation-live' -or
+    $agentHostCampaignTransportSource -notmatch 'AgentHostControlHold\.WaitWhileHeldAsync\(_root, cancellationToken\)' -or
+    $agentHostLiveStatusSource -notmatch 'RecordHoldReleased' -or
+    $agentHostLiveStatusSource -notmatch 'live-status-hands-control-back-while-keeping-progress-visible') {
+    throw 'Contract 7.739 requires the Host to honour the player handover between Native actions, keep observation reads live, and explain the pause in the live status snapshot.'
+}
+if ($agentControlChannelSource -notmatch 'agent-control\.json' -or
+    $agentControlChannelSource -notmatch 'PlayerTakeoverReason' -or
+    $agentControlChannelSource -notmatch 'EscapeMenuReason' -or
+    $agentPlayerInputOwnershipSource -notmatch '_playerTakeover' -or
+    $agentPlayerInputOwnershipSource -notmatch 'SyncControlHold' -or
+    $agentPlayerInputOwnershipSource -notmatch 'BlockPlayerTimeControlKey' -or
+    $agentPlayerInputOwnershipSource -notmatch 'MapTimeTogglePause' -or
+    $agentPlayerInputOwnershipSource -notmatch 'PollStopKey' -or
+    $agentPlayerInputOwnershipSource -notmatch 'InputKey\.F9' -or
+    $agentPlayerInputOwnershipSource -notmatch 'mode=handover' -or
+    $agentPlayerInputOwnershipSource -notmatch 'mode=resume' -or
+    $agentStatusPanelSource -notmatch 'DescribeRunState' -or
+    $agentStatusPanelSource -notmatch 'CHRONICLE_HARNESS_STATUS_DETAIL' -or
+    $agentStatusPanelSource -notmatch 'CHRONICLE_HARNESS_STATUS_SNAPSHOT_PATH' -or
+        $agentStatusPanelSource -notmatch 'BuildDetailedTitle' -or
+        $agentStatusPanelSource -notmatch 'public string Title' -or
+        $agentStatusPrefabSource -notmatch 'BrushWidget' -or
+        $agentStatusPrefabSource -notmatch 'ChronicleAgentStatus\.Card' -or
+        $agentStatusPrefabSource -notmatch 'Text="@Title"' -or
+        -not (Test-Path -LiteralPath (Join-Path (Join-Path (Join-Path $modRoot 'module') 'GUI/Brushes') 'ChronicleAgentStatusBrushes.xml') -PathType Leaf) -or
+        (Get-Content -LiteralPath (Join-Path (Join-Path (Join-Path $modRoot 'module') 'GUI/Brushes') 'ChronicleAgentStatusBrushes.xml') -Raw -Encoding UTF8) -notmatch 'ChronicleAgentStatus\.Title' -or
+        $harnessScript -notmatch 'Copy-Item -LiteralPath \$packageEntry\.FullName -Destination \$runtimeModuleRoot -Recurse -Force' -or
+$agentStatusPanelSource -notmatch 'F9 ' ) {
+    throw 'Contract 7.739 requires F10 to hand control over and back, F9 to stop the agent, and the agent-owned clock to reject player pause keys while ESC stays available.'
+}
+
+
+
 
 
 

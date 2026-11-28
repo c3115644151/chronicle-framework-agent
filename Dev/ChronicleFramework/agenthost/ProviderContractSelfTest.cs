@@ -99,6 +99,8 @@ internal static class ProviderContractSelfTest
         results.AddRange(AgentHostSupplyLoop.RunContractSelfTests());
         results.AddRange(StoryModeEstablishClanLifecycleStatus.RunContractSelfTests());
         results.AddRange(AgentHostHarnessProgressTrace.RunContractSelfTests());
+    results.AddRange(AgentHostLiveStatus.RunContractSelfTests());
+        results.AddRange(AgentHostControlHold.RunContractSelfTests());
         results.AddRange(AgentHostRuntimeProgressLog.RunContractSelfTests());
         results.AddRange(AgentHostNativeInquiryResolution.RunContractSelfTests());
         var villageQuestPrompt = AgentHostDecisionCycle.VillageToolsQuestSystemPrompt;

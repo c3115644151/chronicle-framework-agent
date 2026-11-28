@@ -12,6 +12,7 @@ internal static class AgentHostHarnessProgressTrace
     internal static void RecordDecision(JsonElement request, ProviderDecisionResult result, double? configuredRunCostLimitCny = null)
     {
         AgentHostRuntimeProgressLog.RecordDecision(request, result, configuredRunCostLimitCny);
+        AgentHostLiveStatus.RecordDecision(request, result);
         var harnessMode = Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE");
         if (!string.Equals(harnessMode, "visual-capture", StringComparison.Ordinal) &&
             !string.Equals(harnessMode, "agent-host-lifecycle-test", StringComparison.Ordinal)) return;
@@ -281,6 +282,7 @@ internal static class AgentHostHarnessProgressTrace
         int? providerResponsePromptTokens = null, int? providerResponseCompletionTokens = null, string? systemPrompt = null,
         string? providerDecisionFieldShape = null, string? providerDshUpstreamCode = null)
     {
+        AgentHostLiveStatus.RecordFailure(request, failureCode);
         var requestDiagnostics = BuildProviderFailureRequestDiagnostics(request, systemPrompt);
         AgentHostRuntimeProgressLog.RecordProviderFailure(request, failureCode, providerHttpStatus, providerRoute,
             providerOutputFormat, providerRetryAttempts, providerRetryWaitMilliseconds, providerFailureStage,

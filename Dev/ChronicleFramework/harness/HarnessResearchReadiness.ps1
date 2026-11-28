@@ -1,6 +1,6 @@
 #Requires -Version 7.0
 $script:AuditedHarnessDiagnosticSource = 'SubModule.cs'
-$script:AuditedHarnessDiagnosticSha256 = 'ec7cb64514d74257d862582739de654dcc929cb38720411df1e9eb01cb88cdf7'
+$script:AuditedHarnessDiagnosticSha256 = 'f57ed13955aad709eddc2c70f515de102762b7e54f9b8f51a7b7ea2ec9d9446b'
 
 function Get-ChronicleCanonicalTextSha256 {
     [CmdletBinding()]
@@ -42,7 +42,7 @@ function Get-ChronicleResearchReadiness {
     }
     if ($changed.Count -eq 1 -and $changed[0] -eq $script:AuditedHarnessDiagnosticSource -and
         $AuditedHarnessDiagnosticSha256 -eq $script:AuditedHarnessDiagnosticSha256) {
-        return [pscustomobject]@{ Allowed = $true; ChangedSources = $changed; Reason = 'exact reviewed SubModule Harness-only controls; player input ownership is unchanged, initial music readiness is one-time, StoryMode continues observing when the Issue probe is skipped, seed SaveAs remains scoped to the owned StoryMode environment after the Host lifecycle mode transition, state-transition diagnostics handle unavailable pre-campaign globals, and disposable battle fixtures cap recruitment and disable AI only on the temporary PostBattle opponent' }
+        return [pscustomobject]@{ Allowed = $true; ChangedSources = $changed; Reason = 'exact reviewed SubModule Harness-only controls; player input ownership is unchanged, initial music readiness is one-time, StoryMode continues observing when the Issue probe is skipped, seed SaveAs remains scoped to the owned StoryMode environment after the Host lifecycle mode transition, state-transition diagnostics handle unavailable pre-campaign globals, and disposable battle fixtures cap recruitment and disable AI only on the temporary PostBattle opponent, and the in-game agent status panel only renders Host live-status snapshots without touching player input ownership' }
     }
     [pscustomobject]@{
         Allowed = $false

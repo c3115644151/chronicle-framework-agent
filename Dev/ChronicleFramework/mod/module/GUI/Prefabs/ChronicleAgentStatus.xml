@@ -1,0 +1,22 @@
+<Prefab>
+  <Constants>
+  </Constants>
+  <Window>
+    <Widget WidthSizePolicy="StretchToParent" HeightSizePolicy="StretchToParent">
+      <Children>
+        <BrushWidget WidthSizePolicy="Fixed" HeightSizePolicy="CoverChildren" SuggestedWidth="640"
+                     HorizontalAlignment="Right" VerticalAlignment="Top" MarginRight="26" MarginTop="150"
+                     Brush="ChronicleAgentStatus.Card" IsVisible="@IsVisible">
+          <Children>
+            <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren"
+                        MarginLeft="18" MarginRight="18" MarginTop="14"
+                        Brush="ChronicleAgentStatus.Title" Text="@Title" TextHorizontalAlignment="Left" />
+            <TextWidget WidthSizePolicy="StretchToParent" HeightSizePolicy="CoverChildren"
+                        MarginLeft="18" MarginRight="18" MarginTop="4" MarginBottom="14"
+                        Brush="ChronicleAgentStatus.Text" Text="@Body" TextHorizontalAlignment="Left" />
+          </Children>
+        </BrushWidget>
+      </Children>
+    </Widget>
+  </Window>
+</Prefab>

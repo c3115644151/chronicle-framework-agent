@@ -124,8 +124,8 @@ if ($moduleManifestSource -notmatch '<XmlName id="GameText" path="global_strings
     $moduleStringsSource -notmatch 'str_key_category_name\.ChronicleAgentControl' -or
     $moduleStringsSource -notmatch 'str_key_name\.ChronicleAgentControl_Up' -or
     $moduleStringsSource -notmatch 'str_key_description\.ChronicleAgentControl_Up' -or
-    $harnessScript -notmatch 'Join-Path \$modulePackageRoot ''ModuleData''' -or
-    $harnessScript -notmatch 'Copy-Item -LiteralPath \$moduleDataEntry\.FullName -Destination \$runtimeModuleData -Recurse -Force' -or
+    $harnessScript -notmatch 'Join-Path \$runtimeModuleRoot ''ModuleData\\global_strings\.xml''' -or
+    $harnessScript -notmatch 'Copy-Item -LiteralPath \$packageEntry\.FullName -Destination \$runtimeModuleRoot -Recurse -Force' -or
     $smokeModuleSource -notmatch 'ModuleData\\global_strings\.xml' -or
     $smokeModuleSource -notmatch 'str_key_description\.ChronicleAgentControl_Up' -or
     $smokeModuleSource -notmatch 'InputControlKeyDisplayTextLoaded' -or
