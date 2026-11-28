@@ -248,6 +248,18 @@ internal sealed partial class ChronicleAgentProtocol
         var menuContext = TaleWorlds.CampaignSystem.Campaign.Current.CurrentMenuContext;
         var expectedMenuId = ReadString(command, "menuId");
         var optionId = ReadString(command, "optionId");
+        if (menuContext?.GameMenu == null && !string.IsNullOrWhiteSpace(expectedMenuId))
+        {
+            // Arriving at a settlement leaves the party on the Map with no current menu until the player
+            // clicks it. When the Agent asks for a settlement menu it is standing in, activate that exact
+            // menu instead of failing: the request still has to match the Native menu id afterwards.
+            var standingSettlement = TaleWorlds.CampaignSystem.Hero.MainHero?.CurrentSettlement;
+            if (standingSettlement != null)
+            {
+                TaleWorlds.CampaignSystem.GameMenus.GameMenu.ActivateGameMenu(expectedMenuId);
+                menuContext = TaleWorlds.CampaignSystem.Campaign.Current.CurrentMenuContext;
+            }
+        }
         if (menuContext?.GameMenu == null || !string.Equals(menuContext.GameMenu.StringId, expectedMenuId, StringComparison.Ordinal))
             throw new InvalidOperationException("campaign menu changed before option selection");
         var menuOptions = menuContext.GameMenu.MenuOptions.ToList();

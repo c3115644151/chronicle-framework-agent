@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.765
+Contract version: 7.766
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -278,6 +278,23 @@ failure = No safe town-trade action is available: gameState=MapState; menuId=<no
 这是这条切片**第一次真正执行原生动作**（此前一直是 1 决策 / 0 动作）。当前停在“自由地图且没有任何报价（buyOfferCount=0）时，循环找不到下一步安全动作”。
 
 下一步：读 `town-trade-no-safe-native-action` 的判定，确认在“自由地图 + 无报价”时它期望哪个动作（大概率是 `mapSettlementTargets` 选城镇，或 `move` 到已知城镇），再决定是补动作目录还是补确定性 provider 的优先级。
+## Contract 7.766 — 站在城镇里却没有菜单：缺的是循环自己的目录项
+
+mod 侧补了一处**生产路径**能力：`HandleMenuSelect` 在“队伍正站在某定居点、当前没有菜单”时，先按请求的 `menuId` 调用 `GameMenu.ActivateGameMenu(menuId)` 再继续，并要求激活后的 `StringId` 必须与请求一致（否则照旧拒绝）。这对应玩家走到城镇点开菜单的动作，不再是 harness-only 专用。
+
+真机（`TestResults/20261128-185210`）：结果与上一轮相同——
+
+```
+resultKind = town-trade-buy, decisions = 4, actionsExecuted = 2
+failureCode = town-trade-no-safe-native-action
+failure = gameState=MapState; menuId=<none>; buyOfferCount=0
+```
+
+说明循环**根本没有发出 `menuSelect`**：`BuildActionCatalog` 在 MapState 下只按“已有菜单/已有报价/有安全城镇”构造目录，站在城镇里但菜单未打开时，它给出的候选集为空，于是走 `DescribeNoAction`。
+
+所以下一步不在 mod，而在 `AgentHostTownTradeLoop.BuildActionCatalog` 的 MapState 分支：当 `location.currentSettlementId` 属于本次移动目标（或已知城镇）且 `context.menuId` 为空时，提供一个 `menuSelect { menuId: town|village, optionId: trade }` 候选，让刚补的 mod 能力被真正调用。
+
+本轮没有买入收据；`menuSelect` 激活能力目前是“已实现、未被真机触发”，这点在文档里写清，没有当成已验证能力。
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：
