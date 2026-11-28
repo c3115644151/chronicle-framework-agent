@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.760
+Contract version: 7.761
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -205,6 +205,24 @@ failureCode = native-visible-hostile-bandit-interrupted-settlement-move
 2. 若地图处于遭遇/战斗可路由状态 → 交给既有 battle mission / BattleSimulation 子流程（与 EYC 父级同一入口，不新造动作）；
 3. 若遭遇已被清除（地图自由） → 清 `moveTargetId`、重挑安全城镇并重发 move，全程写 trace（例如 `town-trade-encounter-handoff-*`）；
 4. 有界：单个切片内只允许有限次交接（与 `MaxEncounterWaits` 相同量级），超出仍以原码终止，不静默循环。
+## Contract 7.761 — 请求不是 Harness 发的：Host 收到的是 mod 自己那套动作集
+
+7.760 的最后一步“请求里到底有什么”已用证据回答。Host 新增 trace `campaign-request-action-set`（记录收到的 `allowedActionNames` 原文与是否等于 `TownTradeActions`），真机 `TestResults/20261128-180709` 拿到：
+
+```
+allowedActionNames = barterAutoBalance, barterCancel, barterOffer, barterOptions, battleFinish, battleSkip,
+  dialogueContinue, dialogueSelect, heroEquipmentOptions, incidentSelect, inventoryCancel, inventoryDone,
+  inventoryOpen, inventoryTakeAll, mapPartyTargets, mapSettlementTargets, menuSelect, missionInteract,
+  missionLeave, missionNavigateToAgent, missionSceneAgents, move, partyLootTransferOne, partyScreenCancel,
+  partyScreenDone, …
+townTradeSetMatched = false
+```
+
+这份清单与 `mod/AgentHostRuntimeController.cs:448` 的请求串**逐项一致**（同样含 `missionSceneAgents`、`partyLootTransferOne`、`barterAutoBalance`）。结论：这次运行里的 Host 是**由 mod 运行时控制器启动并带上它自己的动作集**的，Harness 在 live 测试里算出来的 `$allowedActions`（`town-trade` 9 个动作）根本没有被使用。
+
+于是 7.758–7.760 的连续失效全部得到解释：改 profile、改请求集、在分派里加“请求等于 TownTradeActions 就走贸易循环”的覆盖，都不会触发——因为请求里从来就不是那套动作。
+
+下一增量的正确位置：让 mod 侧启动 Host 时使用 Harness 指定的动作集（例如由 Harness 通过环境变量/启动参数覆盖 `AgentHostRuntimeController` 的默认清单），或让 Harness 直接接管 Host 启动而绕过 mod。修改 harness 的 `$allowedActions` 属于无效动作，不再尝试。
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：

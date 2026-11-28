@@ -563,10 +563,21 @@ internal static class AgentHostCampaignLoop
         var requestedActions = request.TryGetProperty("allowedActionNames", out var actionNames) && actionNames.ValueKind == JsonValueKind.Array
             ? actionNames.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString()!).ToHashSet(StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);
+        // Record the request action set verbatim: the town-trade slice is chosen from it, and a
+        // stale or rewritten set is indistinguishable from a routing bug without this receipt.
+        var requestedActionNamesTrace = new JsonArray(requestedActions.OrderBy(name => name, StringComparer.Ordinal)
+            .Select(name => (JsonNode?)JsonValue.Create(name)).ToArray());
         var goalValid = !string.IsNullOrWhiteSpace(goal) && goal.Length <= 1000;
         var decisionLimitValid = maxDecisions is >= 1 and <= MaxCumulativeDecisions;
         var elapsedLimitValid = maxElapsedSeconds is >= 1 and <= 86400;
         var actionSetValid = IsSupportedRequestedActionSet(requestedActions);
+        ledger.Trace.Add(new JsonObject
+        {
+            ["stage"] = "campaign-request-action-set",
+            ["allowedActionNames"] = requestedActionNamesTrace.DeepClone(),
+            ["townTradeSetMatched"] = requestedActions.SetEquals(TownTradeActions)
+        });
+
         if (!goalValid || !decisionLimitValid || !elapsedLimitValid || !actionSetValid)
         {
             var missingApprovedActions = AllSupportedActions.Except(requestedActions).OrderBy(action => action, StringComparer.Ordinal);
@@ -815,6 +826,16 @@ internal static class AgentHostCampaignLoop
                             throw new AgentHostException("establish-clan-quest-details-client-unavailable", "The Native transport does not implement the read-only Quest Journal query required by the StoryMode planner.");
                         return await AgentHostEstablishYourClanGoalLoop.RunAsync(
                             request, client, plannerDetailsClient, provider, ledger, elapsed.Token);
+                    }
+                    // A request that carries exactly the bounded Town trade action set is a town-trade
+                    // slice by construction: the StoryMode opening Quest would otherwise classify the
+                    // same save as the autonomy route and run the EYC loop instead (contract 7.760).
+                    if (requestedActions.SetEquals(TownTradeActions) && client is IAgentHostTownTradeNativeClient requestedTownTradeClient)
+                    {
+                        ledger.Trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
+                            providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
+                        return await AgentHostTownTradeLoop.RunAsync(
+                            request, client, requestedTownTradeClient, provider, ledger, elapsed.Token);
                     }
                     if (!requestedActions.SetEquals(AllSupportedActions))
                         throw new AgentHostException("establish-clan-autonomy-action-set-unavailable", "The StoryMode autonomy loop requires the exact reviewed Native superset for its currently integrated Gold, PartySize, Renown and Companion subgoals.");
