@@ -168,7 +168,14 @@ internal sealed partial class ChronicleAgentProtocol
     {
         EnsureNoActiveMapIncident("settlement movement");
         if (ChronicleInquiryAdapter.IsInquiryOpen || MapScreen.Instance?.IsEscapeMenuOpened == true || PlayerEncounter.IsActive || MobileParty.MainParty.CurrentSettlement != null || MobileParty.MainParty.MapEvent != null)
-            throw new InvalidOperationException("settlement movement requires the unobstructed Campaign Map with no Native menu, Escape menu, Inquiry, or active Encounter");
+            throw new InvalidOperationException("settlement movement requires the unobstructed Campaign Map with no Native menu, Escape menu, Inquiry, or active Encounter"
+                + " | inquiryOpen=" + ChronicleInquiryAdapter.IsInquiryOpen
+                + " | escapeMenuOpen=" + (MapScreen.Instance?.IsEscapeMenuOpened == true)
+                + " | playerEncounterActive=" + PlayerEncounter.IsActive
+                + " | currentSettlement=" + (MobileParty.MainParty?.CurrentSettlement?.StringId ?? "<none>")
+                + " | atMenu=" + ((Game.Current?.GameStateManager?.ActiveState as MapState)?.AtMenu ?? false)
+                + " | cameraInput=" + (MapScreen.Instance?.MapCameraView?.ProcessCameraInput == true)
+                + " | menuId=" + (Campaign.Current?.CurrentMenuContext?.GameMenu?.StringId ?? "<none>"));
         var mapStateForSettlementMove = Game.Current?.GameStateManager?.ActiveState as MapState;
         if (mapStateForSettlementMove == null || mapStateForSettlementMove.AtMenu)
             throw new InvalidOperationException("settlement movement requires the unobstructed native Campaign Map");

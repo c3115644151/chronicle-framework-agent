@@ -2320,6 +2320,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.739 接管事实：玩家按 F10 接管身体时，mod 写 `agent-control.json`（`hold=true`，`reason=player-takeover`），Host 在写下一个原生动作命令前等待该文件释放，`reason=escape-menu` 用于 ESC 菜单打开期间；F10 再按一次交还，F9 结束 Agent。Agent 拥有输入时 `GameKey.IsDown/IsPressed` 在 `MapHotKeyCategory` 上被前缀拦截（`MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`），ESC 不在拦截范围。真机截图取证见 TestResults/20261128-081358 与 20261128-081633。
 
+契约 7.773 事实（决定性）：`training_field_leave` 一次即可清空 menuId 且 encounterActive=false；但 move 仍被拒，守卫自报 `inquiryOpen=True`（来自 ChronicleInquiryAdapter.IsInquiryOpen）而观察层 `context.inquiryOpen=false`——两个事实源矛盾，守卫用 adapter 侧。7.768–7.772 的时间冻结最终都归因于这只隐藏的 Native 询问。下一步让观察层与 adapter 同源并把它答掉。
+
 契约 7.772 事实（决定性，无模型探针 TestResults/_tmp/probe-move.log）：夹具加载后 `menu=training_field_menu, encounter=True, tc=Stop`，`HandleMove` 前置守卫（ChronicleAgentProtocol.Actions.Map.cs:172）直接拒绝 move（status=rejected），因此队伍不动、campaignDay 恒为 91077.375。7.768–7.771 的“时间冻结”由此解释；下一步夹具必须先把训练场遭遇走完（training_field_leave 直到 encounterActive=false 且 menuId 空）再进定居点菜单。
 
 契约 7.771 事实：对照实验排除了窗口失焦——保持游戏前台 95 秒后同一夹具仍 `town-trade-move-time-frozen`（campaignDay 恒 91077.375，TestResults/20261128-194846）。等待记录同时显示 `gameState=MapState, inquiryOpen=false, escapeMenuOpen=false, paused=false, timeControlMode=StoppablePlay, partyIsMoving=false`（30 次一致）。下一步要用 `harnessMapDiagnostics` 读引擎侧 PartyMoveMode/IsMoving/时间速度，与观察层对比。

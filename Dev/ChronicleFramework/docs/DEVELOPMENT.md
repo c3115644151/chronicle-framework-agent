@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.772
+Contract version: 7.773
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -2131,7 +2131,20 @@ TestResults的完整留存和历史清理策略见上文“Harness产物按可�
 
 不使用 Windows Computer Use 向游戏窗口发送鼠标或键盘输入：当前 `@oai/sky` 的窗口定向输入会自动激活目标窗口，不能保证不抢占用户前台或物理键鼠。游戏操作一律走 Mod 内版本化协议和 Harness 白名单动作；截图不是功能真值。若未来要恢复窗口输入，必须先证明后台窗口输入不会激活窗口、移动/占用用户鼠标或截获键盘，并以隔离测试验证，不能只因 API 接收了 window 参数就视为隔离。
 
-## 统一状态与动作
+## Contract 7.773 — 真正挡路的是一只看不见的 Native 询问
+
+训练场清理探针（`TestResults/_tmp/probe-training-clear.ps1`）证明 `training_field_leave` 一次就把 `menuId` 清空、`encounterActive=false`；但随后 `move` 仍被拒。于是给 `HandleMove` 的前置守卫加上逐条事实，真机回执（`TestResults/_tmp/probe-training-clear.log`）：
+
+```
+inquiryOpen=True | escapeMenuOpen=False | playerEncounterActive=False
+currentSettlement=<none> | atMenu=False | cameraInput=True | menuId=<none>
+```
+
+也就是说：观察层报告 `context.inquiryOpen=false`（7.772 的 PRE 行），而 mod 自己的 `ChronicleInquiryAdapter.IsInquiryOpen` 读作 **True**。同一状态两个事实源互相矛盾，而移动守卫用的是 adapter 那一侧。
+
+这正是为什么：清理菜单之后队伍仍不能移动、时间仍然冻住。7.768–7.772 的所有“时间冻结”现象，最终都归到这一个隐藏的 Native 询问。
+
+下一步：让观察层与 adapter 用同一事实源（把 `ChronicleInquiryAdapter.IsInquiryOpen` / 当前询问 token 暴露进 state），并在夹具准备里真正把它答掉；在此之前不再调整时钟或移动逻辑。## 统一状态与动作
 
 状态至少包含：
 
