@@ -447,6 +447,16 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
         $townTradeMenuId = [string]$baseline.state.context.menuId
         $townTradeOption = @($baseline.state.availableMenuOptions | Where-Object { $_.available -and $_.enabled -and ([string]$_.id -match 'trade') }).Count -gt 0
         $townTradeSettlementId = [string]$baseline.state.location.currentSettlementId
+        # A cloned StoryMode save can still sit on the tutorial training menu; the normal
+        # StoryMode opening clears it with the Native training_field_leave option.
+        if ($townTradeMenuId -ceq 'training_field_menu') {
+            $townTradeTrainingLeave = Invoke-AgentCli 'menuSelect' @('-MenuId', 'training_field_menu', '-OptionId', 'training_field_leave')
+            if ($townTradeTrainingLeave.status -ne 'completed') { throw ('TownTradeLoop could not leave the Native training field menu: ' + [string]$townTradeTrainingLeave.error) }
+            $baseline = Invoke-AgentCli 'state'
+            $townTradeMenuId = [string]$baseline.state.context.menuId
+            $townTradeOption = @($baseline.state.availableMenuOptions | Where-Object { $_.available -and $_.enabled -and ([string]$_.id -match 'trade') }).Count -gt 0
+            $townTradeSettlementId = [string]$baseline.state.location.currentSettlementId
+        }
         if (-not [string]::IsNullOrWhiteSpace($townTradeSettlementId)) {
             if (-not $townTradeOption) {
                 # Harness fixture preparation: open the settlement trade screen through the same

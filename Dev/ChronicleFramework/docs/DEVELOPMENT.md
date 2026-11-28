@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.756
+Contract version: 7.757
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -159,6 +159,20 @@ System.InvalidOperationException: menu option not found
 因此 TownTrade 夹具准备的正确顺序是：先按已文档化的教程退出路径把 `training_field_menu` 处理掉（原生 `training_field_leave`），再激活/进入定居点菜单，最后才谈 `trade`。
 
 本轮未产出买入收据；但把根因从“菜单/选项名”下移到“夹具起点是教程菜单”，这是一条可执行的具体修复路径。
+## Contract 7.757 — 夹具过了，卡在动作集与目标分类不匹配
+
+按 7.756 的结论给 TownTrade 夹具准备补上第一步：若读档后停在 `training_field_menu`，先发原生 `menuSelect training_field_menu training_field_leave`，重新取状态后再激活定居点菜单。
+
+真机（`TestResults/20261128-155612`）夹具阶段通过，Host 真的启动了（`decisionCount=1`），但立刻失败：
+
+```
+"failureCode":"establish-clan-autonomy-action-set-unavailable"
+"reason":"campaign-loop-failed"
+```
+
+原因是：这份存档的原版 `Establish Your Clan` 任务仍在，Host 的目标分类把它判为 autonomy/StoryMode 路线，而 `-TownTradeLoop` 请求携带的是城镇贸易那套动作集，两者不相等，于是 Host 在任何模型动作前就拒绝。**这不是夹具问题，是切片入口与目标分类的契约冲突**。
+
+下一步二选一（都需要真机验证）：TownTrade 从 StoryMode 存档启动时改请求 `AllSupportedActions`（与 gold-sale 一致的放宽），或让评测入口使用不带 EYC 任务的活动存档作为贸易夹具。在此之前不给“城镇贸易已可跑”的结论。
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：
