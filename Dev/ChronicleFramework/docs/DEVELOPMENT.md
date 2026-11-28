@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.770
+Contract version: 7.771
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -410,7 +410,23 @@ waits = 30, campaignDay = 91077.375（首尾相同）
 
 真机取证：`2026-11-28T05:09:46Z|pid=34808`：`agent-window-resize-hook-installed`、`agent-window-taskbar-tab|requested=True`、`agent-window-style|caption=True|thickFrame=True|appWindow=True|toolWindow=False|noActivate=False|captureMode=False`。点击置顶与拖边缩放的行为由用户手测确认，日志行会记录首次点击。
 
-## Contract 7.743 — 玩家窗口：任务栏、点击置顶、拖动与边缘缩放
+## Contract 7.771 — 焦点不是原因：地图干净、未暂停、模式 StoppablePlay，时间仍不动
+
+两个对照都做了：
+
+1. **保持游戏窗口前台**（`SetForegroundWindow` + `ShowWindow(SW_RESTORE)`，连续 95 秒，进程 `Bannerlord.BLSE.Standalone` pid 8080）后复跑同一夹具：`TestResults/20261128-194846` 仍是 `town-trade-move-time-frozen`，`campaignDay` 首尾都是 91077.375 → 焦点/最小化暂停**不是**原因；
+2. 给等待记录补上完整上下文：
+
+```
+timeControlMode = StoppablePlay, partyIsMoving = false, campaignDay = 91077.375
+gameState = MapState, inquiryOpen = false, escapeMenuOpen = false, paused = false
+```
+
+（`TestResults/20261128-195114` 一带的这组记录 30 次完全一致。）
+
+即：地图状态干净、没有模态、没有暂停标志、时间模式显示为可推进，但 Campaign 时间一格不走、队伍也不进入移动。这与“观察层没看到真实移动状态”一致——需要引擎视角的确切事实。
+
+下一步：在 `move` 之后立刻用 `harnessMapDiagnostics` 读引擎侧（`MobileParty.MainParty.PartyMoveMode`、`IsMoving`、`Position`、`MapState` 的暂停/时间速度）与观察层对比，再决定是 mod 的移动实现没真正下单，还是观察层把状态读错。## Contract 7.743 — 玩家窗口：任务栏、点击置顶、拖动与边缘缩放
 
 玩家反馈（本次实测）：游戏窗口不出现在任务栏、被其它窗口盖住后点击不置顶、无法拖动，并希望像普通窗口一样拉边缘改大小。根因是用于捕获的窗口样式被留在了玩家会话里：窗口是 `WS_POPUP`（无标题栏，拖不动）、没有 `WS_THICKFRAME`（不能拉边缩放）、没有 `WS_EX_APPWINDOW`（任务栏没有条目），加上 `WS_EX_NOACTIVATE`（点击不激活，所以也不置顶）。
 

@@ -224,7 +224,11 @@ internal static class AgentHostTownTradeLoop
                         ["attempt"] = passiveMoveWaits,
                         ["timeControlMode"] = ReadString(currentNative, "timeControlMode"),
                         ["partyIsMoving"] = ReadBoolean(state["party"] as JsonObject, "isMoving"),
-                        ["campaignDay"] = ReadDouble(currentNative, "campaignDay", double.NaN)
+                        ["campaignDay"] = ReadDouble(currentNative, "campaignDay", double.NaN),
+                        ["gameState"] = ReadString(state["context"] as JsonObject, "gameState"),
+                        ["inquiryOpen"] = ReadBoolean(state["context"] as JsonObject, "inquiryOpen"),
+                        ["escapeMenuOpen"] = ReadBoolean(state["context"] as JsonObject, "escapeMenuOpen"),
+                        ["paused"] = ReadBoolean(currentNative, "paused")
                     });
                     var waitDayNow = ReadDouble(currentNative, "campaignDay", double.NaN);
                     if (double.IsNaN(waitStartCampaignDay)) waitStartCampaignDay = waitDayNow;
