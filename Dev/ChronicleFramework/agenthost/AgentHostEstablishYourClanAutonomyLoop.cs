@@ -915,7 +915,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                 var ended = ReadBoolean(mission, "missionEnded");
                 if (ReadString(context, "gameState") != "MissionState" || ended)
                     return JsonDocument.Parse(fresh.RootElement.GetRawText());
-                if (mode is "Deployment" or "Battle" or "Conversation" || HasHandledMissionConversation(state))
+                if (mode is "Deployment" or "Battle" or "Conversation" || (mode != "StartUp" && HasHandledMissionConversation(state)))
                     return JsonDocument.Parse(fresh.RootElement.GetRawText());
                 lastMission = mission?.DeepClone() as JsonObject;
                 lastContext = context?.DeepClone() as JsonObject;
@@ -1676,7 +1676,7 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     // Native can move straight from a Map encounter into a MissionState scene: a battle mission
                     // (Deployment/Battle) or an encounter conversation. Both hide the Map encounter, so the Map
                     // classifier cannot route them; handle the mission itself with the bounded Native actions.
-                    if (IsNativeMissionScene(failedState.RootElement))
+                    if (IsNativeMissionScene(failedState.RootElement) && !IsStartUpLocationMission(failedState.RootElement))
                     {
                         using var missionEntry = await WaitForHandledMissionModeAsync(elapsed.Token);
                         if (missionEntry is null)
@@ -2635,10 +2635,14 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         if (state is null || ReadString(state["context"] as JsonObject, "gameState") != "MissionState") return false;
         var mission = state["mission"] as JsonObject;
         if (mission is null || !ReadBoolean(mission, "active") || ReadBoolean(mission, "missionEnded")) return false;
-        if (string.Equals(ReadString(mission, "mode"), "Conversation", StringComparison.Ordinal)) return true;
-        // Native publishes the same ConversationManager surface from non-Conversation Mission
-        // modes (a hideout Stealth approach opens with a spoken line and Native options).
-        // The published surface, not the mode string, decides whether the Host can act in bounds.
+        var missionMode = ReadString(mission, "mode");
+        if (string.Equals(missionMode, "Conversation", StringComparison.Ordinal)) return true;
+        // Town/Tavern location Missions run in StartUp and keep the Native Leave path; widening
+        // them here would strand the companion provider-recovery contract that expects a Leave.
+        if (string.Equals(missionMode, "StartUp", StringComparison.Ordinal)) return false;
+        // Native publishes the same ConversationManager surface from other Mission modes (a hideout
+        // Stealth approach opens with a spoken line and Native options). The published surface, not
+        // the mode string, decides whether the Host can act in bounds.
         return HasHandledMissionConversation(state);
     }
     internal static bool HasHandledMissionConversation(JsonObject? state)
@@ -2659,6 +2663,16 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         var mission = state["mission"] as JsonObject;
         if (mission is null) return false;
         return !ReadBoolean(mission, "missionEnded");
+    }
+    internal static bool IsStartUpLocationMission(JsonElement native)
+    {
+        if (native.ValueKind != JsonValueKind.Object || !native.TryGetProperty("state", out var stateElement) || stateElement.ValueKind != JsonValueKind.Object)
+            return false;
+        var state = JsonNode.Parse(stateElement.GetRawText())?.AsObject();
+        var mission = state?["mission"] as JsonObject;
+        // Town/Tavern location Missions enter StartUp and belong to the location paths (leave,
+        // dialogue, trade); the encounter entry gate must not wait on them for a battle mode.
+        return mission is not null && string.Equals(ReadString(mission, "mode"), "StartUp", StringComparison.Ordinal);
     }
     internal static bool IsFreeMapForObjectiveReplan(JsonElement native)
     {

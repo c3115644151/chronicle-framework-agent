@@ -971,7 +971,7 @@ internal static class AgentHostCampaignLoop
                 {
                     ledger.Trace.Add(BuildDecisionOnlyStep(iteration, observation, previousReceipt, actionCatalog, controls, decision,
                         providerStartedUtc, providerDoneUtc, providerStartedTicks, null));
-                    if (!requestedActions.SetEquals(TownTradeActions))
+                    if (!requestedActions.SetEquals(TownTradeActions) && !requestedActions.SetEquals(AllSupportedActions))
                         throw new AgentHostException("town-trade-action-set-unavailable", "The Campaign request must include exactly the bounded Town trade action set.");
                     if (client is not IAgentHostTownTradeNativeClient townTradeClient)
                         throw new AgentHostException("town-trade-native-client-unavailable", "The Native transport does not implement the original bounded Town trade protocol.");

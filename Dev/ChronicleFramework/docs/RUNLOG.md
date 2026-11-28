@@ -1,5 +1,13 @@
 # Chroni
 
+## 2026-11-28 StartUp 地点任务与自测恢复（契约 7.751）
+
+- 发现：`--provider-self-test` 在 b96b29d 已失败（`companion-provider-failure-recovery-selftest-failed`），非本轮引入（`git stash` 对照证明）。
+- 根因：遭遇入口分支排在 provider 失败恢复之前，Tavern `mode=StartUp` 落进“等 60s → mode-unavailable”。
+- 改动：`IsStartUpLocationMission` 把地点任务从遭遇门排除；会话表面放行显式排除 StartUp；town-trade 分派接受 `AllSupportedActions`。
+- 验证：`--provider-self-test` → EXIT=0。同轮 EYC 控制跑 `TestResults/20261128-152133` 在 11 决策被可见敌对匪徒打断（`native-visible-hostile-bandit-interrupted-settlement-move`），未触发会话分支，会话回归仍属未覆盖。
+- 未完成：town-trade 缺 evaluation wrapper（无 `-TownTradeLoop` 开关），live 直跑又被“地图夹具不得停在定居点”拒绝。
+
 ## 2026-11-28 会话按台词选离开项（契约 7.750）
 
 - 事实：前几轮 provider 一直选列表第一项（adg:124/128/131），全是“走进藏身处 Stealth”的分支；`adg:132`（我得先处理另一件事）才是离开。

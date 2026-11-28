@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.750
+Contract version: 7.751
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -76,6 +76,21 @@ objective-mission-conversation-resolved|decisionsUsed=6|nativeActionsUsed=6|retu
 即同一开局夹具下，队伍第一次真正**从藏身处遭遇里退回地图**，随后继续跑满 160 决策 / 177 原生动作，直到 `gold-sale-budget-exhausted`（预算边界，不是场景边界）；金币 1000 → 1011。四目标仍未达成（1011/2000 金、1/25 兵、20/50 声望、0/1 同伴）。
 
 注意：这条规则是**决策层策略**，不是游戏事实。它让 Agent 在“被拉进藏身处”的对话里选择离开，从而不必依赖 7.749 记录的不可行动会话表面；真实模型接入后仍应把同一政策作为可覆盖的默认，而不是硬编码唯一答案。
+## Contract 7.751 — StartUp 地点任务不归遭遇门管，Host 自测恢复
+
+7.749/7.750 之后第一次跑 Host 自测（`ChronicleAgentHost.dll --provider-self-test`）暴露出一个**既有失败**：`establish-clan-autonomy-companion-provider-failure-recovery-selftest-failed`（provider 在 Tavern Mission 里失败后没有走原生 Leave）。用 `git stash` 对照 b96b29d 已证明它与本轮改动无关。
+
+根因：`AgentHostEstablishYourClanAutonomyLoop` 的遭遇入口分支（`IsNativeMissionScene` → `WaitForHandledMissionModeAsync`）排在 provider 失败恢复分支之前，而 Tavern 地点任务是 `mode=StartUp`：既不匹配 `Deployment|Battle|Conversation`，也没有会话表面，于是先等满 60 秒判 `native-mission-entry-mode-unavailable`，永远到不了"provider 失败→原生 Leave"的合同。
+
+改动（`agenthost/AgentHostEstablishYourClanAutonomyLoop.cs`）：
+
+- 新增 `IsStartUpLocationMission`，遭遇入口分支改为 `IsNativeMissionScene && !IsStartUpLocationMission`——Town/Tavern 地点任务交回它自己的路径（Leave、对话、交易）；
+- `IsNativeConversationMissionScene` 与 `WaitForHandledMissionModeAsync` 的会话表面放行显式排除 `StartUp`，避免 7.748 的表面扩展把地点任务吸进会话分支；
+- `agenthost/AgentHostCampaignLoop.cs` 的 town-trade 分派与 gold-sale 一致，接受 `AllSupportedActions`（`requestedActions.SetEquals(TownTradeActions) || SetEquals(AllSupportedActions)`），为 EYC 复用买入腿铺路。
+
+验证：`dotnet agenthost/bin/Release/net8.0/ChronicleAgentHost.dll --provider-self-test` → `EXIT=0`（此前同一命令打印 failed JSON）。同一轮的 EYC 控制跑（`TestResults/20261128-152133`）在 11 决策时以 `native-visible-hostile-bandit-interrupted-settlement-move` 结束，本轮没有触发会话分支，不能作为会话路径的回归证据——这是一个未覆盖点，下次会话相关改动仍需专门的零模型用例。
+
+未完成：town-trade slice 仍没有 evaluation wrapper（`Test-AgentHostCampaignLoopEvaluation.ps1` 无 `-TownTradeLoop` 开关），直跑 live 测试又会因“地图夹具必须无当前定居点”而被拒；要拿到 #143 的可复现收据，下一步必须补一个准备自由地图夹具的城镇贸易评测入口。
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：

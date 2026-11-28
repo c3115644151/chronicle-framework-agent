@@ -938,3 +938,10 @@ if ($deterministicProviderSource -notmatch 'Choose-MissionConversationOption' -o
     $deterministicProviderSource -notmatch 'mission-conversation-prefers-last-listed') {
     throw 'Contract 7.750 requires the deterministic provider to pick a Native mission-conversation line by the published option text, prefer leaving, fall back to the last listed option, and keep both self-tests.'
 }
+
+if ($agentHostAutonomyLoopSource -notmatch 'IsStartUpLocationMission' -or
+    $agentHostAutonomyLoopSource -notmatch 'IsNativeMissionScene\(failedState.RootElement\) && !IsStartUpLocationMission' -or
+    $agentHostAutonomyLoopSource -notmatch 'Town/Tavern location Missions' -or
+    $agentHostAutonomyLoopSource -notmatch 'mode != "StartUp" && HasHandledMissionConversation') {
+    throw 'Contract 7.751 requires the encounter entry gate to leave StartUp location Missions to their own paths, so a provider failure inside a Tavern keeps the Native Leave contract.'
+}
