@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.753
+Contract version: 7.754
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -121,6 +121,21 @@ System.InvalidOperationException: menu option not found
 结论：**整局读档后 `menuId` 为空**，此时原生没有“当前菜单”，`menuSelect village trade` 自然找不到选项（EYC 运行里同一调用能成功，是因为那时 village 菜单已经是当前菜单）。所以夹具准备还缺第一步——从地图进入定居点菜单，然后才谈 trade 选项。
 
 这一轮没有产出买入收据，但把缺口从“不知道差什么”缩小成“差一次进入定居点菜单的原生动作”；`menuSelect` 的 CLI 通道与前置校验已成为可复用件，`-TownTradeFromStoryMode` 仍会在准备失败时确定性拒绝而不是带着错误状态启动 Host。
+## Contract 7.754 — 重进城兜底也不够：定居点菜单不会被 move 重新打开
+
+7.753 之后在 TownTrade 夹具准备里加了兜底：`menuSelect` 失败时先 `mapSettlementTargets` + `move` 到当前定居点，期望原生重新弹出定居点菜单，再选 trade。
+
+真机（`TestResults/20261128-154050-deterministic-towntrade-eval-ChronicleEycDev-opening-20261126`）：仍然失败——
+
+```
+TownTradeLoop could not open the Native settlement trade menu:
+System.InvalidOperationException: menu option not found
+   at ChronicleFramework.ChronicleAgentProtocol.HandleMenuSelect
+```
+
+也就是说：读档后即使把队伍 `move` 到它已经所在的定居点，原生也不会把 `CurrentMenuContext` 设回定居点菜单。要拿到买入收据，需要一条真正“打开定居点菜单”的原生路径（例如 Native settlement menu 的入口 API，或先离开定居点再进入），而不是继续在 `menuSelect` 上找角度。
+
+当前状态：`-TownTradeFromStoryMode` 入口、`menuSelect` CLI 通道、`partyScreenMode` 校验都在，且失败会确定性拒绝；**没有**买入收据。这两轮把问题从“不知道夹具差什么”收敛成“差一条打开定居点菜单的原生入口”。
 ## Contract 7.746 — Mission 会话表面：暴露原生选项并提供选择/继续动作
 
 契约 7.745 记录的任务场景缺口在本契约补上 mod 侧表面。真机取到的类型事实（诊断行 `mission-conversation-surface`，`pid=9916`）：

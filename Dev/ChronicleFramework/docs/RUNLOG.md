@@ -1,5 +1,11 @@
 # Chroni
 
+## 2026-11-28 城镇贸易夹具：重进城兜底无效（契约 7.754）
+
+- 兜底：`menuSelect` 失败 → `mapSettlementTargets` + `move` 到当前定居点 → 再 `menuSelect`。
+- 真机 `TestResults/20261128-154050`：仍是 `menu option not found`（`HandleMenuSelect`）；原生不会因 `move` 重新设置 `CurrentMenuContext`。
+- 结论：需要一条真正打开定居点菜单的原生入口；入口/校验件已就位，买入收据仍缺。
+
 ## 2026-11-28 城镇贸易夹具：缺“进入定居点菜单”一步（契约 7.753）
 
 - 新增 CLI `menuSelect`（`-MenuId`/`-OptionId`）+ live 测试夹具准备（打开 trade 屏并回读 `partyScreenMode`）。

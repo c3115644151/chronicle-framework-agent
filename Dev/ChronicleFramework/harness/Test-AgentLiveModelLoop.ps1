@@ -453,7 +453,17 @@ $env:CHRONICLE_HARNESS_MODE = if ($BattleSimulationLoop -or $BattleAndCaptivityL
                 # Native menu action the Agent uses, so the bounded loop starts in a trade screen
                 # instead of guessing. The receipt is recorded in the live result.
                 $townTradeMenuToOpen = if ($townTradeMenuId) { $townTradeMenuId } else { 'village' }
-                $townTradeOpen = Invoke-AgentCli 'menuSelect' @('-MenuId', $townTradeMenuToOpen, '-OptionId', 'trade')
+                $townTradeOpen = $null
+                try { $townTradeOpen = Invoke-AgentCli 'menuSelect' @('-MenuId', $townTradeMenuToOpen, '-OptionId', 'trade') }
+                catch {
+                    # A loaded save can sit inside a settlement with no current menu. Re-issuing the
+                    # approved Native move to the same settlement makes Native show its menu again.
+                    $null = Invoke-AgentCli 'mapSettlementTargets'
+                    $townTradeMove = Invoke-AgentCli 'move' @('-SettlementId', $townTradeSettlementId)
+                    if ($townTradeMove.status -ne 'completed') { throw ('TownTradeLoop could not re-open the settlement: ' + [string]$townTradeMove.error) }
+                    Start-Sleep -Seconds 3
+                    $townTradeOpen = Invoke-AgentCli 'menuSelect' @('-MenuId', $townTradeMenuToOpen, '-OptionId', 'trade')
+                }
                 if ($townTradeOpen.status -ne 'completed') { throw ('TownTradeLoop could not open the Native settlement trade menu: ' + [string]$townTradeOpen.error) }
                 $townTradeOpenedState = Invoke-AgentCli 'state'
                 $townTradeScreenMode = [string]$townTradeOpenedState.partyScreenMode
