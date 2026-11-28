@@ -2320,6 +2320,8 @@ TestResults/20261026-191500改用FreeLLMAPI keyless kilo-auto做单次Provider S
 
 契约 7.739 接管事实：玩家按 F10 接管身体时，mod 写 `agent-control.json`（`hold=true`，`reason=player-takeover`），Host 在写下一个原生动作命令前等待该文件释放，`reason=escape-menu` 用于 ESC 菜单打开期间；F10 再按一次交还，F9 结束 Agent。Agent 拥有输入时 `GameKey.IsDown/IsPressed` 在 `MapHotKeyCategory` 上被前缀拦截（`MapTimeStop`/`MapTimeTogglePause`/`MapTimeFastForward`/`MapTimeNormal`），ESC 不在拦截范围。真机截图取证见 TestResults/20261128-081358 与 20261128-081633。
 
+契约 7.775 事实（基线）：自由地图静置 60 秒 campaignDay 恒 91077.375（tc=Stop）；回答询问并发 move（completed, target=town_ES3）后再静置 60 秒仍是 91077.375、moving=False、tc=StoppablePlay（TestResults/_tmp/probe-clock-baseline.log、probe-move-rate.log）。焦点/时钟锁/模式/遭遇/询问/菜单均已排除，下一步在 mod 内加 tick 计数与 CampaignDt 暴露，判定引擎是否在 tick。
+
 契约 7.774 事实（进展）：`inquiryOpen` 改为直接取 `ChronicleInquiryAdapter.IsInquiryOpen`（并发布 `inquiryActiveGameState`）；隐藏询问是 StoryMode 通知（kind=YesNoInquiry, storyModeStartupKind=tutorial-skip-notification）。用 `respondInquiry -InquiryToken ... -InquiryChoice affirmative` 答掉后，`move` 首次被原生接受（completed, target=town_ES3），但 `moving=False`、`campaignDay` 仍 91077.375、`timeControlModeLocked=False`；保持窗口前台同样如此（TestResults/_tmp/probe-focus.log）→ 焦点不是原因。下一步量基线：自由地图静置 60 秒 campaignDay 走多少。
 
 契约 7.773 事实（决定性）：`training_field_leave` 一次即可清空 menuId 且 encounterActive=false；但 move 仍被拒，守卫自报 `inquiryOpen=True`（来自 ChronicleInquiryAdapter.IsInquiryOpen）而观察层 `context.inquiryOpen=false`——两个事实源矛盾，守卫用 adapter 侧。7.768–7.772 的时间冻结最终都归因于这只隐藏的 Native 询问。下一步让观察层与 adapter 同源并把它答掉。

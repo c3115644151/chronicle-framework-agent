@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.774
+Contract version: 7.775
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -2281,7 +2281,23 @@ AFTER: lock=False moving=False day=91077.375 tc=StoppablePlay target=town_ES3
 
 “启动”“主菜单”“加载 DLL”“进入战役”“事件触发”“存档恢复”是不同命题。没有对应层证据只能标记为未验证。
 
-## 原版增强测试
+## Contract 7.775 — 基线三条：无论 `Stop` 还是 `StoppablePlay`，Campaign 日都不动
+
+写了两个不经过模型的探针量基线（都在 `TestResults/_tmp/`）：
+
+1. `probe-clock-baseline.ps1`：清掉训练场与通知询问后**不移动**，静置 60 秒——
+```
+T0/T30/T60: day=91077.375, tc=Stop   （完全不动）
+```
+2. `probe-move-rate.ps1`：回答询问后发 `move`（`completed`），再静置 60 秒——
+```
+MOVE completed -> town_ES3
+A0/A30/A60: day=91077.375, moving=False, tc=StoppablePlay   （仍然完全不动）
+```
+
+结合 7.774 的“保持窗口前台”对照：**焦点、时钟锁、模式、遭遇、询问、菜单都已排除**。剩下唯一没被证实的是“引擎到底有没有在 tick”。对照 EYC 的历史数据（5 分钟内 `campaignDay` 从 91077.375 走到 91077.489），那边确实有推进，说明不是引擎根本不跑，而是当前这条运行路径下 `Campaign.Tick` 没被驱动。
+
+下一步（一次实验即可定性）：在 mod 侧加一个每帧计数（例如在 `ChronicleCampaignBehavior` 的 tick 回调里累加并暴露到 state），同时记录 `Campaign.Current.CampaignDt` 与 `TimeControlMode`。若 60 秒后计数不增长，就是“引擎没 tick”（要找 Harness 的帧率/暂停源）；若计数增长而 `campaignDay` 不动，则问题在时间推进本身。## 原版增强测试
 
 ```text
 同一 disposable save + 基线模块集
