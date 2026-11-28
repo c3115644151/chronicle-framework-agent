@@ -1,5 +1,13 @@
 # Chroni
 
+## 2026-11-28 玩家窗口与从零 EYC 继续（契约 7.743）
+
+- 玩家反馈：窗口不在任务栏、点击不置顶、拖不动，希望可拉边缩放。
+- 定位：捕获用样式残留——`WS_POPUP`（无标题栏）、无 `WS_THICKFRAME`、无 `WS_EX_APPWINDOW`、带 `WS_EX_NOACTIVATE`。
+- 改动：新增 `mod/AgentGameWindow.cs` 在加载后用后台线程规范化窗口样式（补标题栏/缩放框/APPWINDOW，玩家会话去掉 NOACTIVATE，捕获会话保留不抢光标），并写 `agent-window-style` 诊断行。
+- 真机：`2026-11-28T04:39:00Z|pid=41776|agent-window-style|caption=True|thickFrame=True|appWindow=True|toolWindow=False|noActivate=True|captureMode=True`。玩家模式分支（noActivate=False）由代码与门禁覆盖，未单独跑真机。
+- 从零 EYC：`IsNativeBattleMissionScene` + `WaitForBattleMissionEntryAsync` 让“遭遇直接进战斗任务”不再判死整轮；`objective-subflow-failed-parent-gate` 记录父级拒绝继续的完整依据。四目标仍未达成（1000/2000 金、1/25 兵、20/50 声望、0/1 同伴），边界保留。
+
 ## 2026-11-28 窗口交还（契约 7.742）
 
 - 玩家实测：窗口钉在左上角 840x472、拉不动、点击不置顶，只能 ESC 抢回鼠标。

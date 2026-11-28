@@ -60,6 +60,23 @@ namespace ChronicleFramework
             return HasNoActivateExtendedStyle(actualStyle);
         }
 
+        public static bool EnsurePlayerWindowStyles(IntPtr hWnd)
+        {
+            if (hWnd == IntPtr.Zero) return false;
+            const int GWL_STYLE = -16;
+            const int GWL_EXSTYLE = -20;
+            const long WS_CAPTION = 0x00C00000L, WS_THICKFRAME = 0x00040000L, WS_SYSMENU = 0x00080000L;
+            const long WS_MINIMIZEBOX = 0x00020000L, WS_MAXIMIZEBOX = 0x00010000L, WS_POPUP = 0x80000000L;
+            const long WS_EX_APPWINDOW = 0x00040000L, WS_EX_TOOLWINDOW = 0x00000080L;
+            var style = GetWindowLongPtr(hWnd, GWL_STYLE).ToInt64();
+            var exStyle = GetWindowLongPtr(hWnd, GWL_EXSTYLE).ToInt64();
+            var requestedStyle = (style & ~WS_POPUP) | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+            var requestedExStyle = (exStyle | WS_EX_APPWINDOW) & ~WS_EX_TOOLWINDOW;
+            if (requestedStyle != style) SetWindowLongPtr(hWnd, GWL_STYLE, new IntPtr(requestedStyle));
+            if (requestedExStyle != exStyle) SetWindowLongPtr(hWnd, GWL_EXSTYLE, new IntPtr(requestedExStyle));
+            var finalStyle = GetWindowLongPtr(hWnd, GWL_STYLE).ToInt64();
+            return (finalStyle & WS_CAPTION) != 0 && (finalStyle & WS_THICKFRAME) != 0;
+        }
         public static bool RemoveNoActivate(IntPtr hWnd)
         {
             if (hWnd == IntPtr.Zero) return false;

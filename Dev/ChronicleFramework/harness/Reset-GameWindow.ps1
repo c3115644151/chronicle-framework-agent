@@ -48,6 +48,7 @@ foreach ($target in $targets) {
     $handle = [ChronicleFramework.WindowApi]::FindProcessWindow($target.Id)
     if ($handle -eq [IntPtr]::Zero) { continue }
     $cleared = [ChronicleFramework.WindowApi]::RemoveNoActivate($handle)
+    $styled = [ChronicleFramework.WindowApi]::EnsurePlayerWindowStyles($handle)
     # SWP_FRAMECHANGED|SWP_NOZORDER applies the style change without touching the player's layout.
     [ChronicleFramework.WindowApi]::SetWindowPos($handle, [IntPtr]::Zero, 0, 0, 0, 0, 0x0024) | Out-Null
     [ChronicleFramework.WindowApi]::ShowWindowAsync($handle, 9) | Out-Null
@@ -57,6 +58,7 @@ foreach ($target in $targets) {
         ProcessId = $target.Id
         NoActivateCleared = $cleared
         NoActivateStillPresent = [ChronicleFramework.WindowApi]::HasNoActivateExtendedStyle($style)
+        PlayerStylesApplied = $styled
     }
 }
 [ordered]@{

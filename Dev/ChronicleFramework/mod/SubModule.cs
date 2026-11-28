@@ -39,6 +39,7 @@ public sealed class SubModule : MBSubModuleBase
     {
         base.OnSubModuleLoad();
         ChronicleDiagnostics.Write("submodule-load");
+        AgentGameWindow.EnsurePlayerUsableWindow();
         if (Environment.GetEnvironmentVariable("CHRONICLE_HARNESS_MODE") == "smoke") ChronicleDiagnostics.Write("harness-smoke-mode-active");
         InstallCrashExceptionCaptureIfRequested();
         TryInstallHarnessFocusLossEscapeMenuGuard();

@@ -1,6 +1,23 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.742
+Contract version: 7.743
+
+## Contract 7.743 — 玩家窗口：任务栏、点击置顶、拖动与边缘缩放
+
+玩家反馈（本次实测）：游戏窗口不出现在任务栏、被其它窗口盖住后点击不置顶、无法拖动，并希望像普通窗口一样拉边缘改大小。根因是用于捕获的窗口样式被留在了玩家会话里：窗口是 `WS_POPUP`（无标题栏，拖不动）、没有 `WS_THICKFRAME`（不能拉边缩放）、没有 `WS_EX_APPWINDOW`（任务栏没有条目），加上 `WS_EX_NOACTIVATE`（点击不激活，所以也不置顶）。
+
+新增 `mod/AgentGameWindow.cs`：`OnSubModuleLoad` 触发一个后台线程（最多 120×500ms）找到本进程最大的可见带标题窗口，然后
+
+- 样式：去掉 `WS_POPUP`，补 `WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX`；
+- 扩展样式：加 `WS_EX_APPWINDOW`、去 `WS_EX_TOOLWINDOW`（任务栏出现，点击可置顶）；
+- 仅在 `CHRONICLE_HARNESS_MODE` 为空时去掉 `WS_EX_NOACTIVATE`（玩家自己玩时抢光标是正常的；捕获运行仍不抢光标）；
+- 用 `SWP_FRAMECHANGED|SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE` 应用，不移动也不改尺寸；
+- 写 `agent-window-style|caption=…|thickFrame=…|appWindow=…|toolWindow=…|noActivate=…|captureMode=…` 到诊断日志。
+
+真机取证：`TestResults/20261128-123900` 系列运行中使用 `TestResults/_tmp/probe-window-mode.ps1` 与诊断日志核到
+`agent-window-style|caption=True|thickFrame=True|appWindow=True|toolWindow=False|noActivate=True|captureMode=True`（捕获模式仍不抢光标）。玩家会话（`CHRONICLE_HARNESS_MODE` 为空）走 `noActivate=False` 分支；该分支由代码与门禁断言覆盖，未单独跑一次玩家模式真机。
+
+同期把从零 EYC 的三处缺口修进机制层：`IsNativeBattleMissionScene`（遭遇已把 Native 带进战斗任务时交给 `AgentHostBattleMissionLoop`，不再判死整轮）、`WaitForBattleMissionEntryAsync`（MissionState 到 Deployment/Battle 之间的入口形状有界等待 60s）、`objective-subflow-failed-parent-gate`（父级拒绝继续时把 child 状态、termination、freeMap、activeQuest 记进 trace，避免只看失败码猜原因）。
 
 ## Contract 7.742 — 把游戏窗口交还给玩家（不再强制几何，仍不抢光标）
 

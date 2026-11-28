@@ -769,6 +769,28 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         using var elapsed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         elapsed.CancelAfter(TimeSpan.FromSeconds(maxElapsedSeconds));
 
+        async Task<JsonDocument?> WaitForBattleMissionEntryAsync(CancellationToken token)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(60);
+            while (DateTime.UtcNow < deadline)
+            {
+                token.ThrowIfCancellationRequested();
+                var fresh = await client.ReadStateAsync(token);
+                var state = fresh.RootElement.TryGetProperty("state", out var stateNode) && stateNode.ValueKind == JsonValueKind.Object
+                    ? JsonNode.Parse(stateNode.GetRawText())?.AsObject()
+                    : null;
+                var context = state?["context"] as JsonObject;
+                var mission = state?["mission"] as JsonObject;
+                var mode = ReadString(mission, "mode");
+                var ended = ReadBoolean(mission, "missionEnded");
+                if (ReadString(context, "gameState") != "MissionState" || ended)
+                    return JsonDocument.Parse(fresh.RootElement.GetRawText());
+                if (mode is "Deployment" or "Battle")
+                    return JsonDocument.Parse(fresh.RootElement.GetRawText());
+                await Task.Delay(1000, token);
+            }
+            return null;
+        }
         async Task EnsureObjectiveAttemptCheckpointAsync(JsonElement nativeState)
         {
             if (objectiveAttemptCheckpointRead || checkpointClient is null || !IsSafeObjectiveAttemptCheckpointState(nativeState))
@@ -1504,6 +1526,66 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                     // objective must not reinterpret that encounter as a Companion/Gold
                     // failure or discard it; resolve it through the existing Native
                     // BattleSimulation contract, then resume planning from fresh Journal state.
+                    // A bandit interruption can already have dropped Native into the battle MissionState; in that
+                    // case the encounter is no longer a Map encounter and the parent must finish the battle through
+                    // the existing BattleSimulation subflow instead of failing the whole objective.
+                    // Native can already sit inside a running battle Mission. The Map-only BattleSimulation
+                    // loop has no bounded action there; that state belongs to the Battle Mission controller,
+                    // which finishes the Native mission and returns to the Campaign Map.
+                    if (IsNativeBattleMissionScene(failedState.RootElement))
+                    {
+                        // Native reports MissionState before the mission publishes Deployment/Battle. Poll the
+                        // live state for a bounded window instead of failing on the transient entry shape.
+                        using var missionEntry = await WaitForBattleMissionEntryAsync(elapsed.Token);
+                        if (missionEntry is null)
+                            return BuildResult("failed", "native-battle-mission-entry-timeout", false,
+                                "Native stayed in MissionState without a Deployment/Battle mission mode; the parent did not guess an action.",
+                                "native-battle-mission-entry-timeout", journalObjectives, snapshot, differences);
+                        if (!IsNativeBattleMissionScene(missionEntry.RootElement))
+                        {
+                            ledger.Trace.Add(new JsonObject { ["stage"] = "objective-replanned-after-native-mission-returned-to-map", ["objectiveId"] = objectiveId });
+                            continue;
+                        }
+                        if (client is not IAgentHostBattleMissionNativeClient incidentMissionClient ||
+                            client is not IAgentHostBattleSimulationNativeClient missionMapClient)
+                            return BuildResult("failed", "native-battle-mission-controller-unavailable", false,
+                                "Native is inside a battle Mission but this Host transport cannot drive it; no action was invented.",
+                                "native-battle-mission-controller-unavailable", journalObjectives, snapshot, differences);
+                        var missionProcessId = failedState.RootElement.TryGetProperty("processId", out var missionPid) && missionPid.ValueKind == JsonValueKind.Number
+                            ? missionPid.GetInt32()
+                            : 0;
+                        var incidentMission = await AgentHostBattleMissionLoop.RunAsync(missionMapClient, incidentMissionClient, missionProcessId, elapsed.Token);
+                        ledger.Trace.Add(new JsonObject
+                        {
+                            ["stage"] = "objective-interrupted-by-native-battle-mission",
+                            ["objectiveId"] = objectiveId,
+                            ["missionCompleted"] = incidentMission.Completed,
+                            ["missionTermination"] = incidentMission.Termination,
+                            ["missionModeAtEntry"] = incidentMission.MissionModeAtEntry,
+                            ["nativeDelegationIssued"] = incidentMission.DelegationIssued,
+                            ["delegatedFormationCount"] = incidentMission.DelegatedFormationCount,
+                            ["mainHeroHealthAtEnd"] = double.IsFinite(incidentMission.MainHeroHealthAtEnd) ? JsonValue.Create(incidentMission.MainHeroHealthAtEnd) : null,
+                            ["replayedChildActions"] = false
+                        });
+                        objectiveRuns.Add(new JsonObject
+                        {
+                            ["objectiveId"] = "nativeBattleMission",
+                            ["interruptedObjectiveId"] = objectiveId,
+                            ["status"] = incidentMission.Completed ? "completed" : "failed",
+                            ["termination"] = incidentMission.Termination,
+                            ["missionModeAtEntry"] = incidentMission.MissionModeAtEntry,
+                            ["nativeDelegationIssued"] = incidentMission.DelegationIssued
+                        });
+                        if (incidentMission.Completed)
+                        {
+                            ledger.Trace.Add(new JsonObject { ["stage"] = "objective-replanned-after-native-battle-mission", ["objectiveId"] = objectiveId });
+                            continue;
+                        }
+                        return BuildResult("failed", "native-battle-mission-interruption-failed", false,
+                            "The Native battle mission did not resolve back to a healthy Campaign Map; the parent did not claim a victory or replay actions.",
+                            string.IsNullOrWhiteSpace(incidentMission.Termination) ? "native-battle-mission-interruption-failed" : incidentMission.Termination,
+                            journalObjectives, snapshot, differences);
+                    }
                     if (ShouldRouteToBattleSimulation(failedState.RootElement, childFailureCode) &&
                         client is IAgentHostBattleSimulationNativeClient incidentBattleClient)
                     {
@@ -1809,6 +1891,21 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
                         });
                         continue;
                     }
+                    // Record exactly why the parent refused to keep going, so a bare failure code in a receipt
+                    // can be traced back to the child shape instead of guessed at.
+                    ledger.Trace.Add(new JsonObject
+                    {
+                        ["stage"] = "objective-subflow-failed-parent-gate",
+                        ["objectiveId"] = objectiveId,
+                        ["childStatus"] = ReadString(child, "status"),
+                        ["childTermination"] = termination,
+                        ["childFailureCode"] = ReadString(child, "failureCode"),
+                        ["encounterInterruptionTermination"] = IsEncounterInterruptionTermination(termination),
+                        ["freeMap"] = freeMap,
+                        ["activeQuest"] = AgentHostEstablishYourClanGoalLoop.HasActiveQuest(failedState.RootElement),
+                        ["safeRouteUnavailable"] = IsSafeObjectiveRouteUnavailable(objectiveId, termination, freeMap),
+                        ["nativeState"] = JsonNode.Parse(failedState.RootElement.GetRawText())
+                    });
                     return BuildResult("failed", "objective-subflow-failed", false,
                         "A Native objective subflow failed; the parent did not claim progress or replay its actions.",
                         ReadString(child, "failureCode"), journalObjectives, snapshot, differences);
@@ -2334,6 +2431,18 @@ internal static class AgentHostEstablishYourClanAutonomyLoop
         termination is "campaign-interruption" or AgentHostNativeMapMovementMonitor.FailureCode or
         "native-encounter-left-no-battle" or "native-captivity-interrupted-settlement-move";
 
+    // Native has already entered a battle mission scene (an encounter that resolved into a real MissionState
+    // battle). The BattleSimulation subflow owns that state; the Map-only encounter classifier does not.
+    internal static bool IsNativeBattleMissionScene(JsonElement native)
+    {
+        if (native.ValueKind != JsonValueKind.Object || !native.TryGetProperty("state", out var stateElement) || stateElement.ValueKind != JsonValueKind.Object)
+            return false;
+        var state = JsonNode.Parse(stateElement.GetRawText())?.AsObject();
+        if (state is null || ReadString(state["context"] as JsonObject, "gameState") != "MissionState") return false;
+        var mission = state["mission"] as JsonObject;
+        if (mission is null) return false;
+        return !ReadBoolean(mission, "missionEnded");
+    }
     internal static bool IsFreeMapForObjectiveReplan(JsonElement native)
     {
         if (native.ValueKind != JsonValueKind.Object || !native.TryGetProperty("state", out var stateElement) || stateElement.ValueKind != JsonValueKind.Object)

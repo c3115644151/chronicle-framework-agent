@@ -56,7 +56,12 @@ if (-not (Test-ChronicleNoActivateStyleContract) -or
     $testWindowLayoutSource -notmatch 'geometryPreserved' -or
     $testWindowLayoutSource -notmatch '0x0057' -or
     $testWindowLayoutSource -match 'display_width = \$script:ChronicleTestWindow' -or
-    $testWindowLayoutSource -notmatch 'RemoveNoActivate' -or
+    -not (Test-Path -LiteralPath (Join-Path $modRoot 'AgentGameWindow.cs') -PathType Leaf) -or
+    (Get-Content -LiteralPath (Join-Path $modRoot 'AgentGameWindow.cs') -Raw -Encoding UTF8) -notmatch 'WsExAppWindow' -or
+    (Get-Content -LiteralPath (Join-Path $modRoot 'AgentGameWindow.cs') -Raw -Encoding UTF8) -notmatch 'WsThickFrame' -or
+    (Get-Content -LiteralPath (Join-Path $modRoot 'AgentGameWindow.cs') -Raw -Encoding UTF8) -notmatch 'agent-window-style\|caption=' -or
+    (Get-Content -LiteralPath (Join-Path $modRoot 'AgentGameWindow.cs') -Raw -Encoding UTF8) -notmatch 'CHRONICLE_HARNESS_MODE' -or
+    (Get-Content -LiteralPath (Join-Path $modRoot 'SubModule.cs') -Raw -Encoding UTF8) -notmatch 'AgentGameWindow\.EnsurePlayerUsableWindow\(\)' -or    $testWindowLayoutSource -notmatch 'RemoveNoActivate' -or
     -not (Test-Path -LiteralPath (Join-Path $stageRoot 'Reset-GameWindow.ps1') -PathType Leaf) -or
     $testWindowLayoutSource -notmatch 'if \(processId != targetProcessId\) return true;' -or
     $testWindowLayoutSource -notmatch 'IsWindowVisible\(handle\) \? 10000000L' -or
@@ -64,7 +69,7 @@ if (-not (Test-ChronicleNoActivateStyleContract) -or
     $testWindowLayoutSource -notmatch 'IsIconic' -or $testWindowLayoutSource -notmatch 'IsWindowVisible' -or
     $testWindowLayoutSource -notmatch 'Minimized = \$iconic' -or
     $testWindowLayoutSource -match 'SetForegroundWindow|BringWindowToTop') {
-    throw 'Harness game windows must remain visible for capture but carry WS_EX_NOACTIVATE, verify the style, and restore only a test-introduced cursor clip to the previously unrestricted desktop bounds without foregrounding or injecting input.'
+    throw 'Harness game windows must remain visible for capture but carry WS_EX_NOACTIVATE, verify the style, restore only a test-introduced cursor clip, and the mod must hand a normal taskbar/drag/resize window back to the player.'
 }
 $focusRestoreSource = Get-Content (Join-Path $stageRoot 'HarnessFocusRestore.ps1') -Raw -Encoding UTF8
 if ($testWindowLayoutSource -notmatch 'Restore-ChroniclePreLaunchForeground -TargetProcessId' -or
