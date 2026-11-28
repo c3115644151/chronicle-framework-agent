@@ -1,6 +1,6 @@
 # Chronicle Framework 开发与 Harness 契约
 - `settlementOverlayCharacters`是schema 21中的有限视图，只在Settlement Characters overlay当前可见时按本体`MenuLocations + HeroAgentLocationModel.WillBeListedInOverlay`生成，并携带玩家Overlay显示的Issue/Quest标记。用户确认聚落人物与地图贵族领主名旁都有蓝色委托标记；W2-AU将Native Party Nameplate的类别补到`mapPartyTargets`，不暴露全局Issue/Quest清单，并由临时Native Issue与引擎帧验证`AvailableIssue`。`talkToSettlementHero(HeroId)`经QuickTalkPermission和CampaignMapConversation作地图快速“交谈”；`visitSettlementHero(HeroId)`经Visit permission进入NPC的Location Mission。W2-D运行`TestResults/20261001-101331`验证QuickTalk返回原Village菜单/MapState，`20261001-095934`验证Visit进入目标Mission；二者不可混称。两者都只接受本轮可见overlay名单，不用Harness全场景Notable诊断里的隐藏ID。
-Contract version: 7.771
+Contract version: 7.772
 
 ## Contract 7.747 — Host 有界驱动 Mission 会话（首次真机走通遭遇对话）
 
@@ -2094,7 +2094,21 @@ Build和AgentHostPackage通过；
 
 ```text
 CLI 启动适配
-            ↓
+## Contract 7.772 — 无模型探针找到终点：移动被 `training_field_menu` 的活跃遭遇挡住
+
+写了一个**不经过模型**的探针 `TestResults/_tmp/probe-move.ps1`（load → state → mapSettlementTargets → move → state），直接看原生反应。真机（`TestResults/_tmp/probe-move.log`）：
+
+```
+PRE: menu=training_field_menu inquiry=False encounter=True tc=Stop
+MOVE status=rejected  err=settlement movement requires the unobstructed Campaign Map with no Native menu, Escape menu, Inquiry, or active Encounter
+AFTER: gameState=MapState moving=False day=91077.375 tc=Stop target=
+```
+
+结论链条完整：夹具读进来时**教程训练场的遭遇仍然活跃**（`encounter=True`）并停在 `training_field_menu`，于是 `HandleMove` 的前置守卫（`ChronicleAgentProtocol.Actions.Map.cs:172`）直接拒绝；移动没下单 → 队伍不动 → Campaign 时间也不推进（`Stop`）。7.768–7.771 观察到的“时间冻结”就是这个原因，不是焦点、不是距离、也不是时钟动作缺失。
+
+顺带说明 Host 那次为什么看起来 `move` 成功：那次的 `actionsExecuted=2` 计数包含 `mapSettlementTargets` 与 `move` 的**请求**，但队伍实际没动——现在有了原生侧的 rejected 证据，不再靠推断。
+
+下一步很具体：夹具准备要把训练场遭遇真正走完（`training_field_menu` 的 `training_field_leave` 直到 `encounterActive=false` 且 `menuId` 为空），再激活定居点菜单；这一步做完，`move` 才有机会被 Native 接受。            ↓
 进程、模块集与 disposable save
             ↓
 Mod 内状态、命令与事件遥测
